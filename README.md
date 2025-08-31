@@ -1,127 +1,93 @@
-# PQTR - PostgreSQL + PostgREST SaaS Template
+# PQTR - Multi-Project Infrastructure Repository
 
-A production-ready SaaS backend template using PostgreSQL and PostgREST, designed for rapid development and deployment of multi-tenant applications.
+A comprehensive repository containing multiple production-ready projects for modern infrastructure and application development.
+
+## 🏗️ Project Overview
+
+This repository contains three main project areas, each designed for specific infrastructure and development needs:
+
+### 🚀 [SaaS Project](saas/) - Backend API Template
+- **PostgreSQL + PostgREST** SaaS backend
+- **Multi-tenant architecture** with Row Level Security
+- **Production-ready** with health checks and monitoring
+- **Multi-environment support** (dev/test/production)
+- **Secure configuration management** with GPG encryption
+
+### 🏠 [Host Project](host/) - Server Hardening & Management
+- **Linux server hardening** with security best practices
+- **SSH infrastructure management** with zone-based authentication
+- **Web service deployment** with SSL/TLS and reverse proxy
+- **Standardized server configuration** across environments
+- **Enterprise-grade security** practices
+
+### 🗂️ [PITS Project](pits/) - Picture Image Transfer System
+- **IoT device for photographers** in the field
+- **FTP server integration** for camera image uploads
+- **Hotspot management** for phone connectivity
+- **Image processing pipeline** with storage management
+- **Classic Unix structure** for reliable operation
+
+### 🌐 [Site Project](site/) - Web Development Framework
+- **Modern web development** with classic Unix structure
+- **Build automation** and deployment packaging
+- **Local development server** for testing and preview
+- **Production-ready deployment** with versioning
+- **Web-focused workflow** and tools
 
 ## 🚀 Quick Start
 
+### SaaS Backend
 ```bash
-# Clone the repository
-git clone <your-repo> pqtr
-cd pqtr/saas
-
-# First time setup
-./quick-start.sh setup
-
-# Start services
-./quick-start.sh start
-
-# Test the API
-./quick-start.sh test
-```
-
-## 🏗️ Project Structure
-
-```
-pqtr/
-├── saas/                    # Main SaaS project
-│   ├── config/             # Configuration files
-│   │   ├── init.sql        # Database schema
-│   │   └── postgrest.conf  # PostgREST config
-│   ├── scripts/            # Management scripts
-│   │   ├── project.sh      # Unified project manager
-│   │   ├── setup-local.sh  # Local setup
-│   │   ├── env-manager.sh  # Environment management
-│   │   ├── safe.sh         # Encryption/security
-│   │   └── ...             # Other utilities
-│   ├── .env-*              # Environment configurations
-│   ├── project.conf        # Project settings
-│   ├── quick-start.sh      # Simple commands
-│   ├── DEPLOYMENT.md       # Deployment guide
-│   └── README.md           # Detailed documentation
-└── README.md               # This file
-```
-
-## 🎯 Key Features
-
-- **Multi-tenant SaaS architecture** with Row Level Security
-- **Unified project management** - single script for all operations
-- **Multi-environment support** (dev/test/production)
-- **Secure configuration management** with GPG encryption
-- **Production-ready** with health checks and monitoring
-- **Comprehensive deployment guide** for all environments
-
-## 🛠️ Management Commands
-
-### Simple Commands (Quick Start)
-```bash
-./quick-start.sh setup    # First time setup
-./quick-start.sh start    # Start services
-./quick-start.sh test     # Test API
-./quick-start.sh status   # Check status
-./quick-start.sh stop     # Stop services
-```
-
-### Advanced Commands (Full Control)
-```bash
-./scripts/project.sh setup      # Complete setup
-./scripts/project.sh start      # Start services
-./scripts/project.sh env dev    # Switch environment
-./scripts/project.sh secure encrypt  # Encrypt configs
-./scripts/project.sh health     # Health checks
-./scripts/project.sh backup     # Create backup
-```
-
-## 🌍 Environment Management
-
-```bash
-# Switch environments
-./scripts/project.sh env dev    # Development
-./scripts/project.sh env tst    # Test
-./scripts/project.sh env pro    # Production
-
-# Secure environment files
-./scripts/project.sh secure encrypt   # Encrypt
-./scripts/project.sh secure decrypt   # Decrypt
-```
-
-## 🔒 Security Features
-
-- **Row Level Security (RLS)** for data isolation
-- **JWT authentication** with configurable expiration
-- **Environment encryption** using GPG
-- **Secure backup system** with encrypted storage
-- **Production hardening** guidelines
-
-## 📚 Documentation
-
-- **[SaaS Project README](saas/README.md)** - Complete project documentation
-- **[Deployment Guide](saas/DEPLOYMENT.md)** - Production deployment instructions
-- **[API Examples](saas/README.md#api-usage-examples)** - Usage examples
-- **[Database Schema](saas/README.md#database-schema)** - Table structure
-
-## 🚀 Deployment
-
-### Development
-```bash
+cd saas
 ./quick-start.sh setup
 ./quick-start.sh start
 ```
 
-### Production
+### Server Management
 ```bash
-# Follow DEPLOYMENT.md for production setup
-./scripts/project.sh env pro
-./scripts/project.sh secure encrypt
-./scripts/project.sh start
-./scripts/project.sh health
+cd host
+./bin/zone-make.sh production-zone
+./bin/node-make.sh <host-ip> <host-name> <zone-pkey>
 ```
+
+### IoT Photo Transfer Device
+```bash
+cd pits
+./bin/init
+./bin/pits status
+```
+
+### Web Development
+```bash
+cd site
+./bin/init
+./bin/site serve
+```
+
+## 🎯 Use Cases
+
+- **SaaS Applications** - Multi-tenant backend services
+- **Infrastructure Management** - Secure server deployment and hardening
+- **IoT Devices** - Photo transfer and field management
+- **Web Development** - Modern frameworks with classic Unix organization
+- **Production Environments** - Enterprise-grade security and monitoring
 
 ## 🔧 Prerequisites
 
-- **PostgreSQL 15+** - Database server
-- **PostgREST** - REST API generator
+- **Linux/macOS** - Operating system support
+- **PostgreSQL 15+** - For SaaS project
+- **PostgREST** - For SaaS project
 - **GPG** - For encryption (optional)
-- **Linux/macOS** - Operating system
+- **SSH** - For host project
+- **Python 3** - For roam project
+
+## 📚 Documentation
+
+Each project contains comprehensive documentation:
+- **[SaaS Project](saas/README.md)** - Complete backend documentation
+- **[Host Project](host/README.md)** - Server management guide
+- **[PITS Project](pits/README.md)** - Picture Image Transfer System guide
+- **[Site Project](site/README.md)** - Web development framework guide
 
 ## 🤝 Contributing
 
@@ -137,11 +103,12 @@ This project is licensed under the MIT License.
 
 ## 🆘 Support
 
-- **Documentation**: Check the [SaaS project README](saas/README.md)
-- **Deployment**: See [DEPLOYMENT.md](saas/DEPLOYMENT.md)
-- **Issues**: Open an issue in the repository
-- **Health Checks**: Run `./scripts/project.sh health`
+- **SaaS Issues**: Check [SaaS README](saas/README.md)
+- **Host Issues**: Check [Host README](host/README.md)
+- **PITS Issues**: Check [PITS README](pits/README.md)
+- **Site Issues**: Check [Site README](site/README.md)
+- **General Issues**: Open an issue in the repository
 
 ---
 
-**Ready for production use** - This template includes security best practices, monitoring, and deployment guides for enterprise environments.
+**Production Ready** - All projects include security best practices, monitoring, and deployment guides for enterprise environments.

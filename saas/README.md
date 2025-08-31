@@ -2,21 +2,50 @@
 
 This project provides a complete SaaS backend setup using PostgreSQL as the database and PostgREST as the REST API layer.
 
-## Architecture
+## 🏗️ Project Structure
+
+```
+saas/
+├── config/             # Configuration files
+│   ├── init.sql        # Database schema and RLS policies
+│   ├── postgrest.conf  # PostgREST configuration
+│   └── health.sql      # Health check and monitoring functions
+├── scripts/            # Management scripts
+│   ├── project.sh      # Unified project manager
+│   ├── setup-local.sh  # Local setup and initialization
+│   ├── manage-services.sh # Service management (start/stop/status)
+│   ├── env-manager.sh  # Environment management
+│   ├── safe.sh         # Encryption/security management
+│   ├── test-api-local.sh # API testing and validation
+│   └── uninstall-local.sh # Clean uninstallation
+├── .env-*              # Environment configurations
+│   ├── .env-dev        # Development environment
+│   ├── .env-tst        # Test environment
+│   └── .env-pro        # Production environment
+├── project.conf        # Project-wide configuration
+├── quick-start.sh      # Simple command wrapper
+├── DEPLOYMENT.md       # Production deployment guide
+├── PROJECT_STATUS.md   # Project status and readiness
+└── README.md           # This documentation
+```
+
+## 🏗️ Architecture
 
 - **PostgreSQL 15**: Primary database with Row Level Security (RLS)
 - **PostgREST**: Auto-generated REST API from PostgreSQL schema
 
-## Features
+## 🎯 Key Features
 
-- Multi-tenant SaaS architecture
+- **Multi-tenant SaaS architecture** with Row Level Security
+- **Unified project management** - single script for all operations
+- **Multi-environment support** (dev/test/production)
+- **Secure configuration management** with GPG encryption
+- **Production-ready** with health checks and monitoring
+- **Comprehensive deployment guide** for all environments
 - User management with organizations
 - Role-based access control (RBAC)
-- Row Level Security (RLS) policies
 - JWT authentication support
 - RESTful API endpoints
-- Multi-environment configuration support
-- Encrypted environment file storage
 
 ## Prerequisites
 
@@ -85,7 +114,28 @@ This project provides a complete SaaS backend setup using PostgreSQL as the data
    ./scripts/test-api-local.sh
    ```
 
-## Environment Configuration
+## 🛠️ Management Commands
+
+### Simple Commands (Quick Start)
+```bash
+./quick-start.sh setup    # First time setup
+./quick-start.sh start    # Start services
+./quick-start.sh test     # Test API
+./quick-start.sh status   # Check status
+./quick-start.sh stop     # Stop services
+```
+
+### Advanced Commands (Full Control)
+```bash
+./scripts/project.sh setup      # Complete setup
+./scripts/project.sh start      # Start services
+./scripts/project.sh env dev    # Switch environment
+./scripts/project.sh secure encrypt  # Encrypt configs
+./scripts/project.sh health     # Health checks
+./scripts/project.sh backup     # Create backup
+```
+
+## 🌍 Environment Management
 
 The project supports multiple environment configurations:
 
@@ -95,9 +145,18 @@ The project supports multiple environment configurations:
 - **`.env-tst`** - Shared test server environment  
 - **`.env-pro`** - Production environment
 
-### Environment Management
+### Environment Management Commands
 
 ```bash
+# Switch environments
+./scripts/project.sh env dev    # Development
+./scripts/project.sh env tst    # Test
+./scripts/project.sh env pro    # Production
+
+# Secure environment files
+./scripts/project.sh secure encrypt   # Encrypt
+./scripts/project.sh secure decrypt   # Decrypt
+```
 # Switch between environments
 ./scripts/env-manager.sh dev    # Switch to development
 ./scripts/env-manager.sh tst    # Switch to test
@@ -111,6 +170,23 @@ The project supports multiple environment configurations:
 
 # Create missing environment files
 ./scripts/env-manager.sh create
+```
+
+## 🚀 Deployment
+
+### Development
+```bash
+./quick-start.sh setup
+./quick-start.sh start
+```
+
+### Production
+```bash
+# Follow DEPLOYMENT.md for production setup
+./scripts/project.sh env pro
+./scripts/project.sh secure encrypt
+./scripts/project.sh start
+./scripts/project.sh health
 ```
 
 ### Secure Environment Storage
@@ -167,9 +243,12 @@ Each environment file contains:
 
 ### Security Features
 
-- Row Level Security (RLS) enabled on all tables
+- **Row Level Security (RLS)** for data isolation
+- **JWT authentication** with configurable expiration
+- **Environment encryption** using GPG
+- **Secure backup system** with encrypted storage
+- **Production hardening** guidelines
 - Role-based access control policies
-- JWT token authentication
 - Secure password hashing
 
 ## API Usage Examples

@@ -1,0 +1,85 @@
+#!/bin/bash
+
+# Site Project Initialization Script
+# Sets up the project structure and initial files
+
+set -e
+
+echo "🚀 Initializing Site Project..."
+
+# Create necessary subdirectories
+mkdir -p var/logs var/cache var/tmp var/build var/deploy
+
+# Set proper permissions
+chmod 755 bin/*
+chmod 644 etc/*
+chmod 644 src/*
+chmod 644 www/*
+
+# Create initial log file
+touch var/logs/site.log
+chmod 644 var/logs/site.log
+
+# Create .gitignore if it doesn't exist
+if [ ! -f .gitignore ]; then
+    cat > .gitignore << 'EOF'
+# Variable data
+var/logs/*
+var/cache/*
+var/tmp/*
+var/build/*
+var/deploy/*
+!var/logs/.gitkeep
+!var/cache/.gitkeep
+!var/tmp/.gitkeep
+!var/build/.gitkeep
+!var/deploy/.gitkeep
+
+# Build artifacts
+*.tar.gz
+*.zip
+dist/
+build/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node.js (if using)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Python (if using)
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+venv/
+env/
+EOF
+    echo "✅ Created .gitignore"
+fi
+
+# Create .gitkeep files
+touch var/logs/.gitkeep var/cache/.gitkeep var/tmp/.gitkeep var/build/.gitkeep var/deploy/.gitkeep
+
+echo "✅ Site project initialized successfully!"
+echo ""
+echo "Next steps:"
+echo "  1. Run './bin/site status' to check setup"
+echo "  2. Run './bin/site serve' to start web server"
+echo "  3. Edit etc/site.conf to customize settings"
+echo "  4. Add your source code to src/"
+echo "  5. Add your web content to www/"
+echo "  6. Run './bin/site build' to create build artifacts"
+echo "  7. Run './bin/site deploy' to create deployment packages"

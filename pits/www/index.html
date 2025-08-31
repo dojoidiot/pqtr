@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roam Project</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            text-align: center;
+            color: #fff;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+        .directory-structure {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        .directory {
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+        .directory-name {
+            font-weight: bold;
+            color: #ffd700;
+        }
+        .directory-desc {
+            color: #e0e0e0;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+        .usage {
+            background: rgba(0, 0, 0, 0.2);
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        code {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 40px;
+            color: #ccc;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 PITS - Picture Image Transfer System</h1>
+        
+        <p>Welcome to the PITS project - an IoT device for photographers to transfer picture images from cameras via FTP and manage production through phone connectivity.</p>
+        
+        <div class="directory-structure">
+            <h2>📁 Directory Structure</h2>
+            <div class="directory">
+                <div class="directory-name">bin/</div>
+                <div class="directory-desc">Executable scripts and binaries</div>
+            </div>
+            <div class="directory">
+                <div class="directory-name">etc/</div>
+                <div class="directory-desc">Configuration files</div>
+            </div>
+            <div class="directory">
+                <div class="directory-name">src/</div>
+                <div class="directory-desc">Source code and development files</div>
+            </div>
+            <div class="directory">
+                <div class="directory-name">var/</div>
+                <div class="directory-desc">Variable data (logs, cache, etc.)</div>
+            </div>
+            <div class="directory">
+                <div class="directory-name">www/</div>
+                <div class="directory-desc">Web content and static files</div>
+            </div>
+        </div>
+        
+        <div class="usage">
+            <h2>🔧 Usage</h2>
+            <p>From the project root directory:</p>
+            <ul>
+                <li><code>./bin/pits start</code> - Start the IoT device</li>
+                <li><code>./bin/pits status</code> - Show device status</li>
+                <li><code>./bin/pits ftp</code> - Start FTP server for photo uploads</li>
+                <li><code>./bin/pits hotspot</code> - Start WiFi hotspot for phone connectivity</li>
+                <li><code>python3 src/main.py status</code> - Python status</li>
+            </ul>
+        </div>
+        
+        <div class="footer">
+            <p>PITS - Picture Image Transfer System v1.0.0 - IoT Image Management</p>
+            <p>Built with ❤️ for photographers in the field</p>
+        </div>
+    </div>
+</body>
+</html>

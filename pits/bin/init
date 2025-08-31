@@ -1,0 +1,68 @@
+#!/bin/bash
+
+# PITS Project Initialization Script
+# Sets up the Picture Image Transfer System structure and initial files
+
+set -e
+
+echo "🚀 Initializing PITS - Picture Image Transfer System..."
+
+# Create necessary subdirectories
+mkdir -p var/logs var/cache var/tmp var/build
+
+# Set proper permissions
+chmod 755 bin/*
+chmod 644 etc/*
+chmod 644 src/*
+chmod 644 www/*
+
+# Create initial log file
+touch var/logs/pits.log
+chmod 644 var/logs/pits.log
+
+# Create .gitignore if it doesn't exist
+if [ ! -f .gitignore ]; then
+    cat > .gitignore << 'EOF'
+# Variable data
+var/logs/*
+var/cache/*
+var/tmp/*
+var/build/*
+!var/logs/.gitkeep
+!var/cache/.gitkeep
+!var/tmp/.gitkeep
+!var/build/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+EOF
+    echo "✅ Created .gitignore"
+fi
+
+# Create .gitkeep files
+touch var/logs/.gitkeep var/cache/.gitkeep var/tmp/.gitkeep var/build/.gitkeep
+
+echo "✅ PITS - Picture Image Transfer System initialized successfully!"
+echo ""
+echo "Next steps:"
+echo "  1. Run './bin/pits status' to check setup"
+echo "  2. Run './bin/pits ftp' to start FTP server for photo uploads"
+echo "  3. Run './bin/pits hotspot' to start WiFi hotspot for phone connectivity"
+echo "  4. Edit etc/config.conf to customize settings"
+echo "  5. Add your source code to src/"
+echo "  6. Add your management interface to www/"
