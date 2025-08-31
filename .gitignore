@@ -1,0 +1,114 @@
+# Environment variables
+.env
+.env.local
+.env.*.local
+.env-dev
+.env-tst
+.env-pro
+
+# Encrypted environment files
+.env-*.gpg
+.env.backup.*.gpg
+.env.current.*.gpg
+
+# Project backups
+backups/
+*.backup
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+postgrest.log
+
+# Process IDs
+*.pid
+postgrest.pid
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.atom/
+.brackets.json
+
+# Node.js (if adding frontend later)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm
+.yarn-integrity
+
+# Python (if adding Python backend later)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Ruby (if adding Ruby backend later)
+*.gem
+*.rbc
+/.config
+/coverage/
+/InstalledFiles
+/pkg/
+/spec/reports/
+/spec/examples.txt
+/test/tmp/
+/test/version_tmp/
+/tmp/
+
+# Backup files
+*.bak
+*.backup
+*.old
+
+# Local development
+.local/
+local/
+
+# Project-specific
+# Keep these files in version control:
+# - project.conf
+# - health.sql
+# - All .sh scripts
+# - Configuration files
