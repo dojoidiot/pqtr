@@ -1,3 +1,5 @@
+power supply is Raspberry Pi 5 18650 Battery UPS HAT (5.1V 5A)
+
 # PITS Project - Picture Image Transfer System
 
 An IoT device used by photographers in the field for picture image transfer from their camera using FTP to the PITS server where processing and storage is done, and then waits for their phone to provide a hotspot and then use the PQTR user app to manage the production process.
