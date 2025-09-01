@@ -88,6 +88,14 @@ wheels/
 *.egg
 MANIFEST
 
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+env.bak/
+venv.bak/
+
 # Ruby (if adding Ruby backend later)
 *.gem
 *.rbc
