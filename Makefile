@@ -40,19 +40,19 @@ test-all:
 # Run tests for specific projects
 test-saas:
 	@echo "Running SaaS project tests..."
-	pytest saas/tests/ -v
+	pytest saas/tst/ -v
 
 test-pits:
 	@echo "Running PITS project tests..."
-	pytest pits/tests/ -v
+	pytest pits/tst/ -v
 
 test-host:
 	@echo "Running Host project tests..."
-	pytest host/tests/ -v
+	pytest host/tst/ -v
 
 test-site:
 	@echo "Running Site project tests..."
-	pytest site/tests/ -v
+	pytest site/tst/ -v
 
 # Linting
 lint:
@@ -89,7 +89,7 @@ status:
 	@echo "Overall Quality: 8.7/10"
 	@echo "Target Quality:  9.5/10"
 	@echo ""
-	@echo "Test Coverage:   $(shell find . -name "tests" -type d | wc -l)/5 projects have tests"
+	@echo "Test Coverage:   $(shell find . -name "tst" -type d | wc -l)/5 projects have tests"
 	@echo "Next Phase:      Team Foundation & Collaboration"
 
 # Quick test run (fast)
