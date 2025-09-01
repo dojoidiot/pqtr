@@ -9,22 +9,19 @@ import os
 import sys
 from pathlib import Path
 
-# Add project root to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 
 class TestScripts:
     """Test the management scripts"""
 
-    def test_site_script_exists(self):
-        """Test that the main site script exists"""
-        script_path = Path(__file__).parent.parent / "bin" / "site"
-        assert script_path.exists(), f"Site script not found at {script_path}"
+    def test_make_script_exists(self):
+        """Test that the make script exists"""
+        script_path = Path(__file__).parent.parent / "bin" / "make.sh"
+        assert script_path.exists(), f"Make script not found at {script_path}"
 
-    def test_init_script_exists(self):
-        """Test that the init script exists"""
-        script_path = Path(__file__).parent.parent / "bin" / "init"
-        assert script_path.exists(), f"Init script not found at {script_path}"
+    def test_send_script_exists(self):
+        """Test that the send script exists"""
+        script_path = Path(__file__).parent.parent / "bin" / "send.sh"
+        assert script_path.exists(), f"Send script not found at {script_path}"
 
     def test_scripts_are_executable(self):
         """Test that all scripts are executable"""
@@ -66,15 +63,15 @@ class TestProjectStructure:
 class TestConfiguration:
     """Test configuration files"""
 
-    def test_site_conf_exists(self):
-        """Test that site.conf exists"""
-        config_path = Path(__file__).parent.parent / "etc" / "site.conf"
-        assert config_path.exists(), f"Site config not found at {config_path}"
+    def test_pqtr_ai_conf_exists(self):
+        """Test that pqtr.ai.conf exists"""
+        config_path = Path(__file__).parent.parent / "etc" / "pqtr.ai.conf"
+        assert config_path.exists(), f"PQTR AI config not found at {config_path}"
 
-    def test_readme_exists(self):
-        """Test that README.md exists"""
-        readme_path = Path(__file__).parent.parent / "README.md"
-        assert readme_path.exists(), f"README not found at {readme_path}"
+    def test_apex_md_exists(self):
+        """Test that apex.md exists"""
+        apex_path = Path(__file__).parent.parent / "doc" / "apex.md"
+        assert apex_path.exists(), f"Apex.md not found at {apex_path}"
 
 
 class TestSourceCode:
@@ -98,17 +95,17 @@ class TestSourceCode:
 
 
 class TestWebContent:
-    """Test web content components"""
-
-    def test_index_html_exists(self):
-        """Test that index.html exists"""
-        index_path = Path(__file__).parent.parent / "www" / "index.html"
-        assert index_path.exists(), f"Index HTML not found at {index_path}"
+    """Test web content"""
 
     def test_main_html_exists(self):
         """Test that main.html exists"""
-        main_html_path = Path(__file__).parent.parent / "www" / "main.html"
-        assert main_html_path.exists(), f"Main HTML not found at {main_html_path}"
+        main_path = Path(__file__).parent.parent / "www" / "main.html"
+        assert main_path.exists(), f"Main HTML not found at {main_path}"
+
+    def test_main_png_exists(self):
+        """Test that main.png exists"""
+        png_path = Path(__file__).parent.parent / "www" / "main.png"
+        assert png_path.exists(), f"Main PNG not found at {png_path}"
 
     def test_web_content_is_readable(self):
         """Test that web content is readable"""
