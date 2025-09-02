@@ -13,7 +13,17 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.pqtr.ios",
+      "buildNumber": "1",
+      "infoPlist": {
+        "CFBundleDisplayName": "PQTR",
+        "CFBundleName": "PQTR",
+        "NSCameraUsageDescription": "PQTR needs camera access to capture photos for your projects",
+        "NSPhotoLibraryUsageDescription": "PQTR needs photo library access to manage and organize your photo projects",
+        "NSPhotoLibraryAddUsageDescription": "PQTR needs permission to save photos to your library",
+        "NSMicrophoneUsageDescription": "PQTR needs microphone access for video recording features"
+      }
     },
     "android": {
       "adaptiveIcon": {
