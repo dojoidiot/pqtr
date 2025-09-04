@@ -1,14 +1,16 @@
-# Host Project - SSH Zone Management
+# Fast Zone - SSH Zone Management
+
+**Part of the Fast Tools Family: Fast Zone, Fast Data, Fast Site, Fast SaaS**
 
 ## What It Does
 
-Creates a secure SSH infrastructure using certificate-based authentication. No passwords, just certificates signed by a zone authority.
+Fast Zone creates a secure SSH infrastructure using certificate-based authentication. No passwords, just certificates signed by a zone authority.
 
 ## Key Concepts
 
 - **Zone**: A group of servers with shared SSH certificate authority
 - **Zone Head**: First server that manages the zone (signs certificates, tracks nodes)  
-- **Zone Authority**: Ed25519 SSH CA keypair that signs all certificates
+- **Zone Boss**: Ed25519 SSH CA keypair that signs all certificates
 
 ## Quick Setup
 
@@ -94,8 +96,8 @@ host/etc/ssh/
 /opt/zone/
 ├── safe/                   # Encrypted key storage
 ├── bin/
-│   ├── safe.sh            # Encrypted storage (init/save/load)
-│   └── zone-boss.sh       # Zone operations (make/sign/list)
+│   ├── zone-safe.sh       # Encrypted storage (init/save/load)
+│   └── zone-boss.sh       # Zone operations (make/sign/list/drop)
 ├── config/zone.conf       # Zone metadata
 └── nodes/                 # Node inventory
 ```
@@ -153,7 +155,7 @@ tar -xzf zone-backup.tar.gz
 | `node-make.sh` | Harden server | Desktop |
 | `zone-init.sh` | Create zone head | Desktop |
 | `zone-boss.sh` | Zone operations | Zone Head |
-| `safe.sh` | Key storage | Zone Head |
+| `zone-safe.sh` | Key storage | Zone Head |
 
 ## That's It
 

@@ -46,9 +46,9 @@ scp -i "$ZONE_KEYS/env-$ZONE_NAME.skey" \
     env@$ZONE_HEAD_IP:/opt/zone/safe/
 
 
-# 3. Install safe script
-echo "→ Installing safe..."
-cat << 'SAFE_SCRIPT' | ssh -i "$ZONE_KEYS/env-$ZONE_NAME.skey" env@$ZONE_HEAD_IP "cat > /opt/zone/bin/safe.sh && chmod +x /opt/zone/bin/safe.sh"
+# 3. Install zone safe script
+echo "→ Installing zone safe..."
+cat << 'SAFE_SCRIPT' | ssh -i "$ZONE_KEYS/env-$ZONE_NAME.skey" env@$ZONE_HEAD_IP "cat > /opt/zone/bin/zone-safe.sh && chmod +x /opt/zone/bin/zone-safe.sh"
 #!/bin/bash
 # Simple safe for zone head
 SAFE_DIR="/opt/zone/safe"
@@ -87,12 +87,12 @@ SAFE_SCRIPT
 # 4. Initialize safe and store zone keys
 echo "→ Securing zone keys..."
 ssh -i "$ZONE_KEYS/env-$ZONE_NAME.skey" env@$ZONE_HEAD_IP "
-    # Initialize safe
-    /opt/zone/bin/safe.sh init
+    # Initialize zone safe
+    /opt/zone/bin/zone-safe.sh init
     
     # Store zone CA key encrypted
-    /opt/zone/bin/safe.sh save zone-ca-private /opt/zone/safe/$ZONE_NAME.skey
-    /opt/zone/bin/safe.sh save zone-ca-public /opt/zone/safe/$ZONE_NAME.skey.pub
+    /opt/zone/bin/zone-safe.sh save zone-ca-private /opt/zone/safe/$ZONE_NAME.skey
+    /opt/zone/bin/zone-safe.sh save zone-ca-public /opt/zone/safe/$ZONE_NAME.skey.pub
     
     # Remove unencrypted keys
     shred -u /opt/zone/safe/$ZONE_NAME.skey
@@ -137,7 +137,7 @@ sign() {
     
     # Get zone CA key from safe
     TMPKEY=$(mktemp)
-    /opt/zone/bin/safe.sh load zone-ca-private > $TMPKEY
+    /opt/zone/bin/zone-safe.sh load zone-ca-private > $TMPKEY
     
     case $type in
         user)
