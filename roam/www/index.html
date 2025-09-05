@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Roam - Welcome</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="logo">Roam</h1>
+                <nav class="nav">
+                    <button class="nav-btn active" data-section="home">Home</button>
+                    <button class="nav-btn" data-section="about">About</button>
+                    <button class="nav-btn" data-section="contact">Contact</button>
+                </nav>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Home Section -->
+            <section id="home" class="section active">
+                <div class="hero">
+                    <h2 class="hero-title">Welcome to Roam</h2>
+                    <p class="hero-subtitle">Your gateway to interactive experiences</p>
+                    <div class="app-links">
+                        <a href="shot-game.html" class="app-link">
+                            <div class="app-icon">🎮</div>
+                            <h3>Shot Game Terminal</h3>
+                            <p>Full I2xP experience with ASCII art and interactive terminal</p>
+                            <span class="launch-btn">Launch App →</span>
+                        </a>
+                        <a href="terminal.html" class="app-link">
+                            <div class="app-icon">💻</div>
+                            <h3>Interactive Terminal</h3>
+                            <p>Focused terminal experience with Horyzon colors</p>
+                            <span class="launch-btn">Launch App →</span>
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <!-- About Section -->
+            <section id="about" class="section">
+                <div class="section-content">
+                    <h2>About Roam</h2>
+                    <p>Roam is a collection of interactive web applications and experiences, designed to showcase modern web technologies and creative programming.</p>
+                    <ul class="about-list">
+                        <li>Interactive terminal applications</li>
+                        <li>Mobile-optimized experiences</li>
+                        <li>Modern web technologies</li>
+                        <li>Responsive design principles</li>
+                        <li>Creative programming projects</li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Contact Section -->
+            <section id="contact" class="section">
+                <div class="section-content">
+                    <h2>Get in Touch</h2>
+                    <form class="contact-form" id="contactForm">
+                        <div class="form-group">
+                            <label for="name">Name</label>
+                            <input type="text" id="name" name="name" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="email">Email</label>
+                            <input type="email" id="email" name="email" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="message">Message</label>
+                            <textarea id="message" name="message" rows="5" required></textarea>
+                        </div>
+                        <button type="submit" class="submit-button">Send Message</button>
+                    </form>
+                </div>
+            </section>
+        </main>
+
+        <!-- Footer -->
+        <footer class="footer">
+            <p>&copy; 2024 Roam Web App. Built with ❤️</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
