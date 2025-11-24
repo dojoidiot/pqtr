@@ -1,6 +1,6 @@
 // process.cpp
 // Sony ARW2 RAW processing pipeline
-// Bayer → BLC → WB → Demosaic → Gamma → RGB
+// Implements the main `process` method for the sony::Decoder class.
 
 #include "../sony.h"
 #include <opencv2/core.hpp>
@@ -8,59 +8,42 @@
 
 namespace sony
 {
-    // Forward declarations for processing modules
-    namespace blc
+    bool Decoder::process(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb)
     {
-        bool process(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-    }
-    namespace wb_gain
-    {
-        bool process(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-    }
-    namespace demosaic
-    {
-        bool process(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-    }
-    namespace gamma_oetf
-    {
-        bool process(const cv::UMat &input, cv::UMat &output);
-    }
-
-    bool arw2_gold::process(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb)
-    {
-        // Gold pipeline: RAW → BLC → WB → Demosaic → Gamma
-        // This matches the exact flow from test/main.cpp (old pipeline)
+        // Pipeline: Demosaic → BLC → WB → Gamma
+        // This order ensures cv::demosaicing receives the integer data it expects.
+        // Each stage is now a private static method of the Decoder class.
 
         try
         {
-            // Stage 1: BLC (Black Level Correction)
-            cv::UMat bayer_normalized;
-            if (!blc::process(bayer, bayer_normalized, metadata))
+            // Stage 1: Demosaic (Input: CV_16UC1, Output: CV_16UC3)
+            cv::UMat rgb_u16;
+            if (!demosaic(bayer, rgb_u16, metadata))
             {
-                std::cerr << "[arw2_gold::process] BLC failed" << std::endl;
+                std::cerr << "[Decoder::process] Demosaic failed" << std::endl;
                 return false;
             }
 
-            // Stage 2: White Balance
-            cv::UMat bayer_wb;
-            if (!wb_gain::process(bayer_normalized, bayer_wb, metadata))
+            // Stage 2: BLC (Black Level Correction) (Input: CV_16UC3, Output: CV_32FC3)
+            cv::UMat rgb_normalized;
+            if (!blc(rgb_u16, rgb_normalized, metadata))
             {
-                std::cerr << "[arw2_gold::process] WB_Gain failed" << std::endl;
+                std::cerr << "[Decoder::process] BLC failed" << std::endl;
                 return false;
             }
 
-            // Stage 3: Demosaic
-            cv::UMat rgb_linear;
-            if (!demosaic::process(bayer_wb, rgb_linear, metadata))
+            // Stage 3: White Balance (Input: CV_32FC3, Output: CV_32FC3)
+            cv::UMat rgb_wb;
+            if (!wb_gain(rgb_normalized, rgb_wb, metadata))
             {
-                std::cerr << "[arw2_gold::process] Demosaic failed" << std::endl;
+                std::cerr << "[Decoder::process] WB_Gain failed" << std::endl;
                 return false;
             }
 
-            // Stage 4: Gamma OETF
-            if (!gamma_oetf::process(rgb_linear, rgb))
+            // Stage 4: Gamma OETF (Input: CV_32FC3, Output: CV_32FC3)
+            if (!gamma_oetf(rgb_wb, rgb))
             {
-                std::cerr << "[arw2_gold::process] Gamma OETF failed" << std::endl;
+                std::cerr << "[Decoder::process] Gamma OETF failed" << std::endl;
                 return false;
             }
 
@@ -68,7 +51,7 @@ namespace sony
         }
         catch (const std::exception &e)
         {
-            std::cerr << "[arw2_gold::process] Exception: " << e.what() << std::endl;
+            std::cerr << "[Decoder::process] Exception: " << e.what() << std::endl;
             return false;
         }
     }

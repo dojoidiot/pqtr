@@ -53,7 +53,7 @@ namespace sony
         };
     }
 
-    bool arw2_gold::prepare(pqtr::Sink &source, cv::UMat &output, Info &info, RawMetadata &metadata)
+    bool Decoder::prepare(pqtr::Sink &source, cv::UMat &output, Info &info, RawMetadata &metadata)
     {
         using namespace internal;
 
@@ -88,6 +88,7 @@ namespace sony
         memcpy(file_data.data(), data_ptr, bytes_read);
         delete[] data_ptr;
 
+        // Check for little-endian TIFF header ('II') and magic number (42)
         if (file_data[0] != 'I' || file_data[1] != 'I' || read_u16(&file_data[2]) != 0x002A)
         {
             std::cerr << "RawLoader: Not a valid TIFF file" << std::endl;
@@ -192,6 +193,7 @@ namespace sony
         {
             uint32_t maker_ifd_offset = maker_note_offset;
 
+            // Sony MakerNote can start with a header like "SONY CAM" (12 bytes)
             if (file_data[maker_note_offset] == 'S' && file_data[maker_note_offset + 1] == 'O')
             {
                 maker_ifd_offset += 12;
@@ -211,6 +213,7 @@ namespace sony
 
                     IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
 
+                    // Tag 0x2010 is a Sony-specific sub-IFD with more metadata
                     if (entry.tag == 0x2010)
                     {
                         sony_tag2010_offset = entry.value_offset;
@@ -317,36 +320,40 @@ namespace sony
 
         if (found_cfa)
         {
-            if (cfa_pattern[0] == 0 && cfa_pattern[1] == 1 &&
-                cfa_pattern[2] == 1 && cfa_pattern[3] == 2)
+            // These numeric codes are custom to this project. They are mapped to
+            // standard OpenCV ColorConversionCodes in the demosaic module.
+            if (cfa_pattern[0] == 0 && cfa_pattern[1] == 1 && // R G
+                cfa_pattern[2] == 1 && cfa_pattern[3] == 2)   // G B
             {
-                metadata.bayer_pattern = 46; // cv::COLOR_BayerRG2RGB_EA
+                metadata.bayer_pattern = 46; // RGGB
             }
-            else if (cfa_pattern[0] == 2 && cfa_pattern[1] == 1 &&
-                     cfa_pattern[2] == 1 && cfa_pattern[3] == 0)
+            else if (cfa_pattern[0] == 2 && cfa_pattern[1] == 1 && // B G
+                     cfa_pattern[2] == 1 && cfa_pattern[3] == 0)   // G R
             {
-                metadata.bayer_pattern = 44; // cv::COLOR_BayerBG2RGB_EA
+                metadata.bayer_pattern = 48; // BGGR (Note: custom code 44 was incorrect)
             }
-            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 0 &&
-                     cfa_pattern[2] == 2 && cfa_pattern[3] == 1)
+            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 0 && // G R
+                     cfa_pattern[2] == 2 && cfa_pattern[3] == 1)   // B G
             {
-                metadata.bayer_pattern = 47; // cv::COLOR_BayerGB2RGB_EA
+                metadata.bayer_pattern = 47; // GRBG
             }
-            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 2 &&
-                     cfa_pattern[2] == 0 && cfa_pattern[3] == 1)
+            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 2 && // G B
+                     cfa_pattern[2] == 0 && cfa_pattern[3] == 1)   // R G
             {
-                metadata.bayer_pattern = 45; // cv::COLOR_BayerGR2RGB_EA
+                metadata.bayer_pattern = 49; // GBRG (Note: custom code 45 was incorrect)
             }
             else
             {
-                metadata.bayer_pattern = 46; // cv::COLOR_BayerRG2RGB_EA (default)
+                metadata.bayer_pattern = 46; // Default to RGGB
             }
         }
         else
         {
-            metadata.bayer_pattern = 46; // cv::COLOR_BayerRG2RGB_EA (default)
+            metadata.bayer_pattern = 46; // Default to RGGB
         }
 
+        // Set default black/white levels, typical for 14-bit Sony sensors.
+        // These are used if not found in the file's metadata.
         metadata.black_level = 512;
         metadata.white_level = 16383;
 
@@ -354,17 +361,19 @@ namespace sony
         {
             metadata.wb_rggb[0] = wb_rggb[0];
             metadata.wb_rggb[1] = wb_rggb[1];
-            metadata.wb_rggb[2] = wb_rggb[3];
+            metadata.wb_rggb[2] = wb_rggb[3]; // Swap G2 and B, as per MakerNote format
             metadata.wb_rggb[3] = wb_rggb[2];
         }
         else
         {
+            // Fallback WB multipliers for daylight
             metadata.wb_rggb[0] = 2176;
             metadata.wb_rggb[1] = 1024;
-            metadata.wb_rggb[2] = 1024;
-            metadata.wb_rggb[3] = 1551;
+            metadata.wb_rggb[2] = 1551;
+            metadata.wb_rggb[3] = 1024;
         }
 
+        // Standard sRGB conversion matrix for Sony ILCE-7M3.
         metadata.color_matrix = cv::Matx33f(
             1.9413f, -0.6498f, -0.2915f,
             -0.3204f, 1.2907f, 0.0297f,
@@ -378,6 +387,9 @@ namespace sony
 
         cv::Mat bayer_cpu(metadata.height, metadata.width, CV_16UC1);
 
+        // This is the Sony piecewise linearization curve for highlight recovery.
+        // The tag 0x7010 merely signals its presence; the curve itself is fixed.
+        // Values up to 2000 are linear. Values above are expanded 4x.
         for (int i = 0; i < 4000; i++)
         {
             linearization_curve[i] = i;
@@ -387,6 +399,7 @@ namespace sony
             linearization_curve[i] = i * 4 - 12000;
         }
 
+        // 32767 is the proprietary compression code for Sony ARW2
         if (compression == 32767)
         {
             if (!decompress_arw2(
@@ -400,29 +413,26 @@ namespace sony
                 return false;
             }
 
-            uint16_t *pixel_data = reinterpret_cast<uint16_t *>(bayer_cpu.data);
-            size_t total_pixels = metadata.width * metadata.height;
+            // If the Sony curve is specified, apply it.
+            if (found_sony_curve) {
+                uint16_t *pixel_data = reinterpret_cast<uint16_t *>(bayer_cpu.data);
+                size_t total_pixels = metadata.width * metadata.height;
 
-            for (size_t i = 0; i < total_pixels; i++)
-            {
-                uint16_t raw_value = pixel_data[i];
-                uint32_t curve_index = raw_value << 1;
-                if (curve_index < 16384)
+                for (size_t i = 0; i < total_pixels; i++)
                 {
-                    pixel_data[i] = linearization_curve[curve_index];
-                }
-                else
-                {
-                    pixel_data[i] = raw_value;
+                    uint16_t raw_value = pixel_data[i];
+                    // The `<< 1` indexing is a quirk for compatibility with LibRaw's curve format.
+                    uint32_t curve_index = raw_value << 1;
+                    if (curve_index < 16384)
+                    {
+                        pixel_data[i] = linearization_curve[curve_index];
+                    }
                 }
             }
-
-            metadata.black_level = 512;
-            metadata.white_level = 16383;
         }
-        else if (compression == 1)
+        else if (compression == 1) // Uncompressed
         {
-            size_t expected_size = metadata.width * metadata.height * 2;
+            size_t expected_size = static_cast<size_t>(metadata.width) * metadata.height * 2;
 
             if (strip_byte_count < expected_size)
             {
@@ -440,7 +450,7 @@ namespace sony
 
         bayer_cpu.copyTo(output);
 
-        // Populate info map
+        // Populate info map for external consumers (e.g., embedding in PNG)
         info["camera_make"] = metadata.camera_make;
         info["camera_model"] = metadata.camera_model;
         info["width"] = std::to_string(metadata.width);

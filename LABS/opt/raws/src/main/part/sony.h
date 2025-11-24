@@ -1,6 +1,5 @@
-// sony_arw2_gold.h
-// Gold standard Sony ARW2 decoder
-// Static interface: Sink → UMat + Info
+// sony.h
+// Main header for the Sony RAW decoder pipeline.
 
 #pragma once
 
@@ -74,30 +73,34 @@ namespace sony
         std::string lens_model; // Lens description
     };
 
-    // Gold standard decoder for Sony ARW2 files
-    // Single static method: prepare() decodes RAW data from Sink
-    class arw2_gold
+    // Sony RAW decoder with a static interface.
+    class Decoder
     {
     public:
-        // Decode Sony ARW2 file from Sink
-        // Input:  sink - Raw file bytes (from Tool::read)
-        // Output: data     - Bayer data (uint16, single channel)
-        //         info     - Metadata as string map (sony::Info)
-        //         metadata - Metadata as struct (sony::RawMetadata)
+        // Decode Sony ARW file from Sink
+        // Input:  sink     - Raw file bytes
+        // Output: data     - Bayer data (CV_16UC1)
+        //         info     - Metadata as string map
+        //         metadata - Metadata as struct
         // Returns: true on success, false on error
         static bool prepare(pqtr::Sink &sink, cv::UMat &data, sony::Info &info, sony::RawMetadata &metadata);
 
-        // Process RAW data through pipeline modules
-        // Input:  bayer    - Bayer data from prepare() (uint16, single channel)
+        // Process RAW data through the full pipeline
+        // Input:  bayer    - Bayer data from prepare() (CV_16UC1)
         //         metadata - Metadata from prepare()
-        // Output: rgb      - Processed RGB image (float32, 3 channels, [0,1] range)
-        // Pipeline: Bayer → BLC → WB → Demosaic → Color Matrix → Gamma (sRGB OETF)
+        // Output: rgb      - Final processed RGB image (CV_32FC3, [0,1] range)
         // Returns: true on success, false on error
         static bool process(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb);
 
     private:
         // No instances - static interface only
-        arw2_gold() = delete;
+        Decoder() = delete;
+
+        // Internal pipeline stages
+        static bool demosaic(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool blc(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool wb_gain(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool gamma_oetf(const cv::UMat &input, cv::UMat &output);
     };
 
 } // namespace sony

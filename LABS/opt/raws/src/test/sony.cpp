@@ -1,5 +1,5 @@
 // test_gold.cpp
-// Test program for sony_arw2_gold decoder
+// Test program for sony_Decoder decoder
 // Loads RAW file → Sink, calls prepare(), validates output
 
 #include <iostream>
@@ -39,8 +39,8 @@ int main(int argc, char** argv) {
         std::cout << std::endl;
 
         // Step 3: Decode
-        std::cout << "Step 3: Calling sony::arw2_gold::prepare()..." << std::endl;
-        if (!sony::arw2_gold::prepare(*sink, bayer_data, info, metadata)) {
+        std::cout << "Step 3: Calling sony::Decoder::prepare()..." << std::endl;
+        if (!sony::Decoder::prepare(*sink, bayer_data, info, metadata)) {
             delete sink;
             std::cerr << "ERROR: Decoder failed" << std::endl;
             return 1;
@@ -144,7 +144,7 @@ int main(int argc, char** argv) {
         std::cout << "Step 7: Processing through pipeline..." << std::endl;
         cv::UMat rgb_output;
 
-        if (!sony::arw2_gold::process(bayer_data, metadata, rgb_output)) {
+        if (!sony::Decoder::process(bayer_data, metadata, rgb_output)) {
             std::cerr << "  ✗ FAIL: Processing failed" << std::endl;
             return 1;
         }
