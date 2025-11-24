@@ -165,7 +165,7 @@ int main(int argc, char** argv) {
         // Step 8: Save output
         std::cout << "Step 8: Saving output..." << std::endl;
         // Output to tmp directory (run from opt/raws/)
-        std::string output_file = "./tmp/sony.jpg";
+        std::string output_file = "./tmp/sony.png";
 
         // Convert to 8-bit for saving
         cv::UMat output_8bit;

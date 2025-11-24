@@ -48,7 +48,11 @@ RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
 # Target executable
 LABS_BIN = $(BIN_DIR)/labs
 
-.PHONY: all clean
+# Test configuration
+TEST_INPUT = var/pics/DSC00144.ARW
+TEST_OUTPUT_DIR = tmp/var/labs
+
+.PHONY: all clean test
 
 all: $(LABS_BIN)
 
@@ -74,3 +78,8 @@ $(OBJ_DIR):
 
 clean:
 	rm -rf $(TMP_DIR)
+
+test: $(LABS_BIN)
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@echo "Running labs on $(TEST_INPUT)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_INPUT) $(TEST_OUTPUT_DIR)

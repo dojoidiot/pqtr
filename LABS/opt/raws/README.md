@@ -12,9 +12,9 @@ cd /home/z/base/code/pqtr/labs/opt/raws
 ```
 
 **Default input**: `./var/sony.ARW`
-**Output**: `./tmp/sony.jpg`
+**Output**: `./tmp/sony.png`
 
-The output filename is hardcoded to `sony.jpg` in the `tmp` directory.
+The output filename is hardcoded to `sony.png` in the `tmp` directory.
 
 ## Philosophy: Maximum Manufacturer Processing
 
@@ -92,7 +92,7 @@ opt/raws/
 └── tmp/
     ├── sony/            ← Build artifacts (binary, objects)
     │   └── sony
-    └── sony.jpg         ← Processed output image
+    └── sony.png         ← Processed output image
 ```
 
 ---

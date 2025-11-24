@@ -14,8 +14,8 @@ echo ""
 # Default input file
 INPUT_FILE="${1:-./var/sony.ARW}"
 
-# Output is always sony.jpg
-OUTPUT_FILE="./tmp/sony.jpg"
+# Output is always sony.png
+OUTPUT_FILE="./tmp/sony.png"
 
 echo "Input file: $INPUT_FILE"
 echo "Output file: $OUTPUT_FILE"
