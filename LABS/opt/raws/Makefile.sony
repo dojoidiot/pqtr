@@ -27,7 +27,9 @@ LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB
 
 # Source files - Sony implementation
 SONY_DECODER = src/main/part/sony.cpp
-SONY_MODS = src/main/part/sony/blc.cpp \
+SONY_MODS = src/main/part/sony/prepare.cpp \
+            src/main/part/sony/process.cpp \
+            src/main/part/sony/blc.cpp \
             src/main/part/sony/wb_gain.cpp \
             src/main/part/sony/demosaic.cpp \
             src/main/part/sony/gamma_oetf.cpp
@@ -37,6 +39,8 @@ TEST_SONY = src/test/sony.cpp
 
 # Build objects
 SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
+               $(OBJ_DIR)/prepare.o \
+               $(OBJ_DIR)/process.o \
                $(OBJ_DIR)/blc.o \
                $(OBJ_DIR)/wb_gain.o \
                $(OBJ_DIR)/demosaic.o \

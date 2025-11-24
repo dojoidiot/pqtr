@@ -8,12 +8,45 @@
 #include <opencv2/core.hpp>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace sony
 {
 
     // Info type (matches pipe::Info)
     using Info = std::map<std::string, std::string>;
+
+    // Internal TIFF/ARW2 structures and functions
+    namespace internal
+    {
+        // TIFF data types
+        enum TIFFType
+        {
+            TYPE_BYTE = 1,
+            TYPE_ASCII = 2,
+            TYPE_SHORT = 3,
+            TYPE_LONG = 4,
+            TYPE_RATIONAL = 5
+        };
+
+        // TIFF IFD entry structure
+        struct IFDEntry
+        {
+            uint16_t tag;
+            uint16_t type;
+            uint32_t count;
+            uint32_t value_offset;
+        };
+
+        // Helper functions
+        uint16_t read_u16(const uint8_t *data);
+        uint32_t read_u32(const uint8_t *data);
+        float read_rational(const std::vector<uint8_t> &file_data, uint32_t offset);
+        IFDEntry parse_ifd_entry(const uint8_t *data);
+        uint32_t get_entry_value(const IFDEntry &entry, const std::vector<uint8_t> &file_data);
+        std::string get_entry_string(const IFDEntry &entry, const std::vector<uint8_t> &file_data);
+        bool decompress_arw2(const uint8_t *compressed_data, size_t compressed_size, uint16_t *output, int width, int height);
+    }
 
     struct RawMetadata
     {
