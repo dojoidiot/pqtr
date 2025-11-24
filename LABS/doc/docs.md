@@ -81,13 +81,21 @@ Passive voice is acceptable for:
 8. Success criteria
 9. Documentation standards
 
-**Specification docs** (pipe.md, diff.md, tune.md):
+**Specification docs** (pipe.md, diff.md, tune.md, test.md):
 1. [back] link to parent
 2. Purpose
 3. Architecture/concept
 4. Details (modules, parameters, etc.)
 5. Examples (configuration, usage)
 6. API interface (if applicable)
+
+**Test documentation** (test.md):
+1. [back] link to parent
+2. Test philosophy (synthetic images, mathematical verification)
+3. Test structure (directory layout, Makefile targets)
+4. Module test coverage (test cases per module)
+5. Tool test sections (labs, diff, tune - filled incrementally)
+6. Running tests (commands, visual inspection)
 
 **Module docs** (geometric_adjustments.md, etc.):
 1. [back] link to pipe.md

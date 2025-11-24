@@ -97,7 +97,7 @@ Each module contains sub-modules that work together. See [module documentation](
 
 ### 2. [Color Correction](./mods/color_correction.md)
 **Purpose**: Camera-native RGB to device-independent color space
-**Sub-Modules**: White Balance (2 dials), Exposure (1 dial)
+**Sub-Modules**: Exposure (1 dial), White Balance (2 dials)
 **Total**: 3 dials
 **Color Space**: LINEAR_RGB
 
@@ -135,7 +135,7 @@ Each module contains sub-modules that work together. See [module documentation](
 
 Within each Link, modules are applied in this order:
 1. Geometric (Crop → Zoom → Rotation)
-2. Color Correction (White Balance → Exposure)
+2. Color Correction (Exposure → White Balance)
 3. Tone Mapping (Contrast → Curve Adjustment → Clipping Point)
 4. Global Color (Vibrance → Saturation → Color Density)
 5. Selective Color (8 color bands)

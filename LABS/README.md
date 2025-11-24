@@ -28,6 +28,7 @@ labs/
     ├── diff.md   # Diff tool specification
     ├── labs.md   # Labs system integration and overview
     ├── pipe.md   # Pipe tool specification
+    ├── test.md   # Test strategy and verification
     └── tune.md   # Tune tool specification
 ```
 

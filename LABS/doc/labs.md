@@ -16,21 +16,21 @@ The `LABS` system consists of several independent programs (executables and libr
      ↓
 ┌─────────┐
 │  pipe   │  6-module creative grading pipeline
-└────┬────┘  Input: linear RGB, 46 sliders → Output: display RGB
+└────┬────┘  Input: linear RGB, 45 dials → Output: display RGB
      │ display_rgb.png
      │
      ├──────────────────────────────────┐
      │                                  │
      ↓                                  ↓
 ┌─────────┐                        ┌─────────┐
-│  diff   │  Perceptual diff       │  tune   │  Slider optimizer
-└─────────┘  Computation           └─────────┘  Finds optimal sliders
+│  diff   │  Perceptual diff       │  tune   │  Dial optimizer
+└─────────┘  Computation           └─────────┘  Finds optimal dials
                                                 Uses diff for feedback
 ```
 
 ## Data Flow and Integration Patterns
 
-The interaction between `raws` (the RAW decoder), `pipe` (the processing pipeline), `diff` (the difference calculator), and `tune` (the slider optimizer) follows distinct patterns.
+The interaction between `raws` (the RAW decoder), `pipe` (the processing pipeline), `diff` (the difference calculator), and `tune` (the dial optimizer) follows distinct patterns.
 
 ### Pattern 1: Full Pipeline (`raws` → `pipe` → output)
 
@@ -41,9 +41,9 @@ cv::UMat linear_rgb = loader.process("input.ARW");
 
 // 2. Grade with pipe (core processing pipeline)
 pqtr::Pipe pipeline;
-pqtr::Sliders sliders;
-sliders.fill(0.5f);  // Defaults for all 46 sliders
-cv::UMat display_rgb = pipeline.process(linear_rgb, sliders);
+pqtr::Dials dials;
+dials.fill(0.5f);  // Defaults for all 45 dials
+cv::UMat display_rgb = pipeline.process(linear_rgb, dials);
 
 // 3. Save output
 cv::imwrite("output.png", display_rgb);
@@ -51,44 +51,44 @@ cv::imwrite("output.png", display_rgb);
 
 ### Pattern 2: Style Transfer (`raws` → `tune` → `pipe`)
 
-This pattern is used to automatically discover optimal slider settings for `pipe` by comparing a reference image to a target-styled image.
+This pattern is used to automatically discover optimal dial settings for `pipe` by comparing a reference image to a target-styled image.
 
 ```cpp
 // 1. Load reference and target (raws for reference, imread for target)
 cv::UMat reference_linear = raws.process("reference.ARW");
 cv::UMat target_display = cv::imread("target_styled.png", cv::IMREAD_COLOR);
 
-// 2. Find optimal sliders using tune
+// 2. Find optimal dials using tune
 pqtr::Tune tuner(pipeline, diff_tool);
 pqtr::TuneResult result = tuner.optimize(reference_linear, target_display);
 
-// 3. Apply optimal sliders to new images
-pqtr::Sliders optimal_sliders;
-std::copy_n(result.sliders, 46, optimal_sliders.begin()); // 46 sliders now
+// 3. Apply optimal dials to new images
+pqtr::Dials optimal_dials;
+std::copy_n(result.dials, 45, optimal_dials.begin()); // 45 dials
 
 cv::UMat new_image_linear = raws.process("new_image.ARW");
-cv::UMat styled_output = pipeline.process(new_image_linear, optimal_sliders);
+cv::UMat styled_output = pipeline.process(new_image_linear, optimal_dials);
 ```
 
-### Pattern 3: Real-Time Slider Tuning (`pipe` + `diff`)
+### Pattern 3: Real-Time Dial Tuning (`pipe` + `diff`)
 
-This pattern describes an interactive user experience, typically within a GUI application (like `PQTR:DESK`), where users adjust sliders and see real-time feedback and metrics.
+This pattern describes an interactive user experience, typically within a GUI application (like `PQTR:DESK`), where users adjust dials and see real-time feedback and metrics.
 
 ```cpp
-// Interactive slider adjustment with live diff
+// Interactive dial adjustment with live diff
 cv::UMat reference_linear = raws.process("input.ARW");
 cv::UMat target = cv::imread("reference_styled.png");
 
 pqtr::Pipe pipeline;
 pqtr::Diff differ;
-pqtr::Sliders sliders;
-sliders.fill(0.5f);
+pqtr::Dials dials;
+dials.fill(0.5f);
 
-// User adjusts slider via UI (e.g., in PQTR:DESK's UI)
-void onSliderChange(int slider_idx, float value) {
-    sliders[slider_idx] = value;
+// User adjusts dial via UI (e.g., in PQTR:DESK's UI)
+void onDialChange(int dial_idx, float value) {
+    dials[dial_idx] = value;
 
-    cv::UMat candidate = pipeline.process(reference_linear, sliders);
+    cv::UMat candidate = pipeline.process(reference_linear, dials);
     float loss = differ.compute(candidate, target).total_loss;
     cv::UMat visual_diff = differ.visualDiff(candidate, target, 5.0);
 
@@ -108,7 +108,7 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 | `raws`   | Existing (validated) | Any |
 | `pipe`   | 30-60 fps @ 1080p | RTX 3060+, RX 6700+ |
 | `diff`   | <16ms per comparison | GPU |
-| `tune`   | 5-8 seconds (15 sliders) | GPU |
+| `tune`   | 5-8 seconds (15 dials) | GPU |
 
 **Full Pipeline (`raws` + `pipe`)**:
 - `raws`: ~500ms (decode + demosaic)
@@ -117,7 +117,7 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 
 **`tune` Optimization**:
 - Sensitivity analysis: ~1-2 seconds (41 renders)
-- Greedy optimization: ~5-6 seconds (15 sliders × 20 evaluations)
+- Greedy optimization: ~5-6 seconds (15 dials × 20 evaluations)
 - **Total**: ~7-8 seconds (acceptable for one-time style discovery)
 
 ## Notes and Considerations
@@ -135,7 +135,7 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 
 ### Preset Management
 
-*   Slider presets are stored as JSON files.
+*   Dial presets are stored as JSON files.
 *   Common presets: `neutral.json` (all 0.5), `vibrant.json`, `matte.json`, `teal_orange.json`.
 *   `tune` can generate new presets.
 

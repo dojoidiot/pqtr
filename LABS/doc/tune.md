@@ -4,15 +4,15 @@
 
 ## Purpose
 
-The `tune` tool is a library and a headless command-line program that automatically finds the optimal pipe slider values required to make a source RAW image visually match a target-styled image. It enables automatic style transfer and preset creation.
+The `tune` tool is a library and a headless command-line program that automatically finds the optimal pipe dial values required to make a source RAW image visually match a target-styled image. It enables automatic style transfer and preset creation.
 
-It works by using the `diff` tool as a feedback mechanism, iteratively adjusting sliders to minimize the perceptual loss between the pipe's output and the target image.
+It works by using the `diff` tool as a feedback mechanism, iteratively adjusting dials to minimize the perceptual loss between the pipe's output and the target image.
 
 ## Prerequisites
 
-**Geometric Alignment**: The `pipe` contains modules for both geometric and creative adjustments. However, the `tune` tool is specifically designed to optimize only the **40 creative sliders** (color, tone, etc.).
+**Geometric Alignment**: The `pipe` contains modules for both geometric and creative adjustments. However, the `tune` tool is specifically designed to optimize only the **39 creative dials** (color, tone, etc. - 45 total minus 6 geometric).
 
-Therefore, it is the **user's responsibility** to ensure the source and target images are geometrically aligned *before* using this tool. `tune` will not solve for differences in crop, scale, rotation, or perspective.
+Therefore, it is the **user's responsibility** to ensure the source and target images are geometrically aligned *before* using this tool. `tune` does not solve for differences in crop, scale, rotation, or perspective.
 
 ---
 
@@ -22,26 +22,26 @@ The optimization process is designed to be both fast and effective, focusing on 
 
 ### Stage 1: Sensitivity Analysis
 
-The tool first identifies which of the pipe's 40 creative sliders will have the most significant visual impact.
+The tool first identifies which of the pipe's 39 creative dials have the most significant visual impact.
 
-1.  The source RAW is processed with all sliders at their default neutral values to get a baseline image.
-2.  For each slider, it is perturbed by a small amount (e.g., +10%), and the RAW is processed again.
+1.  The source RAW is processed with all dials at their default neutral values to get a baseline image.
+2.  For each dial, it is perturbed by a small amount (e.g., +10%), and the RAW is processed again.
 3.  The `diff` tool calculates the perceptual loss between each perturbed result and the target image.
-4.  The change in loss (`|loss_delta|`) determines the sensitivity of that slider.
-5.  All sliders are ranked by their sensitivity, from most impactful to least impactful.
+4.  The change in loss (`|loss_delta|`) determines the sensitivity of that dial.
+5.  All dials are ranked by their sensitivity, from most impactful to least impactful.
 
-**Output**: A ranked list of sliders that contribute most to the visual difference.
+**Output**: A ranked list of dials that contribute most to the visual difference.
 
 ### Stage 2: Greedy Optimization
 
-Using the sensitivity analysis, the tool intelligently searches for the best slider values.
+Using the sensitivity analysis, the tool intelligently searches for the best dial values.
 
-1.  Only sliders with a sensitivity above a certain threshold (e.g., 5% contribution) are selected for optimization.
-2.  The tool proceeds down the ranked list of high-impact sliders.
-3.  For each slider, it performs a 1D search (using an efficient algorithm like Golden Section Search) to find the optimal value in its `[0.0, 1.0]` range that minimizes the loss score from the `diff` tool.
-4.  Once a slider's optimal value is found, it is fixed, and the process continues to the next slider in the list.
+1.  Only dials with a sensitivity above a certain threshold (e.g., 5% contribution) are selected for optimization.
+2.  The tool proceeds down the ranked list of high-impact dials.
+3.  For each dial, it performs a 1D search (using an efficient algorithm like Golden Section Search) to find the optimal value in its `[0.0, 1.0]` range that minimizes the loss score from the `diff` tool.
+4.  Once a dial's optimal value is found, it is fixed, and the process continues to the next dial in the list.
 
-**Output**: A final set of slider values that best reproduces the target style.
+**Output**: A final set of dial values that best reproduces the target style.
 
 ---
 
@@ -54,7 +54,7 @@ Using the sensitivity analysis, the tool intelligently searches for the best sli
 # Run with a real-time visualization window (requires a display)
 ./tune reference.arw target.png --output sliders.json --visualize
 
-# Adjust the sensitivity threshold to only optimize more impactful sliders
+# Adjust the sensitivity threshold to only optimize more impactful dials
 ./tune reference.arw target.png --threshold 0.10 --output sliders.json
 ```
 
@@ -68,8 +68,8 @@ The optimization is designed to be fast, typically converging in under 10 second
 - **Complex color grades**: **5-8 seconds**
 
 ### Limitations
-1.  **Non-Unique Solutions**: Different combinations of sliders can produce visually similar results. The tool finds **a** valid solution, but not necessarily the *exact* one used to create the target.
-2.  **Overlapping Effects**: Some sliders have overlapping visual effects (e.g., `vibrance` and `saturation`), which can make isolating the exact original change difficult.
+1.  **Non-Unique Solutions**: Different combinations of dials can produce visually similar results. The tool finds **a** valid solution, but not necessarily the *exact* one used to create the target.
+2.  **Overlapping Effects**: Some dials have overlapping visual effects (e.g., `vibrance` and `saturation`), which can make isolating the exact original change difficult.
 3.  **Irreversible Operations**: The tool cannot reverse-engineer information loss from destructive operations like heavy JPEG compression artifacts or clipped highlights in the target image.
 
 ---
@@ -94,10 +94,10 @@ struct OptimizationProgress {
     int current_step;
 
     // Stage-specific data
-    int slider_index;
-    float slider_value;
+    int dial_index;
+    float dial_value;
     float current_loss;
-    float* current_sliders;  // Array of all current slider values
+    float* current_dials;  // Array of all current dial values
 
     // Visual feedback
     cv::UMat current_candidate;
@@ -108,8 +108,8 @@ using ProgressCallback = std::function<void(const OptimizationProgress&)>;
 
 // The final output of a tune operation.
 struct TuneResult {
-    float sliders[40];
-    float sensitivities[40];
+    float dials[39];
+    float sensitivities[39];
     float final_loss;
     int num_optimized;
     double computation_time_seconds;
@@ -145,16 +145,16 @@ private:
         const cv::UMat& target,
         const float* sensitivities,
         float threshold,
-        float* inout_sliders,
+        float* inout_dials,
         ProgressCallback callback
     );
 
     // Helper for 1D search during greedy optimization
-    float optimizeSlider1D(
-        int slider_index,
+    float optimizeDial1D(
+        int dial_index,
         const cv::UMat& source,
         const cv::UMat& target,
-        float* current_sliders,
+        float* current_dials,
         ProgressCallback callback
     );
 };

@@ -1,0 +1,158 @@
+# Test Makefile
+# Builds unit tests for pipe modules
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# OpenCV paths
+OPENCV_ROOT = ./lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part
+
+# Library flags
+LDFLAGS = -L$(OPENCV_LIB)
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+
+# Directories
+SRC_DIR = src
+TEST_DIR = $(SRC_DIR)/test
+MODS_DIR = $(SRC_DIR)/main/part/pipe/mods
+TMP_DIR = tmp/test
+BIN_DIR = $(TMP_DIR)/bin
+OBJ_DIR = $(TMP_DIR)/obj
+
+# Module sources (shared with main build)
+MODS_SRCS = $(MODS_DIR)/tone_map.cpp \
+            $(MODS_DIR)/color_matrix.cpp \
+            $(MODS_DIR)/exposure.cpp \
+            $(MODS_DIR)/white_balance.cpp
+MODS_OBJS = $(OBJ_DIR)/mods/tone_map.o \
+            $(OBJ_DIR)/mods/color_matrix.o \
+            $(OBJ_DIR)/mods/exposure.o \
+            $(OBJ_DIR)/mods/white_balance.o
+
+# Test sources and targets
+TEST_TONE_MAP_SRC = $(TEST_DIR)/mods/test_tone_map.cpp
+TEST_TONE_MAP_OBJ = $(OBJ_DIR)/test_tone_map.o
+TEST_TONE_MAP_BIN = $(BIN_DIR)/test_tone_map
+
+TEST_EXPOSURE_SRC = $(TEST_DIR)/mods/test_exposure.cpp
+TEST_EXPOSURE_OBJ = $(OBJ_DIR)/test_exposure.o
+TEST_EXPOSURE_BIN = $(BIN_DIR)/test_exposure
+
+TEST_WHITE_BALANCE_SRC = $(TEST_DIR)/mods/test_white_balance.cpp
+TEST_WHITE_BALANCE_OBJ = $(OBJ_DIR)/test_white_balance.o
+TEST_WHITE_BALANCE_BIN = $(BIN_DIR)/test_white_balance
+
+GEN_TEST_IMAGES_SRC = $(TEST_DIR)/mods/gen_test_images.cpp
+GEN_TEST_IMAGES_OBJ = $(OBJ_DIR)/gen_test_images.o
+GEN_TEST_IMAGES_BIN = $(BIN_DIR)/gen_test_images
+
+# Test data
+TEST_DATA_DIR = tmp/var/test/data
+TEST_OUTPUT_DIR = tmp/var/test/output
+
+.PHONY: all clean test test-tone-map test-exposure test-white-balance gen-test-data
+
+all: $(TEST_TONE_MAP_BIN) $(TEST_EXPOSURE_BIN) $(TEST_WHITE_BALANCE_BIN) $(GEN_TEST_IMAGES_BIN)
+
+# Build test executables
+$(TEST_TONE_MAP_BIN): $(TEST_TONE_MAP_OBJ) $(MODS_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(TEST_EXPOSURE_BIN): $(TEST_EXPOSURE_OBJ) $(MODS_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(TEST_WHITE_BALANCE_BIN): $(TEST_WHITE_BALANCE_OBJ) $(MODS_OBJS) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(GEN_TEST_IMAGES_BIN): $(GEN_TEST_IMAGES_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# Compile test sources
+$(OBJ_DIR)/test_tone_map.o: $(TEST_TONE_MAP_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/test_exposure.o: $(TEST_EXPOSURE_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/test_white_balance.o: $(TEST_WHITE_BALANCE_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/gen_test_images.o: $(GEN_TEST_IMAGES_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile module sources
+$(OBJ_DIR)/mods/%.o: $(MODS_DIR)/%.cpp | $(OBJ_DIR)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Directories
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR)
+
+# Generate synthetic test data
+gen-test-data: $(GEN_TEST_IMAGES_BIN)
+	@mkdir -p $(TEST_DATA_DIR)
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(GEN_TEST_IMAGES_BIN) $(TEST_DATA_DIR)
+
+# Run tests
+test: gen-test-data test-tone-map test-exposure test-white-balance
+
+test-tone-map: $(TEST_TONE_MAP_BIN) gen-test-data
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@echo "=== Test: tone_map (HDR ramp, neutral) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_TONE_MAP_BIN) $(TEST_DATA_DIR)/tone_map_hdr_ramp.png $(TEST_OUTPUT_DIR)/tone_map_neutral.png 1.0 1.0
+	@echo ""
+	@echo "=== Test: tone_map (HDR ramp, high contrast) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_TONE_MAP_BIN) $(TEST_DATA_DIR)/tone_map_hdr_ramp.png $(TEST_OUTPUT_DIR)/tone_map_contrast.png 1.0 1.3
+	@echo ""
+	@echo "=== Test: tone_map (EV patches, compressed) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_TONE_MAP_BIN) $(TEST_DATA_DIR)/tone_map_ev_patches.png $(TEST_OUTPUT_DIR)/tone_map_compressed.png 0.8 1.0
+
+test-exposure: $(TEST_EXPOSURE_BIN) gen-test-data
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@echo "=== Test: exposure (gray ramp, neutral EV=0) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_EXPOSURE_BIN) $(TEST_DATA_DIR)/exposure_ramp.png $(TEST_OUTPUT_DIR)/exposure_neutral.png 0.5
+	@echo ""
+	@echo "=== Test: exposure (midgray, -2 EV) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_EXPOSURE_BIN) $(TEST_DATA_DIR)/exposure_midgray.png $(TEST_OUTPUT_DIR)/exposure_dark.png 0.25
+	@echo ""
+	@echo "=== Test: exposure (midgray, +2 EV) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_EXPOSURE_BIN) $(TEST_DATA_DIR)/exposure_midgray.png $(TEST_OUTPUT_DIR)/exposure_bright.png 0.75
+	@echo ""
+	@echo "=== Test: exposure (gray ramp, -4 EV) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_EXPOSURE_BIN) $(TEST_DATA_DIR)/exposure_ramp.png $(TEST_OUTPUT_DIR)/exposure_very_dark.png 0.0
+	@echo ""
+	@echo "=== Test: exposure (gray ramp, +4 EV) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_EXPOSURE_BIN) $(TEST_DATA_DIR)/exposure_ramp.png $(TEST_OUTPUT_DIR)/exposure_very_bright.png 1.0
+
+test-white-balance: $(TEST_WHITE_BALANCE_BIN) gen-test-data
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@echo "=== Test: white_balance (color patches, neutral) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_WHITE_BALANCE_BIN) $(TEST_DATA_DIR)/white_balance_patches.png $(TEST_OUTPUT_DIR)/wb_neutral.png 0.5 0.5
+	@echo ""
+	@echo "=== Test: white_balance (color patches, warm 3000K) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_WHITE_BALANCE_BIN) $(TEST_DATA_DIR)/white_balance_patches.png $(TEST_OUTPUT_DIR)/wb_warm.png 0.25 0.5
+	@echo ""
+	@echo "=== Test: white_balance (color patches, cool 10000K) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_WHITE_BALANCE_BIN) $(TEST_DATA_DIR)/white_balance_patches.png $(TEST_OUTPUT_DIR)/wb_cool.png 0.75 0.5
+	@echo ""
+	@echo "=== Test: white_balance (colorchecker, green tint) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_WHITE_BALANCE_BIN) $(TEST_DATA_DIR)/colorchecker_srgb.png $(TEST_OUTPUT_DIR)/wb_green.png 0.5 0.25
+	@echo ""
+	@echo "=== Test: white_balance (colorchecker, magenta tint) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_WHITE_BALANCE_BIN) $(TEST_DATA_DIR)/colorchecker_srgb.png $(TEST_OUTPUT_DIR)/wb_magenta.png 0.5 0.75
