@@ -34,7 +34,10 @@ namespace sony
             TAG_EXIF_IFD = 34665,
             TAG_MAKER_NOTE = 37500,
             TAG_CFA_PATTERN = 33422,
-            TAG_CFA_REPEAT_PATTERN_DIM = 33421
+            TAG_CFA_REPEAT_PATTERN_DIM = 33421,
+            // DNG crop tags
+            TAG_DEFAULT_CROP_ORIGIN = 0xc61f,
+            TAG_DEFAULT_CROP_SIZE = 0xc620
         };
 
         enum EXIFTag
@@ -259,6 +262,12 @@ namespace sony
         uint16_t cfa_pattern[4] = {0};
         bool found_cfa = false;
 
+        // Crop metadata from DNG tags
+        bool found_crop_origin = false;
+        bool found_crop_size = false;
+        int crop_origin[2] = {0, 0};  // left, top
+        int crop_size[2] = {0, 0};    // width, height
+
         // Parse SubIFD entries
         for (int i = 0; i < sub_num_entries; i++)
         {
@@ -313,6 +322,50 @@ namespace sony
                         cfa_pattern[j] = file_data[entry.value_offset + 4 + j];
                     }
                     found_cfa = true;
+                }
+                break;
+            case TAG_DEFAULT_CROP_ORIGIN:
+                // DNG DefaultCropOrigin - can be LONG (type 4) or RATIONAL (type 5)
+                if (entry.count == 2)
+                {
+                    if (entry.type == 4) // LONG
+                    {
+                        crop_origin[0] = read_u32(&file_data[entry.value_offset]);
+                        crop_origin[1] = read_u32(&file_data[entry.value_offset + 4]);
+                        found_crop_origin = true;
+                    }
+                    else if (entry.type == 5) // RATIONAL (num/denom pairs)
+                    {
+                        uint32_t num0 = read_u32(&file_data[entry.value_offset]);
+                        uint32_t den0 = read_u32(&file_data[entry.value_offset + 4]);
+                        uint32_t num1 = read_u32(&file_data[entry.value_offset + 8]);
+                        uint32_t den1 = read_u32(&file_data[entry.value_offset + 12]);
+                        crop_origin[0] = (den0 > 0) ? num0 / den0 : num0;
+                        crop_origin[1] = (den1 > 0) ? num1 / den1 : num1;
+                        found_crop_origin = true;
+                    }
+                }
+                break;
+            case TAG_DEFAULT_CROP_SIZE:
+                // DNG DefaultCropSize - can be LONG (type 4) or RATIONAL (type 5)
+                if (entry.count == 2)
+                {
+                    if (entry.type == 4) // LONG
+                    {
+                        crop_size[0] = read_u32(&file_data[entry.value_offset]);
+                        crop_size[1] = read_u32(&file_data[entry.value_offset + 4]);
+                        found_crop_size = true;
+                    }
+                    else if (entry.type == 5) // RATIONAL
+                    {
+                        uint32_t num0 = read_u32(&file_data[entry.value_offset]);
+                        uint32_t den0 = read_u32(&file_data[entry.value_offset + 4]);
+                        uint32_t num1 = read_u32(&file_data[entry.value_offset + 8]);
+                        uint32_t den1 = read_u32(&file_data[entry.value_offset + 12]);
+                        crop_size[0] = (den0 > 0) ? num0 / den0 : num0;
+                        crop_size[1] = (den1 > 0) ? num1 / den1 : num1;
+                        found_crop_size = true;
+                    }
                 }
                 break;
             }
@@ -378,6 +431,24 @@ namespace sony
             1.9413f, -0.6498f, -0.2915f,
             -0.3204f, 1.2907f, 0.0297f,
             -0.0625f, 0.2271f, 0.8354f);
+
+        // Active area crop - removes optical black borders
+        // Read from DNG DefaultCropOrigin/DefaultCropSize tags
+        if (found_crop_origin && found_crop_size)
+        {
+            metadata.crop_left = crop_origin[0];
+            metadata.crop_top = crop_origin[1];
+            metadata.crop_width = crop_size[0];
+            metadata.crop_height = crop_size[1];
+        }
+        else
+        {
+            // Fallback: no crop (use full sensor)
+            metadata.crop_left = 0;
+            metadata.crop_top = 0;
+            metadata.crop_width = metadata.width;
+            metadata.crop_height = metadata.height;
+        }
 
         if (strip_offset == 0 || strip_offset + strip_byte_count > static_cast<size_t>(file_size))
         {

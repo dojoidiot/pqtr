@@ -1,7 +1,9 @@
 // labs.cpp
 // Main executable: Processes RAW file → PNG + .labs.json sidecar
 //
-// Usage: labs <input.ARW> [output_dir]
+// Usage: labs <input.ARW> [options] [output_dir]
+// Options:
+//   --default-display  Apply minimal display-referred processing (color matrix + tone map)
 // Output: <input.png> and <input.ARW.labs.json>
 // If output_dir specified: copies RAW there (if not present), creates outputs in output_dir
 
@@ -19,10 +21,13 @@
 // Direct integration of opt/raws decoder
 #include "sony.h"
 
+// Pipe modules for display-referred processing (tone mapping only - color matrix is in decoder)
+#include "pipe/mods/mods.h"
+
 namespace fs = std::filesystem;
 
 // Generate .labs.json with camera info from metadata
-std::string generateLabsJson(const sony::RawMetadata& metadata, const std::string& decoder = "sony")
+std::string generateLabsJson(const sony::RawMetadata& metadata, const std::string& decoder = "sony", bool defaultDisplay = false)
 {
     std::ostringstream json;
     json << "{\n";
@@ -44,7 +49,23 @@ std::string generateLabsJson(const sony::RawMetadata& metadata, const std::strin
     json << "    \"width\": " << metadata.width << ",\n";
     json << "    \"height\": " << metadata.height << "\n";
     json << "  },\n";
-    json << "  \"links\": []\n";
+
+    if (defaultDisplay)
+    {
+        json << "  \"links\": [\n";
+        json << "    {\n";
+        json << "      \"name\": \"default-display\",\n";
+        json << "      \"modules\": {\n";
+        json << "        \"tone_mapping\": { \"white_point\": 1.0, \"contrast\": 1.0 }\n";
+        json << "      }\n";
+        json << "    }\n";
+        json << "  ]\n";
+    }
+    else
+    {
+        json << "  \"links\": []\n";
+    }
+
     json << "}";
     return json.str();
 }
@@ -100,15 +121,35 @@ OutputPaths getOutputPaths(const std::string& inputRaw, const std::string& outpu
 
 int main(int argc, char** argv)
 {
-    if (argc < 2 || argc > 3)
+    if (argc < 2 || argc > 4)
     {
-        std::cerr << "Usage: " << argv[0] << " <input.ARW> [output_dir]" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <input.ARW> [--default-display] [output_dir]" << std::endl;
+        std::cerr << "  --default-display  Apply minimal display-referred processing" << std::endl;
         std::cerr << "  If output_dir specified, copies RAW there and creates outputs in output_dir" << std::endl;
         return 1;
     }
 
-    std::string inputRaw = argv[1];
-    std::string outputDir = (argc == 3) ? argv[2] : "";
+    // Parse arguments
+    std::string inputRaw;
+    std::string outputDir;
+    bool defaultDisplay = false;
+
+    for (int i = 1; i < argc; ++i)
+    {
+        std::string arg = argv[i];
+        if (arg == "--default-display")
+        {
+            defaultDisplay = true;
+        }
+        else if (inputRaw.empty())
+        {
+            inputRaw = arg;
+        }
+        else
+        {
+            outputDir = arg;
+        }
+    }
 
     try
     {
@@ -154,23 +195,57 @@ int main(int argc, char** argv)
         std::cout << "  Decoded: " << metadata.width << "x" << metadata.height << std::endl;
         std::cout << "  Camera: " << metadata.camera_make << " " << metadata.camera_model << std::endl;
 
-        // === BODY: Process through Sony pipeline ===
+        // === BODY: Process through pipeline ===
         std::cout << "\n[BODY] Processing..." << std::endl;
 
-        cv::UMat linearRgb;
-        if (!sony::Decoder::process(bayerData, metadata, linearRgb))
-        {
-            throw std::runtime_error("Failed to process RAW file");
-        }
+        cv::UMat outputRgb;
 
-        std::cout << "  Linear RGB: " << linearRgb.cols << "x" << linearRgb.rows << std::endl;
+        if (defaultDisplay)
+        {
+            // Display-referred pipeline: linear sRGB → tone map → gamma
+            // Note: Color matrix is now automatic in decoder (process_linear)
+            std::cout << "  Mode: default-display (tone map)" << std::endl;
+
+            // Step 1: Get scene-linear sRGB from decoder
+            // (Decoder now applies: Demosaic → BLC → WB → Color Matrix)
+            cv::UMat linearRgb;
+            if (!sony::Decoder::process_linear(bayerData, metadata, linearRgb))
+            {
+                throw std::runtime_error("Failed to process RAW to linear sRGB");
+            }
+            std::cout << "  Scene-linear sRGB: " << linearRgb.cols << "x" << linearRgb.rows << std::endl;
+
+            // Step 2: Apply tone mapping (HDR → SDR compression)
+            cv::UMat toneMapped;
+            if (!pipe::mods::tone_map(linearRgb, toneMapped, 1.0f, 1.0f))
+            {
+                throw std::runtime_error("Failed to apply tone mapping");
+            }
+            std::cout << "  Tone mapping applied" << std::endl;
+
+            // Step 3: Apply gamma (sRGB OETF)
+            if (!sony::Decoder::apply_gamma(toneMapped, outputRgb))
+            {
+                throw std::runtime_error("Failed to apply gamma");
+            }
+            std::cout << "  Gamma applied" << std::endl;
+        }
+        else
+        {
+            // Standard pipeline (existing behavior)
+            if (!sony::Decoder::process(bayerData, metadata, outputRgb))
+            {
+                throw std::runtime_error("Failed to process RAW file");
+            }
+            std::cout << "  Output RGB: " << outputRgb.cols << "x" << outputRgb.rows << std::endl;
+        }
 
         // === TAIL: Output ===
         std::cout << "\n[TAIL] Saving PNG..." << std::endl;
 
-        // Convert to 8-bit (linearRgb is already gamma corrected from process())
+        // Convert to 8-bit (outputRgb is already gamma corrected)
         cv::UMat output8bit;
-        linearRgb.convertTo(output8bit, CV_8UC3, 255.0);
+        outputRgb.convertTo(output8bit, CV_8UC3, 255.0);
 
         // Save PNG
         if (!cv::imwrite(out.png, output8bit))
@@ -183,7 +258,7 @@ int main(int argc, char** argv)
         // === Save .labs.json sidecar ===
         std::cout << "\n[SIDECAR] Saving .labs.json..." << std::endl;
 
-        std::string labsJson = generateLabsJson(metadata, "sony");
+        std::string labsJson = generateLabsJson(metadata, "sony", defaultDisplay);
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {

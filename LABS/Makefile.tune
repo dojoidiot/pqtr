@@ -1,0 +1,63 @@
+# Tune Makefile
+# Builds bin/tune executable
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# OpenCV paths
+OPENCV_ROOT = ./lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Include and library flags
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part
+LDFLAGS = -L$(OPENCV_LIB)
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+
+# Directories
+SRC_DIR = src/main
+TMP_DIR = tmp/tune
+BIN_DIR = $(TMP_DIR)/bin
+OBJ_DIR = $(TMP_DIR)/obj
+
+# Source files
+TUNE_SRC = $(SRC_DIR)/tune.cpp
+
+# Object files
+TUNE_OBJ = $(OBJ_DIR)/tune.o
+
+# Target executable
+TUNE_BIN = $(BIN_DIR)/tune
+
+# Test configuration
+TEST_SOURCE = var/pics/DSC00144.ARW
+TEST_TARGET = var/pics/DSC00144.JPG
+TEST_OUTPUT = tmp/var/tune/DSC00144.json
+
+.PHONY: all clean test
+
+all: $(TUNE_BIN)
+
+$(TUNE_BIN): $(TUNE_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(OBJ_DIR)/tune.o: $(TUNE_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR)
+
+test: $(TUNE_BIN)
+	@mkdir -p tmp/var/tune
+	@echo "Running tune on $(TEST_SOURCE) to match $(TEST_TARGET)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TUNE_BIN) $(TEST_SOURCE) $(TEST_TARGET) --output $(TEST_OUTPUT)

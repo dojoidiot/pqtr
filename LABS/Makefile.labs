@@ -14,7 +14,7 @@ OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
 # Include and library flags
-INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./opt/raws/src/main/part
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./opt/raws/src/main/part -I./src/main/part
 LDFLAGS = -L$(OPENCV_LIB)
 LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 
@@ -33,7 +33,11 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/demosaic.cpp \
             $(OPT_RAWS_DIR)/part/sony/blc.cpp \
             $(OPT_RAWS_DIR)/part/sony/wb_gain.cpp \
+            $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
+            $(OPT_RAWS_DIR)/part/sony/crop.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
+MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
+            $(SRC_DIR)/part/pipe/mods/tone_map.cpp
 
 # Object files
 LABS_OBJ = $(OBJ_DIR)/labs.o
@@ -43,7 +47,11 @@ RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
             $(OBJ_DIR)/part/sony/demosaic.o \
             $(OBJ_DIR)/part/sony/blc.o \
             $(OBJ_DIR)/part/sony/wb_gain.o \
+            $(OBJ_DIR)/part/sony/color_matrix.o \
+            $(OBJ_DIR)/part/sony/crop.o \
             $(OBJ_DIR)/part/sony/gamma_oetf.o
+MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
+            $(OBJ_DIR)/mods/tone_map.o
 
 # Target executable
 LABS_BIN = $(BIN_DIR)/labs
@@ -52,11 +60,11 @@ LABS_BIN = $(BIN_DIR)/labs
 TEST_INPUT = var/pics/DSC00144.ARW
 TEST_OUTPUT_DIR = tmp/var/labs
 
-.PHONY: all clean test
+.PHONY: all clean test test-display
 
 all: $(LABS_BIN)
 
-$(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) | $(BIN_DIR)
+$(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) $(MODS_OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 $(OBJ_DIR)/labs.o: $(LABS_SRC) | $(OBJ_DIR)
@@ -67,6 +75,10 @@ $(OBJ_DIR)/part/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJ_DIR)/part/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/mods/%.o: $(SRC_DIR)/part/pipe/mods/%.cpp | $(OBJ_DIR)
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
@@ -83,3 +95,8 @@ test: $(LABS_BIN)
 	@mkdir -p $(TEST_OUTPUT_DIR)
 	@echo "Running labs on $(TEST_INPUT)..."
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_INPUT) $(TEST_OUTPUT_DIR)
+
+test-display: $(LABS_BIN)
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@echo "Running labs with --default-display on $(TEST_INPUT)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_INPUT) --default-display $(TEST_OUTPUT_DIR)

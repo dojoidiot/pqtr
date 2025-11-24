@@ -1,0 +1,61 @@
+# Diff Makefile
+# Builds bin/diff executable
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# OpenCV paths
+OPENCV_ROOT = ./lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Include and library flags
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part
+LDFLAGS = -L$(OPENCV_LIB)
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+
+# Directories
+SRC_DIR = src/main
+TMP_DIR = tmp/diff
+BIN_DIR = $(TMP_DIR)/bin
+OBJ_DIR = $(TMP_DIR)/obj
+
+# Source files
+DIFF_SRC = $(SRC_DIR)/diff.cpp
+
+# Object files
+DIFF_OBJ = $(OBJ_DIR)/diff.o
+
+# Target executable
+DIFF_BIN = $(BIN_DIR)/diff
+
+# Test configuration
+TEST_CANDIDATE = tmp/var/labs/DSC00144.png
+TEST_TARGET = var/pics/DSC00144.JPG
+
+.PHONY: all clean test
+
+all: $(DIFF_BIN)
+
+$(DIFF_BIN): $(DIFF_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(OBJ_DIR)/diff.o: $(DIFF_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR)
+
+test: $(DIFF_BIN)
+	@echo "Running diff on $(TEST_CANDIDATE) vs $(TEST_TARGET)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(DIFF_BIN) $(TEST_CANDIDATE) $(TEST_TARGET)

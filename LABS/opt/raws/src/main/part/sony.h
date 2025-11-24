@@ -49,9 +49,15 @@ namespace sony
 
     struct RawMetadata
     {
-        // Image dimensions
+        // Image dimensions (sensor size from RAW)
         int width;
         int height;
+
+        // Active area crop (removes optical black borders)
+        int crop_left;
+        int crop_top;
+        int crop_width;   // Final image width after crop
+        int crop_height;  // Final image height after crop
 
         // RAW processing metadata
         int black_level;
@@ -92,6 +98,19 @@ namespace sony
         // Returns: true on success, false on error
         static bool process(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb);
 
+        // Process RAW data to linear RGB (stops before gamma)
+        // For use with external display-referred processing
+        // Input:  bayer    - Bayer data from prepare() (CV_16UC1)
+        //         metadata - Metadata from prepare()
+        // Output: rgb      - Linear RGB image (CV_32FC3, camera space, [0,1+] range)
+        // Returns: true on success, false on error
+        static bool process_linear(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb);
+
+        // Apply gamma OETF (public for external pipeline use)
+        // Input:  linear   - Linear RGB (CV_32FC3)
+        // Output: gamma    - Gamma-corrected RGB (CV_32FC3)
+        static bool apply_gamma(const cv::UMat &linear, cv::UMat &gamma);
+
     private:
         // No instances - static interface only
         Decoder() = delete;
@@ -100,6 +119,8 @@ namespace sony
         static bool demosaic(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         static bool blc(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         static bool wb_gain(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool color_matrix(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool crop(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         static bool gamma_oetf(const cv::UMat &input, cv::UMat &output);
     };
 
