@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include "module.h"
+#include "module.h"     // from part/
 #include <opencv2/core.hpp>
 
 namespace mods {

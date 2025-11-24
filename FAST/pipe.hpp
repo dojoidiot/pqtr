@@ -307,7 +307,7 @@ namespace pipe
     {
         // Open pipe with RAW data in sink
         // Returns Head for decoding, then Body for processing, then Tail for output
-        // Takes ownership of sink via Hold
-        virtual pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) = 0;
+        // Sink ownership remains with caller
+        virtual pqtr::Hold<Head> open(pqtr::Sink sink) = 0;
     };
 } // namespace pipe

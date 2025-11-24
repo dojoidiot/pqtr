@@ -9,7 +9,7 @@
 #include <opencv2/core/ocl.hpp>
 
 // Production modules (custom GPL-free Sony decoder)
-#include "sony_arw2.h"
+#include "sony_arw2.h"  // from part/
 #include "blc.h"
 #include "wb_gain.h"
 #include "demosaic.h"
@@ -42,22 +42,12 @@ int main(int argc, char** argv) {
         input_file = "../../var/sony_arw2.ARW";
     }
 
-    // Generate output filename: replace .ARW extension with .jpg
-    std::string basename = input_file.substr(input_file.find_last_of('/') + 1);
-    size_t dot_pos = basename.find_last_of('.');
-    if (dot_pos != std::string::npos) {
-        basename = basename.substr(0, dot_pos) + ".jpg";
-    } else {
-        basename += ".jpg";
-    }
-
-    // Extract directory from input file to determine tmp/ location
-    std::string input_dir = input_file.substr(0, input_file.find_last_of('/'));
-    std::string test_root = input_dir.substr(0, input_dir.find_last_of('/'));  // Remove /var
-    std::string output_file = test_root + "/tmp/" + basename;
+    // HARDCODED: Research project - ALWAYS save to LABS/opt/raws/tmp
+    std::string output_file = "/home/z/base/code/pqtr/LABS/opt/raws/tmp/old_output.jpg";
+    std::string social_output_file = "/home/z/base/code/pqtr/LABS/opt/raws/tmp/old_output_social.jpg";
 
     std::cout << "Input RAW file: " << input_file << std::endl;
-    std::cout << "Output PNG: " << output_file << std::endl;
+    std::cout << "Output: " << output_file << std::endl;
     std::cout << "OpenCV GPU support: " << (cv::ocl::haveOpenCL() ? "YES" : "NO") << std::endl;
     std::cout << std::endl;
 
@@ -203,12 +193,8 @@ int main(int argc, char** argv) {
         cv::Mat social_sized;
         cv::resize(output_cpu, social_sized, cv::Size(new_cols, new_rows), 0, 0, cv::INTER_AREA);
 
-        // Generate social media output filename
-        size_t ext_pos = output_file.find_last_of('.');
-        std::string social_output = output_file.substr(0, ext_pos) + "_social" + output_file.substr(ext_pos);
-
-        cv::imwrite(social_output, social_sized);
-        std::cout << "  - Social media image saved to: " << social_output << std::endl;
+        cv::imwrite(social_output_file, social_sized);
+        std::cout << "  - Social media image saved to: " << social_output_file << std::endl;
 
     } catch (const std::exception& e) {
         std::cerr << "An error occurred: " << e.what() << std::endl;

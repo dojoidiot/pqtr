@@ -1,244 +1,119 @@
 #pragma once
 
+#include <vector>
+#include <cstring>
+#include <cstddef>
+
 namespace pqtr
 {
 
-    using Bits = char *;
-
+    // Sink: Write-many, then read-many buffer
+    // User manages write/read phases - Sink is stateless
+    // Stores data as chunks for efficient network/async I/O
     class Sink
     {
     public:
-        enum From
-        {
-            HEAD,
-            TAIL
-        };
-
-        explicit Sink(int buffSize = 256)
-            : headBuff_(nullptr),
-              tailBuff_(nullptr),
-              headSlot_(0),
-              tailSlot_(0),
-              buffSize_(buffSize > 0 ? buffSize : 256),
-              fullSize_(0),
-              buffCount_(0)
-        {
-            init();
-        }
+        Sink() : totalSize_(0), readOffset_(0) {}
 
         ~Sink()
         {
-            if (tailBuff_)
+            // Free all chunk allocations
+            for (auto& chunk : chunks_)
             {
-                Buff *current = tailBuff_->next; // Start at what should be the head
-                tailBuff_->next = nullptr;       // Break the cycle to prevent infinite loop
-                while (current)
-                {
-                    Buff *to_delete = current;
-                    current = current->next;
-                    delete to_delete;
-                }
+                delete[] chunk.data;
             }
         }
 
-        void push(const Bits item)
+        // WRITE PHASE: Push a chunk of data
+        // Sink takes ownership of the chunk pointer
+        void push(char* data, size_t size)
         {
-            if (full())
-            {
-                grow();
-            }
-
-            tailBuff_->buff[tailSlot_] = item;
-            tailSlot_++;
-            fullSize_++;
-
-            if (tailSlot_ == buffSize_)
-            {
-                tailSlot_ = 0;
-                tailBuff_ = tailBuff_->next;
-            }
+            chunks_.push_back({data, size});
+            totalSize_ += size;
         }
 
-        // Take whatever bits are at the from position in the sink.
-        bool take(Bits &item, From from)
+        // READ PHASE: Take up to 'size' bytes
+        // Returns actual bytes read (may be less if not enough data)
+        // Allocates new buffer, caller must delete[]
+        int take(char*& buffer, size_t size)
         {
-            if (none())
+            if (readOffset_ >= totalSize_ || size == 0)
             {
-                return false;
-            }
-
-            if (from == HEAD)
-            {
-                item = headBuff_->buff[headSlot_];
-                headSlot_++;
-                fullSize_--;
-
-                if (headSlot_ == buffSize_)
-                {
-                    headSlot_ = 0;
-                    headBuff_ = headBuff_->next;
-                }
-            }
-            else // from == TAIL
-            {
-                if (tailSlot_ == 0)
-                {
-                    Buff *prev = tailBuff_;
-                    while (prev->next != tailBuff_)
-                    {
-                        prev = prev->next;
-                    }
-                    tailBuff_ = prev;
-                    tailSlot_ = buffSize_ - 1;
-                }
-                else
-                {
-                    tailSlot_--;
-                }
-
-                item = tailBuff_->buff[tailSlot_];
-                fullSize_--;
-            }
-            return true;
-        }
-
-        // Take up to 'size' bytes from the head
-        // Allocates a new buffer and copies bytes from the sink
-        // Returns the actual number of bytes taken (may be less than size if sink empties)
-        // Returns 0 if sink is empty
-        // Caller is responsible for deleting the returned buffer with delete[]
-        int take(Bits &item, int size)
-        {
-            if (none() || size <= 0)
-            {
-                item = nullptr;
+                buffer = nullptr;
                 return 0;
             }
 
-            // Determine how many bytes we can actually take
-            int bytesToTake = (fullSize_ < size) ? fullSize_ : size;
+            // Determine how many bytes we can actually read
+            size_t available = totalSize_ - readOffset_;
+            size_t toRead = (size < available) ? size : available;
 
-            // Allocate a new buffer to hold the requested bytes
-            item = new char[bytesToTake];
+            // Allocate output buffer
+            buffer = new char[toRead];
+            size_t copied = 0;
+            size_t currentOffset = readOffset_;
 
-            int taken = 0;
-            while (taken < bytesToTake && !none())
+            // Copy from chunks
+            for (const auto& chunk : chunks_)
             {
-                // Each element in buff is a char*, we need to dereference it
-                Bits currentPtr = headBuff_->buff[headSlot_];
-                item[taken] = *currentPtr;
-
-                headSlot_++;
-                fullSize_--;
-                taken++;
-
-                if (headSlot_ == buffSize_)
+                if (currentOffset >= chunk.size)
                 {
-                    headSlot_ = 0;
-                    headBuff_ = headBuff_->next;
+                    // Skip chunks we've already read past
+                    currentOffset -= chunk.size;
+                    continue;
+                }
+
+                // How much to copy from this chunk
+                size_t chunkOffset = currentOffset;
+                size_t available_in_chunk = chunk.size - chunkOffset;
+                size_t toCopy = (toRead - copied < available_in_chunk)
+                    ? (toRead - copied)
+                    : available_in_chunk;
+
+                memcpy(buffer + copied, chunk.data + chunkOffset, toCopy);
+                copied += toCopy;
+                currentOffset = 0;  // After first chunk, start from beginning of next chunks
+
+                if (copied >= toRead)
+                {
+                    break;
                 }
             }
 
-            return taken;
+            // Update read offset
+            readOffset_ += copied;
+
+            return copied;
         }
 
-        int size() const
+        // Get total bytes stored
+        size_t size() const
         {
-            return fullSize_;
+            return totalSize_;
         }
 
-        // Tidy up the sink by marking all data as taken while preserving allocated memory
+        // Reset for reuse (keeps allocations)
         void tidy()
         {
-            // Reset to initial state with first buffer
-            if (tailBuff_)
-            {
-                // Find the first buffer in the circular list
-                Buff *firstBuff = headBuff_;
-                while (firstBuff->next != headBuff_)
-                {
-                    firstBuff = firstBuff->next;
-                }
-                // Actually, headBuff_ should already point to the logical first buffer
-                // Just reset both pointers to headBuff_ (or any buffer in the ring)
-                headBuff_ = tailBuff_;
-                tailBuff_ = headBuff_;
-            }
-
-            // Reset slots and size
-            headSlot_ = 0;
-            tailSlot_ = 0;
-            fullSize_ = 0;
-            // Note: buffCount_ is preserved to keep allocated memory
+            // Don't free chunks - keep for reuse
+            totalSize_ = 0;
+            readOffset_ = 0;
+            // Note: chunks_ vector keeps pointers but they can be reused
         }
 
-        typedef void (*Take)(Bits item);
-        // take the whole sink
-        void take(Take call)
-        {
-            Bits item;
-            while (this->take(item, From::HEAD))
-            {
-                if (call)
-                {
-                    call(item);
-                }
-            }
-        }
-
-        Sink(const Sink &) = delete;
-        Sink &operator=(const Sink &) = delete;
+        // No copy
+        Sink(const Sink&) = delete;
+        Sink& operator=(const Sink&) = delete;
 
     private:
-        struct Buff
+        struct Chunk
         {
-            Bits *const buff;
-            Buff *next;
-
-            explicit Buff(int size) : buff(new Bits[size]), next(nullptr) {}
-
-            ~Buff()
-            {
-                delete[] buff;
-            }
-
-            Buff(const Buff &) = delete;
-            Buff &operator=(const Buff &) = delete;
+            char* data;
+            size_t size;
         };
-        void init()
-        {
-            buffCount_ = 1;
-            Buff *firstBuff = new Buff(buffSize_);
-            firstBuff->next = firstBuff; // Circular reference
-            headBuff_ = firstBuff;
-            tailBuff_ = firstBuff;
-        }
 
-        void grow()
-        {
-            // Inserts a new buff immediately after the current tailBuff
-            Buff *newBuff = new Buff(buffSize_);
-            newBuff->next = tailBuff_->next;
-            tailBuff_->next = newBuff;
-            buffCount_++;
-        }
-
-        bool full() const
-        {
-            return fullSize_ == buffCount_ * buffSize_;
-        }
-
-        bool none() const
-        {
-            return fullSize_ == 0;
-        }
-        Buff *headBuff_;
-        Buff *tailBuff_;
-        int headSlot_;
-        int tailSlot_;
-        const int buffSize_;
-        int fullSize_;
-        int buffCount_;
+        std::vector<Chunk> chunks_;
+        size_t totalSize_;
+        size_t readOffset_;
     };
 
 } // namespace pqtr

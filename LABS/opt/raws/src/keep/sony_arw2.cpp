@@ -5,8 +5,8 @@
 
 #include "sony_arw2.h"
 #include <opencv2/imgproc.hpp>
+#include <tool.hpp>
 #include <iostream>
-#include <fstream>
 #include <vector>
 #include <cstring>
 #include <stdexcept>
@@ -275,24 +275,37 @@ namespace mods
         return true;
     }
 
-    // Link-based decoder interface (for pipe integration)
-    bool RawLoader::decode(pqtr::Link &source, cv::UMat &output, RawMetadata &metadata)
+    // Sink-based decoder interface
+    bool RawLoader::decode(pqtr::Sink &source, cv::UMat &output, RawMetadata &metadata)
     {
-        ssize_t file_size = pqtr::size(source);
+        int file_size = source.size();
+
         if (file_size < 8)
         {
             std::cerr << "RawLoader: Invalid file size" << std::endl;
             return false;
         }
 
+        // Read entire file from sink into buffer
         std::vector<uint8_t> file_data(file_size);
-        ssize_t bytes_read = pqtr::read(source, file_data.data(), file_size);
+        char* data_ptr = nullptr;
+        int bytes_read = source.take(data_ptr, file_size);
 
         if (bytes_read != file_size)
         {
-            std::cerr << "RawLoader: Read error" << std::endl;
+            if (data_ptr) delete[] data_ptr;
+            std::cerr << "RawLoader: Read error (got " << bytes_read << " expected " << file_size << ")" << std::endl;
             return false;
         }
+
+        if (!data_ptr) {
+            std::cerr << "RawLoader: Null data pointer" << std::endl;
+            return false;
+        }
+
+        // Copy from Sink buffer to our vector
+        memcpy(file_data.data(), data_ptr, bytes_read);
+        delete[] data_ptr;
 
         if (file_data[0] != 'I' || file_data[1] != 'I' || read_u16(&file_data[2]) != 0x002A)
         {
@@ -309,6 +322,11 @@ namespace mods
 
         uint16_t num_entries = read_u16(&file_data[ifd_offset]);
 
+        uint32_t sub_ifd_offset = 0;
+        uint32_t exif_ifd_offset = 0;
+        uint32_t maker_note_offset = 0;
+
+        // Parse IFD0 entries
         for (int i = 0; i < num_entries; i++)
         {
             uint32_t entry_offset = ifd_offset + 2 + (i * 12);
@@ -328,13 +346,325 @@ namespace mods
             case TAG_ORIENTATION:
                 metadata_.orientation = get_entry_value(entry, file_data);
                 break;
+            case TAG_SUB_IFD:
+                // SubIFD contains the RAW image data
+                sub_ifd_offset = get_entry_value(entry, file_data);
+                break;
+            case TAG_EXIF_IFD:
+                // EXIF IFD contains shooting parameters
+                exif_ifd_offset = get_entry_value(entry, file_data);
+                break;
             }
         }
 
-        // TODO: Complete implementation with full TIFF parsing from process() method
-        std::cerr << "RawLoader::decode() - Stub implementation" << std::endl;
+        // Parse EXIF IFD (shooting parameters)
+        if (exif_ifd_offset != 0 && exif_ifd_offset + 2 <= static_cast<size_t>(file_size))
+        {
+            uint16_t exif_num_entries = read_u16(&file_data[exif_ifd_offset]);
+
+            for (int i = 0; i < exif_num_entries; i++)
+            {
+                uint32_t entry_offset = exif_ifd_offset + 2 + (i * 12);
+                if (entry_offset + 12 > static_cast<size_t>(file_size))
+                    break;
+
+                IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
+
+                switch (entry.tag)
+                {
+                case EXIF_TAG_ISO:
+                    metadata_.iso = static_cast<float>(get_entry_value(entry, file_data));
+                    break;
+                case EXIF_TAG_EXPOSURE_TIME:
+                    if (entry.type == TYPE_RATIONAL)
+                    {
+                        metadata_.shutter_speed = read_rational(file_data, entry.value_offset);
+                    }
+                    break;
+                case EXIF_TAG_FNUMBER:
+                    if (entry.type == TYPE_RATIONAL)
+                    {
+                        metadata_.aperture = read_rational(file_data, entry.value_offset);
+                    }
+                    break;
+                case EXIF_TAG_FOCAL_LENGTH:
+                    if (entry.type == TYPE_RATIONAL)
+                    {
+                        metadata_.focal_length = read_rational(file_data, entry.value_offset);
+                    }
+                    break;
+                case EXIF_TAG_LENS_MODEL:
+                    metadata_.lens_model = get_entry_string(entry, file_data);
+                    break;
+                case TAG_MAKER_NOTE:
+                    // MakerNote contains Sony-specific data including tone curve
+                    maker_note_offset = entry.value_offset;
+                    break;
+                }
+            }
+        }
+
+        // Parse Sony MakerNotes for tone curve (tag 0x7010) and WB (tag 0x7313)
+        uint16_t linearization_curve[16384] = {0};
+        bool found_sony_curve = false;
+        bool found_sony_wb = false;
+        uint16_t wb_rggb[4] = {0, 0, 0, 0};
+
+        if (maker_note_offset != 0 && maker_note_offset + 10 <= static_cast<size_t>(file_size))
+        {
+            uint32_t maker_ifd_offset = maker_note_offset;
+
+            if (file_data[maker_note_offset] == 'S' && file_data[maker_note_offset + 1] == 'O')
+            {
+                maker_ifd_offset += 12;
+            }
+
+            if (maker_ifd_offset + 2 <= static_cast<size_t>(file_size))
+            {
+                uint16_t maker_num_entries = read_u16(&file_data[maker_ifd_offset]);
+
+                // Parse MakerNote IFD entries and look for Sony tag2010 sub-IFD
+                uint32_t sony_tag2010_offset = 0;
+
+                for (int i = 0; i < maker_num_entries && i < 200; i++)
+                { // Limit to 200 entries
+                    uint32_t entry_offset = maker_ifd_offset + 2 + (i * 12);
+                    if (entry_offset + 12 > static_cast<size_t>(file_size))
+                        break;
+
+                    IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
+
+                    if (entry.tag == 0x2010)
+                    {
+                        sony_tag2010_offset = entry.value_offset;
+                    }
+                }
+
+                if (sony_tag2010_offset != 0 && sony_tag2010_offset + 2 <= static_cast<size_t>(file_size))
+                {
+                    uint16_t tag2010_num_entries = read_u16(&file_data[sony_tag2010_offset]);
+
+                    for (int i = 0; i < tag2010_num_entries && i < 100; i++)
+                    {
+                        uint32_t entry_offset = sony_tag2010_offset + 2 + (i * 12);
+                        if (entry_offset + 12 > static_cast<size_t>(file_size))
+                            break;
+
+                        IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
+
+                        if (entry.tag == SONY_TAG_TONE_CURVE)
+                        {
+                            if (entry.value_offset + 8 <= static_cast<size_t>(file_size))
+                            {
+                                found_sony_curve = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (sub_ifd_offset == 0 || sub_ifd_offset + 2 > static_cast<size_t>(file_size))
+        {
+            std::cerr << "RawLoader: No SubIFD found" << std::endl;
+            return false;
+        }
+
+        uint16_t sub_num_entries = read_u16(&file_data[sub_ifd_offset]);
+
+        uint32_t strip_offset = 0;
+        uint32_t strip_byte_count = 0;
+        uint16_t compression = 1; // 1 = uncompressed (default)
+        uint16_t cfa_pattern[4] = {0};
+        bool found_cfa = false;
+
+        // Parse SubIFD entries (this is where Sony stores tag 0x7010 tone curve!)
+        for (int i = 0; i < sub_num_entries; i++)
+        {
+            uint32_t entry_offset = sub_ifd_offset + 2 + (i * 12);
+            if (entry_offset + 12 > static_cast<size_t>(file_size))
+                break;
+
+            IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
+
+            if (entry.tag == SONY_TAG_TONE_CURVE && !found_sony_curve)
+            {
+                if (entry.value_offset + 8 <= static_cast<size_t>(file_size))
+                {
+                    found_sony_curve = true;
+                }
+            }
+
+            if (entry.tag == SONY_TAG_WB_RGGB && !found_sony_wb)
+            {
+                if (entry.count == 4 && entry.value_offset + 8 <= static_cast<size_t>(file_size))
+                {
+                    for (int j = 0; j < 4; j++)
+                    {
+                        wb_rggb[j] = read_u16(&file_data[entry.value_offset + j * 2]);
+                    }
+                    found_sony_wb = true;
+                }
+            }
+
+            switch (entry.tag)
+            {
+            case TAG_IMAGE_WIDTH:
+                metadata_.width = get_entry_value(entry, file_data);
+                break;
+            case TAG_IMAGE_LENGTH:
+                metadata_.height = get_entry_value(entry, file_data);
+                break;
+            case TAG_COMPRESSION:
+                compression = get_entry_value(entry, file_data);
+                break;
+            case TAG_STRIP_OFFSETS:
+                strip_offset = get_entry_value(entry, file_data);
+                break;
+            case TAG_STRIP_BYTE_COUNTS:
+                strip_byte_count = get_entry_value(entry, file_data);
+                break;
+            case TAG_CFA_PATTERN:
+                // CFA pattern (Bayer arrangement)
+                if (entry.value_offset + 8 <= static_cast<size_t>(file_size))
+                {
+                    for (int j = 0; j < 4; j++)
+                    {
+                        cfa_pattern[j] = file_data[entry.value_offset + 4 + j];
+                    }
+                    found_cfa = true;
+                }
+                break;
+            }
+        }
+
+        if (found_cfa)
+        {
+            if (cfa_pattern[0] == 0 && cfa_pattern[1] == 1 &&
+                cfa_pattern[2] == 1 && cfa_pattern[3] == 2)
+            {
+                metadata_.bayer_pattern = cv::COLOR_BayerRG2RGB_EA;
+            }
+            else if (cfa_pattern[0] == 2 && cfa_pattern[1] == 1 &&
+                     cfa_pattern[2] == 1 && cfa_pattern[3] == 0)
+            {
+                metadata_.bayer_pattern = cv::COLOR_BayerBG2RGB_EA;
+            }
+            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 0 &&
+                     cfa_pattern[2] == 2 && cfa_pattern[3] == 1)
+            {
+                metadata_.bayer_pattern = cv::COLOR_BayerGB2RGB_EA;
+            }
+            else if (cfa_pattern[0] == 1 && cfa_pattern[1] == 2 &&
+                     cfa_pattern[2] == 0 && cfa_pattern[3] == 1)
+            {
+                metadata_.bayer_pattern = cv::COLOR_BayerGR2RGB_EA;
+            }
+            else
+            {
+                metadata_.bayer_pattern = cv::COLOR_BayerRG2RGB_EA;
+            }
+        }
+        else
+        {
+            metadata_.bayer_pattern = cv::COLOR_BayerRG2RGB;
+        }
+
+        metadata_.black_level = 512;
+        metadata_.white_level = 16383;
+
+        if (found_sony_wb && wb_rggb[1] > 0)
+        {
+            metadata_.wb_rggb[0] = wb_rggb[0];
+            metadata_.wb_rggb[1] = wb_rggb[1];
+            metadata_.wb_rggb[2] = wb_rggb[3];
+            metadata_.wb_rggb[3] = wb_rggb[2];
+        }
+        else
+        {
+            metadata_.wb_rggb[0] = 2176;
+            metadata_.wb_rggb[1] = 1024;
+            metadata_.wb_rggb[2] = 1024;
+            metadata_.wb_rggb[3] = 1551;
+        }
+
+        metadata_.color_matrix = cv::Matx33f(
+            1.9413f, -0.6498f, -0.2915f,
+            -0.3204f, 1.2907f, 0.0297f,
+            -0.0625f, 0.2271f, 0.8354f);
+
+        if (strip_offset == 0 || strip_offset + strip_byte_count > static_cast<size_t>(file_size))
+        {
+            std::cerr << "RawLoader: Invalid strip data location" << std::endl;
+            return false;
+        }
+
+        cv::Mat bayer_cpu(metadata_.height, metadata_.width, CV_16UC1);
+
+        for (int i = 0; i < 4000; i++)
+        {
+            linearization_curve[i] = i;
+        }
+        for (int i = 4000; i < 16384; i++)
+        {
+            linearization_curve[i] = i * 4 - 12000;
+        }
+
+        if (compression == 32767)
+        {
+            if (!decompress_arw2(
+                    &file_data[strip_offset],
+                    strip_byte_count,
+                    reinterpret_cast<uint16_t *>(bayer_cpu.data),
+                    metadata_.width,
+                    metadata_.height))
+            {
+                std::cerr << "RawLoader: ARW2 decompression failed" << std::endl;
+                return false;
+            }
+
+            uint16_t *pixel_data = reinterpret_cast<uint16_t *>(bayer_cpu.data);
+            size_t total_pixels = metadata_.width * metadata_.height;
+
+            for (size_t i = 0; i < total_pixels; i++)
+            {
+                uint16_t raw_value = pixel_data[i];
+                uint32_t curve_index = raw_value << 1;
+                if (curve_index < 16384)
+                {
+                    pixel_data[i] = linearization_curve[curve_index];
+                }
+                else
+                {
+                    pixel_data[i] = raw_value;
+                }
+            }
+
+            metadata_.black_level = 512;
+            metadata_.white_level = 16383;
+        }
+        else if (compression == 1)
+        {
+            size_t expected_size = metadata_.width * metadata_.height * 2;
+
+            if (strip_byte_count < expected_size)
+            {
+                std::cerr << "RawLoader: Strip data too small" << std::endl;
+                return false;
+            }
+
+            std::memcpy(bayer_cpu.data, &file_data[strip_offset], expected_size);
+        }
+        else
+        {
+            std::cerr << "RawLoader: Unsupported compression type " << compression << std::endl;
+            return false;
+        }
+
+        bayer_cpu.copyTo(output);
         metadata = metadata_;
-        return false;
+        return true;
     }
 
     bool RawLoader::process(
@@ -356,22 +686,36 @@ namespace mods
             return false;
         }
 
-        std::ifstream file(file_path_, std::ios::binary);
-        if (!file)
-        {
-            std::cerr << "RawLoader: Failed to open file" << std::endl;
+        // Load file using Tool → Sink
+        pqtr::Sink* sink = nullptr;
+        try {
+            sink = pqtr::Tool::read(file_path_);
+        } catch (const std::exception& e) {
+            std::cerr << "RawLoader: Failed to open file: " << e.what() << std::endl;
             return false;
         }
 
-        file.seekg(0, std::ios::end);
-        size_t file_size = file.tellg();
-        file.seekg(0, std::ios::beg);
+        size_t file_size = sink->size();
 
+        // Read entire file from sink into buffer
         std::vector<uint8_t> file_data(file_size);
-        file.read(reinterpret_cast<char *>(file_data.data()), file_size);
-        file.close();
+        char* data_ptr = nullptr;
+        int bytes_read = sink->take(data_ptr, file_size);
 
-        // Step 2: Verify TIFF header
+        if (bytes_read != static_cast<int>(file_size) || !data_ptr)
+        {
+            if (data_ptr) delete[] data_ptr;
+            delete sink;
+            std::cerr << "RawLoader: Read error" << std::endl;
+            return false;
+        }
+
+        // Copy from Sink buffer to our vector
+        memcpy(file_data.data(), data_ptr, bytes_read);
+        delete[] data_ptr;
+        delete sink;
+
+        // Verify TIFF header
         if (file_size < 8)
         {
             std::cerr << "RawLoader: File too small to be valid TIFF" << std::endl;

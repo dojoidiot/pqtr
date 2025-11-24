@@ -1,0 +1,87 @@
+# Makefile for Sony RAW processing pipeline
+# Structure:
+#   src/main/part/ - Sony decoder and processing modules
+#   src/test/ - Test program with full pipeline
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++11 -Wall -O2
+
+# OpenCV paths (relative to opt/raws/)
+OPENCV_ROOT ?= ../../lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Build output directory
+TMP_DIR = ./tmp
+BUILD_DIR = $(TMP_DIR)/sony
+OBJ_DIR = $(BUILD_DIR)/obj
+
+# Include and library flags
+INCLUDES = $(OPENCV_INCLUDE) -Isrc/main/part -Isrc/main/part/sony -Isrc/main -I../../inc
+LDFLAGS = -L$(OPENCV_LIB)
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+
+# Source files - Sony implementation
+SONY_DECODER = src/main/part/sony.cpp
+SONY_MODS = src/main/part/sony/blc.cpp \
+            src/main/part/sony/wb_gain.cpp \
+            src/main/part/sony/demosaic.cpp \
+            src/main/part/sony/gamma_oetf.cpp
+
+# Test program
+TEST_SONY = src/test/sony.cpp
+
+# Build objects
+SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
+               $(OBJ_DIR)/blc.o \
+               $(OBJ_DIR)/wb_gain.o \
+               $(OBJ_DIR)/demosaic.o \
+               $(OBJ_DIR)/gamma_oetf.o \
+               $(OBJ_DIR)/sony_test.o
+
+SONY_TEST = $(BUILD_DIR)/sony
+
+# Default target
+all: $(SONY_TEST)
+
+# Create build directories
+$(BUILD_DIR):
+	mkdir -p $(BUILD_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+# Link sony test
+$(SONY_TEST): $(SONY_OBJECTS) | $(BUILD_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# Compile src/main/part/ decoder
+$(OBJ_DIR)/sony_decoder.o: src/main/part/sony.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile src/main/part/sony/ files
+$(OBJ_DIR)/%.o: src/main/part/sony/%.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Compile test file
+$(OBJ_DIR)/sony_test.o: src/test/sony.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Clean
+clean:
+	rm -rf $(TMP_DIR)
+
+# Phony targets
+.PHONY: all clean
+
+# Dependencies (headers)
+$(OBJ_DIR)/sony_decoder.o: src/main/part/sony.h
+$(OBJ_DIR)/sony_test.o: src/main/part/sony.h
+$(OBJ_DIR)/blc.o: src/main/part/sony.h
+$(OBJ_DIR)/wb_gain.o: src/main/part/sony.h
+$(OBJ_DIR)/demosaic.o: src/main/part/sony.h
+$(OBJ_DIR)/gamma_oetf.o:

@@ -10,8 +10,8 @@
 
 #pragma once
 
-#include "module.h"
-#include "sony_arw2.h"
+#include "module.h"     // from part/
+#include "sony_arw2.h"  // from part/
 #include <opencv2/core.hpp>
 #include <string>
 

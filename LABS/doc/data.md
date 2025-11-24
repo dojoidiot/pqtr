@@ -16,7 +16,7 @@ This document defines data persistence formats for the PQTR:LABS system. It cove
 
 ### Overview
 
-Pipe data persists Link configurations including dial values. The format is designed for:
+Pipe data persists the complete pipeline configuration from RAW decode (HEAD) through processing steps (BODY) to output (TAIL). The format is designed for:
 - Headless operation (diff and tune tools)
 - Sparse storage (only set dials are saved)
 - Human readability (version control friendly)
@@ -28,6 +28,7 @@ Pipe data persists Link configurations including dial values. The format is desi
 ```json
 {
   "version": "1.0",
+  "decoder": "sony_arw2",
   "links": [
     {
       "name": "tune_optimize",
@@ -52,6 +53,28 @@ All dial values are normalized to the range `[0.0, 1.0]`:
 - **Maximum**: 1.0 (maximum positive adjustment)
 
 **Omitted dials**: If a dial is not present in the JSON, it is treated as unset (not active). Only dials that have been explicitly set are saved.
+
+---
+
+## HEAD Configuration
+
+### Decoder Selection
+
+The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
+
+```json
+{
+  "version": "1.0",
+  "decoder": "sony_arw2",
+  "links": []
+}
+```
+
+**Supported decoders:**
+- `"sony_arw2"`: Sony .ARW format (default)
+- Future: `"nikon_nef"`, `"canon_cr2"`, `"fuji_raf"`, etc.
+
+**Default behavior**: If `decoder` is omitted, the system selects based on file extension.
 
 ---
 
@@ -170,9 +193,27 @@ All dial values are normalized to the range `[0.0, 1.0]`:
 
 ## Complete Example
 
+### Minimal Configuration (Bare Defaults)
+
 ```json
 {
   "version": "1.0",
+  "decoder": "sony_arw2",
+  "links": []
+}
+```
+
+This represents a pipeline with:
+- Sony ARW decoder in HEAD
+- No processing steps in BODY (direct pass-through to TAIL)
+- All modules at default/neutral settings
+
+### Full Configuration Example
+
+```json
+{
+  "version": "1.0",
+  "decoder": "sony_arw2",
   "links": [
     {
       "name": "geometric_adjust",

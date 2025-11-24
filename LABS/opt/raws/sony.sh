@@ -1,25 +1,21 @@
 #!/bin/bash
 
-# Test script for RAW image processing pipeline
-# Custom GPL-free Sony .ARW decoder with full manufacturer processing
+# Test script for Gold RAW decoder
+# Sony .ARW decoder with maximum manufacturer processing
 
 set -e  # Exit on error
 
 echo "╔════════════════════════════════════════════════════════╗"
-echo "║  Sony .ARW Custom Decoder Test                         ║"
-echo "║  Reference Implementation - Maximum Manufacturer       ║"
+echo "║  Gold Sony .ARW Decoder Test                           ║"
+echo "║  Maximum Manufacturer Processing                       ║"
 echo "╚════════════════════════════════════════════════════════╝"
 echo ""
 
 # Default input file
-INPUT_FILE="${1:-./var/sony_arw2.ARW}"
+INPUT_FILE="${1:-./var/sony.ARW}"
 
-# Convert to absolute path
-INPUT_FILE=$(readlink -f "$INPUT_FILE")
-
-# Extract basename without extension for output
-BASENAME=$(basename "$INPUT_FILE" .ARW)
-OUTPUT_FILE="./tmp/${BASENAME}.jpg"
+# Output is always sony.jpg
+OUTPUT_FILE="./tmp/sony.jpg"
 
 echo "Input file: $INPUT_FILE"
 echo "Output file: $OUTPUT_FILE"
@@ -27,7 +23,7 @@ echo ""
 
 if [ ! -f "$INPUT_FILE" ]; then
     echo "ERROR: Input file not found: $INPUT_FILE"
-    echo "Usage: ./test.sh [path/to/raw/file.ARW]"
+    echo "Usage: ./sony.sh [path/to/raw/file.ARW]"
     exit 1
 fi
 
@@ -36,28 +32,26 @@ mkdir -p ./tmp
 
 # Build pipeline
 echo "═══════════════════════════════════════════════════════"
-echo "Building custom Sony decoder pipeline..."
+echo "Building sony decoder..."
 echo "═══════════════════════════════════════════════════════"
-cd src/main
-make clean
-make
+make -f Makefile.sony clean
+make -f Makefile.sony
 if [ $? -ne 0 ]; then
     echo "ERROR: Build failed"
     exit 1
 fi
-cd ../..
 echo ""
 
-# Run pipeline
+# Run sony from opt/raws directory
 echo "═══════════════════════════════════════════════════════"
-echo "Running Sony .ARW processing pipeline..."
+echo "Running sony decoder test..."
 echo "═══════════════════════════════════════════════════════"
-LD_LIBRARY_PATH=../../lib/opencv/build/lib ./tmp/make/pipeline "$INPUT_FILE"
+LD_LIBRARY_PATH=../../lib/opencv/build/lib ./tmp/sony/sony "$INPUT_FILE"
 EXIT_CODE=$?
 echo ""
 
 if [ $EXIT_CODE -ne 0 ]; then
-    echo "ERROR: Pipeline failed"
+    echo "ERROR: Test failed"
     exit 1
 fi
 
@@ -76,7 +70,7 @@ if [ -f "$OUTPUT_FILE" ]; then
 fi
 echo ""
 
-echo "✓ Pipeline completed successfully!"
+echo "✓ Sony decoder test completed successfully!"
 echo ""
-echo "Build artifacts: ./tmp/make/"
+echo "Build artifacts: ./tmp/sony/"
 echo "Output image: $OUTPUT_FILE"

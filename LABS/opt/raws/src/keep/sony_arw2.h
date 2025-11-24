@@ -5,7 +5,7 @@
 #pragma once
 
 #include "module.h"
-#include "link.hpp"
+#include <sink.hpp>
 #include <opencv2/core.hpp>
 #include <string>
 
@@ -50,8 +50,8 @@ public:
 
     Params defaults() const override;
 
-    // NEW: Link-based decoder interface (clean for pipe integration)
-    bool decode(pqtr::Link& source, cv::UMat& output, RawMetadata& metadata);
+    // Sink-based decoder interface
+    bool decode(pqtr::Sink& source, cv::UMat& output, RawMetadata& metadata);
 
     // Get metadata from last load operation
     const RawMetadata& metadata() const { return metadata_; }
@@ -64,9 +64,9 @@ private:
     RawMetadata metadata_;
 
     // Internal parsing helpers
-    bool parseTIFF(pqtr::Link& source);
-    bool parseIFD(pqtr::Link& source, size_t offset, bool is_makernote = false);
-    bool decompressARW2(pqtr::Link& source, size_t strip_offset, size_t strip_bytes,
+    bool parseTIFF(pqtr::Sink& source);
+    bool parseIFD(pqtr::Sink& source, size_t offset, bool is_makernote = false);
+    bool decompressARW2(pqtr::Sink& source, size_t strip_offset, size_t strip_bytes,
                         int width, int height, cv::UMat& output);
 
     // Linearization curve application
