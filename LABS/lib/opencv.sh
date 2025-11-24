@@ -4,9 +4,12 @@
 # This script configures and builds OpenCV from the submodule
 # git submodule update --init bind/lib/opencv
 set -e  # Exit on error
+SCRIPT_DIR=$(
+    cd "$(dirname "$0")"
+    pwd -P
+)
 
 # Get the directory where this script is located
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OPENCV_DIR="$SCRIPT_DIR/opencv"
 BUILD_DIR="$OPENCV_DIR/build"
 
@@ -14,7 +17,7 @@ if [ ! -d "$OPENCV_DIR/cmake" ]; then
     echo "OpenCV source directory not found at $OPENCV_DIR"
     echo "Fetching OpenCV submodule..."
     cd "$(git rev-parse --show-toplevel)"
-    git submodule update --init --depth 1 bind/lib/opencv
+    git submodule update --init --depth 1 $OPENCV_DIR
 
     if [ ! -d "$OPENCV_DIR/cmake" ]; then
         echo "Failed to fetch OpenCV submodule"
