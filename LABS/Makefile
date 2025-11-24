@@ -14,7 +14,7 @@ OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
 # Include and library flags
-INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./opt/raws/src/main
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./opt/raws/src/main/part
 LDFLAGS = -L$(OPENCV_LIB)
 LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 
@@ -27,15 +27,23 @@ OBJ_DIR = $(TMP_DIR)/obj
 
 # Source files
 LABS_SRC = $(SRC_DIR)/labs.cpp
-RAWS_SRCS = $(OPT_RAWS_DIR)/sony_arw2.cpp \
-            $(OPT_RAWS_DIR)/blc.cpp \
-            $(OPT_RAWS_DIR)/wb_gain.cpp \
-            $(OPT_RAWS_DIR)/demosaic.cpp \
-            $(OPT_RAWS_DIR)/gamma_oetf.cpp
+RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
+            $(OPT_RAWS_DIR)/part/sony/prepare.cpp \
+            $(OPT_RAWS_DIR)/part/sony/process.cpp \
+            $(OPT_RAWS_DIR)/part/sony/demosaic.cpp \
+            $(OPT_RAWS_DIR)/part/sony/blc.cpp \
+            $(OPT_RAWS_DIR)/part/sony/wb_gain.cpp \
+            $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
 
 # Object files
 LABS_OBJ = $(OBJ_DIR)/labs.o
-RAWS_OBJS = $(patsubst $(OPT_RAWS_DIR)/%.cpp,$(OBJ_DIR)/%.o,$(RAWS_SRCS))
+RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
+            $(OBJ_DIR)/part/sony/prepare.o \
+            $(OBJ_DIR)/part/sony/process.o \
+            $(OBJ_DIR)/part/sony/demosaic.o \
+            $(OBJ_DIR)/part/sony/blc.o \
+            $(OBJ_DIR)/part/sony/wb_gain.o \
+            $(OBJ_DIR)/part/sony/gamma_oetf.o
 
 # Target executable
 LABS_BIN = $(BIN_DIR)/labs
@@ -50,7 +58,12 @@ $(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) | $(BIN_DIR)
 $(OBJ_DIR)/labs.o: $(LABS_SRC) | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(OBJ_DIR)/%.o: $(OPT_RAWS_DIR)/%.cpp | $(OBJ_DIR)
+$(OBJ_DIR)/part/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)
+	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BIN_DIR):

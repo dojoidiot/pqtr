@@ -16,16 +16,12 @@
 #include <opencv2/imgproc.hpp>
 
 // Direct integration of opt/raws decoder
-#include "sony_arw2.h"
-#include "blc.h"
-#include "wb_gain.h"
-#include "demosaic.h"
-#include "gamma_oetf.h"
+#include "sony.h"
 
 namespace fs = std::filesystem;
 
 // Generate bare .labs.json for given RAW file
-std::string generateLabsJson(const std::string& decoder = "sony_arw2")
+std::string generateLabsJson(const std::string& decoder = "sony")
 {
     return R"({
   "version": "1.0",
@@ -124,11 +120,11 @@ int main(int argc, char** argv)
         pqtr::Sink* rawSink = pqtr::Tool::read(out.rawPath);
 
         // Decode using Sony ARW decoder
-        mods::RawLoader decoder;
         cv::UMat bayerData;
-        mods::RawMetadata metadata;
+        sony::Info info;
+        sony::RawMetadata metadata;
 
-        if (!decoder.decode(*rawSink, bayerData, metadata))
+        if (!sony::Decoder::prepare(*rawSink, bayerData, info, metadata))
         {
             delete rawSink;
             throw std::runtime_error("Failed to decode RAW file");
@@ -139,46 +135,23 @@ int main(int argc, char** argv)
         std::cout << "  Decoded: " << metadata.width << "x" << metadata.height << std::endl;
         std::cout << "  Camera: " << metadata.camera_make << " " << metadata.camera_model << std::endl;
 
-        // === Process through minimal pipeline ===
+        // === BODY: Process through Sony pipeline ===
         std::cout << "\n[BODY] Processing..." << std::endl;
 
-        // Black level correction
-        mods::BLC blc;
-        mods::Params blcParams;
-        blcParams["black_level"] = metadata.black_level;
-        blcParams["white_level"] = metadata.white_level;
-        cv::UMat normalized;
-        blc.process(bayerData, normalized, blcParams);
-
-        // White balance
-        mods::WBGain wb;
-        mods::Params wbParams;
-        wbParams["wb_r"] = metadata.wb_rggb[0];
-        wbParams["wb_g"] = metadata.wb_rggb[1];
-        wbParams["wb_b"] = metadata.wb_rggb[3];
-        cv::UMat whiteBalanced;
-        wb.process(normalized, whiteBalanced, wbParams);
-
-        // Demosaic
-        mods::Demosaic demosaic;
-        mods::Params demosaicParams;
-        demosaicParams["bayer_pattern"] = metadata.bayer_pattern;
         cv::UMat linearRgb;
-        demosaic.process(whiteBalanced, linearRgb, demosaicParams);
+        if (!sony::Decoder::process(bayerData, metadata, linearRgb))
+        {
+            throw std::runtime_error("Failed to process RAW file");
+        }
 
         std::cout << "  Linear RGB: " << linearRgb.cols << "x" << linearRgb.rows << std::endl;
 
         // === TAIL: Output ===
         std::cout << "\n[TAIL] Saving PNG..." << std::endl;
 
-        // Gamma correction (sRGB OETF)
-        mods::GammaOETF gamma;
-        cv::UMat displayRgb;
-        gamma.process(linearRgb, displayRgb, mods::Params());
-
-        // Convert to 8-bit
+        // Convert to 8-bit (linearRgb is already gamma corrected from process())
         cv::UMat output8bit;
-        displayRgb.convertTo(output8bit, CV_8UC3, 255.0);
+        linearRgb.convertTo(output8bit, CV_8UC3, 255.0);
 
         // Save PNG
         if (!cv::imwrite(out.png, output8bit))
@@ -191,7 +164,7 @@ int main(int argc, char** argv)
         // === Save .labs.json sidecar ===
         std::cout << "\n[SIDECAR] Saving .labs.json..." << std::endl;
 
-        std::string labsJson = generateLabsJson("sony_arw2");
+        std::string labsJson = generateLabsJson("sony");
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {
