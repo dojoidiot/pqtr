@@ -110,7 +110,7 @@ The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
     "tint": 0.5          // 0.0 = -100, 0.5 = 0, 1.0 = +100
   },
   "exposure": {
-    "value": 0.5  // 0.0 = -5 EV, 0.5 = 0 EV, 1.0 = +5 EV
+    "value": 0.5  // 0.0 = -4 EV, 0.5 = 0 EV, 1.0 = +4 EV
   }
 }
 ```
@@ -141,9 +141,9 @@ The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
 
 ```json
 "global_color": {
-  "vibrance": 0.5,      // 0.0 = -100, 0.5 = 0, 1.0 = +100
-  "saturation": 0.5,    // 0.0 = -100, 0.5 = 0, 1.0 = +100
-  "color_density": 0.5  // 0.0 = -100, 0.5 = 0, 1.0 = +100
+  "vibrance": 0.5,      // 0.0 = -1.0, 0.5 = 0, 1.0 = +1.0
+  "saturation": 0.5,    // 0.0 = 0.0×, 0.5 = 1.0×, 1.0 = 2.0×
+  "color_density": 0.5  // 0.0 = 0.5×, 0.5 = 1.0×, 1.0 = 1.5×
 }
 ```
 
@@ -154,9 +154,9 @@ The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
 ```json
 "selective_color": {
   "red": {
-    "hue": 0.5,         // 0.0 = -180°, 0.5 = 0°, 1.0 = +180°
-    "saturation": 0.5,  // 0.0 = -100, 0.5 = 0, 1.0 = +100
-    "luminance": 0.5    // 0.0 = -100, 0.5 = 0, 1.0 = +100
+    "hue": 0.5,         // 0.0 = -30°, 0.5 = 0°, 1.0 = +30°
+    "saturation": 0.5,  // 0.0 = -1.0, 0.5 = 0, 1.0 = +1.0
+    "luminance": 0.5    // 0.0 = -1.0, 0.5 = 0, 1.0 = +1.0
   },
   "orange": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
   "yellow": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
@@ -168,7 +168,7 @@ The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
 }
 ```
 
-**Total**: 24 dials (8 colors × 3 parameters)
+**Total**: 24 dials (8 colors × 3 dials each)
 
 ### Detail
 

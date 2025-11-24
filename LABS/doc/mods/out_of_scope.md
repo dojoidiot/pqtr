@@ -107,4 +107,4 @@ These features may be reconsidered if:
 
 ---
 
-**Note**: This list is not exhaustive and will be updated as new ideas emerge during development and testing.
+**Note**: This list is not exhaustive. New ideas may be added as development and testing progress.

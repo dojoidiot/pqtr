@@ -6,11 +6,14 @@
 
 ## Sub-Modules
 
+See [subm/selective_color.md](./subm/selective_color.md) for complete specifications.
+
 The Selective Color module contains 1 sub-module:
 
-### 1. [Selective Color (Hue Mixer)](./subm/selective_color.md)
-**Purpose**: Provides independent HSL adjustments for 8 color bands (Reds, Oranges, Yellows, Greens, Cyans, Blues, Purples, Magentas).
-**Dials**: 24 (8 colors × 3 parameters)
+### 1. HSL Adjustment (×8 color bands)
+**Purpose**: Provides independent HSL adjustments for 8 color bands.
+**Bands**: Red, Orange, Yellow, Green, Cyan, Blue, Purple, Magenta
+**Dials**: 24 (8 colors × 3 dials: hue, saturation, luminance)
 
 ## Total Dials
 
@@ -18,5 +21,7 @@ The Selective Color module contains 1 sub-module:
 
 ## Notes
 
-- There is a 30° overlap between adjacent hue ranges with cosine falloff for smooth blending
-- All operations work in perceptually uniform color space
+- 45° effective range per band with cosine falloff for smooth blending
+- Overlapping hue ranges ensure no hard transitions between bands
+- Processing in HLS space for perceptual consistency
+- All neutral dials (0.5) result in no change

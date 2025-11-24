@@ -54,7 +54,11 @@ src/test/
 │   ├── gen_test_images.cpp  # Synthetic image generator
 │   ├── test_exposure.cpp    # Exposure module tests
 │   ├── test_white_balance.cpp
-│   └── test_tone_map.cpp
+│   ├── test_tone_map.cpp
+│   ├── test_global_color.cpp
+│   ├── test_selective_color.cpp
+│   ├── test_geometric.cpp
+│   └── test_detail.cpp
 └── ...
 
 tmp/var/test/
@@ -72,6 +76,10 @@ tmp/var/test/
 | `test-exposure` | Run exposure module tests |
 | `test-white-balance` | Run white balance module tests |
 | `test-tone-map` | Run tone mapping tests |
+| `test-global-color` | Run global color module tests |
+| `test-selective-color` | Run selective color module tests |
+| `test-geometric` | Run geometric module tests |
+| `test-detail` | Run detail module tests |
 | `clean` | Remove test artifacts |
 
 ---
@@ -125,13 +133,61 @@ After exposure (dial=0.75, +2 EV, ×4):
 | Green tint | 0.5 | 0.25 | Green ↑ |
 | Magenta tint | 0.5 | 0.75 | Green ↓, R/B ↑ |
 
-#### Tone Map (2+ dials)
+#### Tone Map (5 dials)
 
-| Test Case | White Point | Contrast | Expected Result |
-|-----------|-------------|----------|-----------------|
-| Neutral | 1.0 | 1.0 | Linear pass-through |
-| High contrast | 1.0 | 1.3 | Midtones darkened |
-| Compressed | 0.8 | 1.0 | Highlights boosted |
+| Test Case | Contrast | Highlights | Shadows | White Pt | Black Pt | Expected Result |
+|-----------|----------|------------|---------|----------|----------|-----------------|
+| Neutral | 0.5 | 0.5 | 0.5 | 0.5 | 0.5 | Reinhard compression only |
+| High contrast | 0.75 | 0.5 | 0.5 | 0.5 | 0.5 | Steeper S-curve |
+| Lifted shadows | 0.5 | 0.5 | 0.75 | 0.5 | 0.5 | Shadow mean ↑ |
+| Crushed shadows | 0.5 | 0.5 | 0.25 | 0.5 | 0.5 | Shadow mean ↓ |
+| Compressed highlights | 0.5 | 0.25 | 0.5 | 0.5 | 0.5 | Highlight max ↓ |
+| Expanded highlights | 0.5 | 0.75 | 0.5 | 0.5 | 0.5 | Highlight max ↑ |
+
+#### Global Color (3 dials)
+
+| Test Case | Vibrance | Saturation | Density | Expected Result |
+|-----------|----------|------------|---------|-----------------|
+| Neutral | 0.5 | 0.5 | 0.5 | Minimal change |
+| High vibrance | 0.75 | 0.5 | 0.5 | HSV saturation ↑ (less-saturated boosted more) |
+| Low vibrance | 0.25 | 0.5 | 0.5 | HSV saturation ↓ |
+| High saturation | 0.5 | 0.75 | 0.5 | HSV saturation ↑ (uniform) |
+| Low saturation | 0.5 | 0.25 | 0.5 | HSV saturation ↓ |
+| High density | 0.5 | 0.5 | 0.75 | HSV saturation ↑, contrast ↑ |
+| Low density | 0.5 | 0.5 | 0.25 | HSV saturation ↓, contrast ↓ |
+
+#### Selective Color (24 dials)
+
+| Test Case | Band | Hue | Sat | Lum | Expected Result |
+|-----------|------|-----|-----|-----|-----------------|
+| Neutral | red | 0.5 | 0.5 | 0.5 | No change |
+| Red hue +15° | red | 0.75 | 0.5 | 0.5 | Red → Orange shift |
+| Red sat boost | red | 0.5 | 0.75 | 0.5 | Red mean ↑, others ↓ |
+| Green desat | green | 0.5 | 0.25 | 0.5 | Green less saturated |
+| Blue brighten | blue | 0.5 | 0.5 | 0.75 | Blue patches brighter |
+| Orange hue -15° | orange | 0.25 | 0.5 | 0.5 | Orange → Red shift |
+
+#### Geometric (6 dials)
+
+| Test Case | Crop T/R/B/L | Zoom | Tilt | Expected Result |
+|-----------|--------------|------|------|-----------------|
+| Neutral | 0/0/0/0 | 0 | 0.5 | Size unchanged |
+| Crop 10% | 0.2/0.2/0.2/0.2 | 0 | 0.5 | Size reduced ~20% each dimension |
+| Zoom 2x | 0/0/0/0 | 0.33 | 0.5 | Center magnified 2× |
+| Rotate +15° | 0/0/0/0 | 0 | 0.67 | Image rotated CW |
+| Rotate -15° | 0/0/0/0 | 0 | 0.33 | Image rotated CCW |
+| Combo | 0.1/0.1/0.1/0.1 | 0.2 | 0.55 | Crop + zoom + slight rotation |
+
+#### Detail (4 dials)
+
+| Test Case | Amount | Radius | Luma | Chroma | Expected Result |
+|-----------|--------|--------|------|--------|-----------------|
+| Neutral | 0 | 0 | 0 | 0 | Values unchanged |
+| Sharpen | 0.6 | 0.4 | 0 | 0 | Edges enhanced |
+| Strong sharpen | 1.0 | 0.5 | 0 | 0 | Visible edge halos |
+| Denoise luma | 0 | 0 | 0.5 | 0 | Luminance smoothed |
+| Denoise chroma | 0 | 0 | 0 | 0.5 | Color noise reduced |
+| Full default | 0.6 | 0.4 | 0.3 | 0.5 | Balanced sharpen + denoise |
 
 ---
 
@@ -206,6 +262,10 @@ make -f Makefile.test test
 make -f Makefile.test test-exposure
 make -f Makefile.test test-white-balance
 make -f Makefile.test test-tone-map
+make -f Makefile.test test-global-color
+make -f Makefile.test test-selective-color
+make -f Makefile.test test-geometric
+make -f Makefile.test test-detail
 ```
 
 ### Visual Inspection
@@ -270,4 +330,8 @@ If module behavior changes, update expected values in this document and verify n
 - [Pipe Specification](./pipe.md) - Module definitions and dial ranges
 - [Color Correction](./mods/color_correction.md) - Exposure and white balance specs
 - [Tone Mapping](./mods/tone_mapping.md) - Tone map specifications
+- [Global Color](./mods/global_color.md) - Vibrance, saturation, color density specs
+- [Selective Color](./mods/selective_color.md) - HSL adjustments for 8 color bands
+- [Geometric](./mods/geometric.md) - Crop, zoom, rotation specs
+- [Detail + Output](./mods/detail_output.md) - Sharpen, denoise specs
 - [BabelColor ColorChecker](https://babelcolor.com/colorchecker-2.htm) - Reference sRGB values

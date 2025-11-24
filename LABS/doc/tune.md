@@ -18,7 +18,7 @@ Therefore, it is the **user's responsibility** to ensure the source and target i
 
 ## Core Algorithm: A Two-Stage Approach
 
-The optimization process is designed to be both fast and effective, focusing on the most impactful parameters first.
+The optimization process is designed to be both fast and effective, focusing on the most impactful dials first.
 
 ### Stage 1: Sensitivity Analysis
 
@@ -49,13 +49,13 @@ Using the sensitivity analysis, the tool intelligently searches for the best dia
 
 ```bash
 # Full optimization, saving the result to a labs-compatible JSON file
-./tune reference.arw target.png --output sliders.json
+./tune reference.arw target.png --output dials.json
 
 # Run with a real-time visualization window (requires a display)
-./tune reference.arw target.png --output sliders.json --visualize
+./tune reference.arw target.png --output dials.json --visualize
 
 # Adjust the sensitivity threshold to only optimize more impactful dials
-./tune reference.arw target.png --threshold 0.10 --output sliders.json
+./tune reference.arw target.png --threshold 0.10 --output dials.json
 ```
 
 ---
@@ -85,7 +85,7 @@ namespace pqtr {
 struct OptimizationProgress {
     enum Stage {
         SENSITIVITY_ANALYSIS,
-        SLIDER_OPTIMIZATION,
+        DIAL_OPTIMIZATION,
         COMPLETE
     };
 

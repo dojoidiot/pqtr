@@ -85,7 +85,7 @@ Passive voice is acceptable for:
 1. [back] link to parent
 2. Purpose
 3. Architecture/concept
-4. Details (modules, parameters, etc.)
+4. Details (modules, dials, etc.)
 5. Examples (configuration, usage)
 6. API interface (if applicable)
 

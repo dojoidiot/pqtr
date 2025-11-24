@@ -1,16 +1,13 @@
 // test_tone_map.cpp
-// Unit test for tone_map module
+// Unit test for tone_map module (5 dials)
 //
-// Usage: test_tone_map <input.png> <output.png> [white_point] [contrast]
+// Usage: test_tone_map <input.png> <output.png> [contrast] [highlights] [shadows] [white_point] [black_point]
 //
-// Tests the tone mapping module by:
-// 1. Loading a scene-linear sRGB image (or converting from gamma)
-// 2. Applying tone mapping with specified parameters
-// 3. Applying gamma and saving result
-// 4. Printing before/after statistics
+// All dials: 0.0-1.0, default 0.5 (neutral)
 
 #include <iostream>
 #include <string>
+#include <cmath>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
@@ -28,8 +25,13 @@ void to_linear(const cv::UMat& input, cv::UMat& output)
 // Simple gamma (linear → sRGB approximation)
 void to_gamma(const cv::UMat& input, cv::UMat& output)
 {
+    // Clamp before gamma
+    cv::UMat clamped;
+    cv::max(input, 0.0f, clamped);
+    cv::min(clamped, 1.0f, clamped);
+
     cv::UMat gamma_corrected;
-    cv::pow(input, 1.0f/2.2f, gamma_corrected);
+    cv::pow(clamped, 1.0f/2.2f, gamma_corrected);
     gamma_corrected.convertTo(output, CV_8UC3, 255.0);
 }
 
@@ -53,23 +55,42 @@ int main(int argc, char** argv)
 {
     if (argc < 3)
     {
-        std::cerr << "Usage: " << argv[0] << " <input.png> <output.png> [white_point] [contrast]" << std::endl;
-        std::cerr << "  white_point: Scene value mapping to white (default: 1.0)" << std::endl;
-        std::cerr << "  contrast: Midtone contrast (default: 1.0)" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <input.png> <output.png> [contrast] [highlights] [shadows] [white_point] [black_point]" << std::endl;
+        std::cerr << "  All dials: 0.0-1.0, default 0.5 (neutral)" << std::endl;
+        std::cerr << "  contrast:    0.5 = 1.0 (linear)" << std::endl;
+        std::cerr << "  highlights:  0.5 = 0 (no adjustment)" << std::endl;
+        std::cerr << "  shadows:     0.5 = 0 (no adjustment)" << std::endl;
+        std::cerr << "  white_point: 0.5 = 4.0 (scene white)" << std::endl;
+        std::cerr << "  black_point: 0.5 = 0.05 (scene black)" << std::endl;
         return 1;
     }
 
     std::string inputPath = argv[1];
     std::string outputPath = argv[2];
-    float white_point = (argc > 3) ? std::stof(argv[3]) : 1.0f;
-    float contrast = (argc > 4) ? std::stof(argv[4]) : 1.0f;
+    float contrast = (argc > 3) ? std::stof(argv[3]) : 0.5f;
+    float highlights = (argc > 4) ? std::stof(argv[4]) : 0.5f;
+    float shadows = (argc > 5) ? std::stof(argv[5]) : 0.5f;
+    float white_point = (argc > 6) ? std::stof(argv[6]) : 0.5f;
+    float black_point = (argc > 7) ? std::stof(argv[7]) : 0.5f;
+
+    // Convert dials to display values
+    float contrast_val = 0.5f * std::exp(contrast * 1.386f);
+    float highlights_val = (highlights - 0.5f) * 2.0f;
+    float shadows_val = (shadows - 0.5f) * 2.0f;
+    float white_point_val = std::exp(white_point * 2.773f);
+    float black_point_val = black_point * 0.1f;
 
     try
     {
-        std::cout << "Tone Map Test" << std::endl;
+        std::cout << "Tone Map Test (5 dials)" << std::endl;
         std::cout << "  Input: " << inputPath << std::endl;
         std::cout << "  Output: " << outputPath << std::endl;
-        std::cout << "  Parameters: white_point=" << white_point << " contrast=" << contrast << std::endl;
+        std::cout << "  Dials:" << std::endl;
+        std::cout << "    contrast:    " << contrast << " → " << contrast_val << std::endl;
+        std::cout << "    highlights:  " << highlights << " → " << highlights_val << std::endl;
+        std::cout << "    shadows:     " << shadows << " → " << shadows_val << std::endl;
+        std::cout << "    white_point: " << white_point << " → " << white_point_val << std::endl;
+        std::cout << "    black_point: " << black_point << " → " << black_point_val << std::endl;
 
         // Load input image
         cv::Mat input_cpu = cv::imread(inputPath);
@@ -91,7 +112,7 @@ int main(int argc, char** argv)
 
         // Apply tone mapping
         cv::UMat tone_mapped;
-        if (!pipe::mods::tone_map(linear, tone_mapped, white_point, contrast))
+        if (!pipe::mods::tone_map(linear, tone_mapped, contrast, highlights, shadows, white_point, black_point))
         {
             throw std::runtime_error("Tone mapping failed");
         }

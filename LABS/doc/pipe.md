@@ -117,7 +117,7 @@ Each module contains sub-modules that work together. See [module documentation](
 **Purpose**: Targeted adjustments to specific color ranges
 **Sub-Modules**: HSL Adjustment × 8 colors (3 dials each)
 **Total**: 24 dials
-**Color Space**: LCH (perceptually uniform)
+**Color Space**: HLS (via gamma-encoded conversion)
 
 ### 6. [Detail + Output](./mods/detail_output.md)
 **Purpose**: Finalization with sharpening, noise reduction, output transform
