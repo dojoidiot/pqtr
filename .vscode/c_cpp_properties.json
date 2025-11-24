@@ -1,0 +1,17 @@
+{
+    "configurations": [
+        {
+            "name": "Linux",
+            "includePath": [
+                "${workspaceFolder}/**/inc/**",
+                "${workspaceFolder}/**/include/**"
+            ],
+            "defines": [],
+            "compilerPath": "/home/z/base/path/android-ndk-r27d/toolchains/llvm/prebuilt/linux-x86_64/bin/clang",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-clang-x64"
+        }
+    ],
+    "version": 4
+}

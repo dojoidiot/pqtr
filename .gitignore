@@ -1,0 +1,13 @@
+# Custom
+target
+/make
+__pycache__
+.env-*
+*.log
+*.p
+.gradle
+tmp
+*.pid
+.venv
+build
+bind/lib/opencv/
