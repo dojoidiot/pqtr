@@ -1,219 +1,220 @@
-# PQTR:GeoS: Geodesic Spectrum Analysis
+# GeoS: Geodesic Spectrum Analysis
 
-Automated Aesthetic Replication via Spectral Hypersphere Optimization
+[back](../README.md)
 
----
+## Purpose
 
-## What This Does (The Simple Version)
+This document describes the theoretical foundation for **color/tone** style matching. GeoS provides content-invariant aesthetic comparison by treating image style as a geometric point on a high-dimensional hypersphere.
 
-**Show the system any photo with a "vibe" you like. It figures out how to make your photos look like that.**
+GeoS captures the "vibe" or "mood" of an image - warm/cool, saturated/muted, high-key/low-key, contrast, color harmony. It does **not** capture sharpness or texture (see [diff.md](./diff.md) for frequency-based sharpness metrics).
 
-- You have a RAW photo from your camera
-- You have a reference image with the mood you want (rainy day, golden hour, film noir, whatever)
-- The system adjusts 45 color/tone sliders automatically to match that vibe
-- Works even when the photos are completely different scenes
-
-**Example:** You love a daytime pit lane shot you took in Austin. Feed it that shot plus your shot taken today at noon in Miami. Out comes settings that give your today shot that same feel.
-
-**Why it works:** Every "look" has a statistical fingerprint—how bright, how saturated, which colors dominate, how contrast is distributed. Two photos can look completely different yet share the same fingerprint. The system matches fingerprints, not pixels.
-
-**What you get:** A `.vibe` file with all 45 settings. Apply it to any future photo instantly.
+The theory in this document underpins the **spectral loss** in [diff.md](./diff.md) and the **SPSA optimizer** in [tune.md](./tune.md) (Stage 1: Color/Tone).
 
 ---
 
-## 1. Executive Summary
+## Core Insight: Style as Geometry
 
-### The Objective
+Two images with the same "vibe" have similar statistical fingerprints even if their pixels differ entirely. GeoS encodes this fingerprint as a point on a high-dimensional unit sphere. Style similarity becomes angular proximity.
 
-Automate color grading and image stylization. The system takes a source RAW image and adjusts the 45 parameters of the production pipeline (pipe) to match the aesthetic of a target reference image.
-
-### The Challenge
-
-| Method | Problem |
-|--------|---------|
-| Pixel MSE | Fails when images differ structurally (crop, rotation, different scene) |
-| Histogram Matching | Loses spatial relationships, can produce flat results |
-| Neural Style Transfer | Slow, introduces artifacts, requires GPU |
-| Perceptual Loss (VGG) | Heavy dependency, black-box features |
-
-### The Solution: Spectral Hypersphere Optimization
-
-Treat an image's style as a normalized spectral signature rather than a grid of pixels. By projecting image statistics onto a unit hypersphere, we measure angular distance (geodesic) rather than Euclidean distance. This captures the distribution of light and color while remaining invariant to:
-
-- Absolute brightness
-- Spatial arrangement
-- Image dimensions
-- Content differences
-
-### The Value
-
-| Property | Benefit |
-|----------|---------|
-| Speed | Leverages C++ pipe (>30fps). Full optimization in <1 minute (single pass). |
-| Portability | Outputs standard .vibe JSON, compatible with existing tools. |
-| Robustness | Content-invariant. Works across different scenes. |
-| Safety | Uses SVD on statistical features, avoiding privacy/copyright pixel leaks. |
+**Key Properties:**
+- Content-invariant (works across different scenes)
+- Geometric-invariant (no alignment required)
+- Dimension-invariant (works regardless of image size)
+- Brightness-invariant (normalized representation)
 
 ---
 
-## 2. Theoretical Foundation
+## Mathematical Foundation
 
-### 2.1 Core Insight: Style as Geometry
+### Step 1: Color Space Transform (Safe LCH)
 
-Two images with the same "vibe" have similar statistical fingerprints even if their pixels differ entirely. We encode this fingerprint as a point on a high-dimensional unit sphere. Style similarity becomes angular proximity.
+Convert the image to LCH (Lightness, Chroma, Hue).
 
-### 2.2 The Mathematics (Refined)
-
-#### Step 1: Color Space Transform (The Safe LCH)
-
-Convert to LCH (Lightness, Chroma, Hue).
-
-**CRITICAL:** To prevent the "Achromatic Singularity" (where Hue swings wildly in gray areas), we apply Chroma-Weighting to the Hue channel.
+**The Achromatic Singularity Problem:** In achromatic regions (grays), Hue becomes undefined and can swing wildly, introducing noise into the optimization. GeoS applies Chroma-Weighting to the Hue channel:
 
 $$H_{safe} = H \cdot \tanh(k \cdot C)$$
 
-This ensures that as Chroma ($C$) $\to 0$, the Hue contribution $\to 0$, preventing noise from driving the optimization.
+As Chroma ($C$) approaches 0, the Hue contribution approaches 0, preventing noise from driving the optimization.
 
-#### Step 2: Spectral Decomposition (SVD)
+### Step 2: Spectral Decomposition (SVD)
 
-Reshape the image to matrix $A \in \mathbb{R}^{N \times 3}$.
+Reshape the image to matrix $A \in \mathbb{R}^{N \times 3}$ where N is the pixel count.
 
 $$A = U \Sigma V^T$$
 
 | Component | Interpretation |
 |-----------|----------------|
-| $\Sigma$ (Singular Values) | Energy spectrum (Contrast magnitude) |
+| $\Sigma$ (Singular Values) | Energy spectrum (contrast magnitude) |
 | $U$ (Left Singular Vectors) | Spatial-chromatic correlations |
 
-#### Step 3: Feature Extraction
+### Step 3: Feature Extraction
 
-Build the style vector $\vec{v}$ from descriptors. Note the addition of Hue-Chroma Covariance to capture "Color Harmony."
+Build the style vector $\vec{v}$ from statistical descriptors:
 
 ```
 v = [
-    σ₁, σ₂, σ₃,                    # Singular values (Energy)
-    μ_L, μ_C,                      # Mean Lightness/Chroma
-    std_L, std_C,                  # Contrast/Saturation spread
-    skew_L,                        # High-key vs Low-key distribution
-    cov(L, C),                     # Does brightness correlate with saturation?
-    cov(H_safe, C)                 # Do specific hues carry more saturation?
+    σ₁, σ₂, σ₃,           # Singular values (energy distribution)
+    μ_L, μ_C,             # Mean lightness/chroma
+    std_L, std_C,         # Contrast/saturation spread
+    skew_L,               # High-key vs low-key distribution
+    cov(L, C),            # Brightness-saturation correlation
+    cov(H_safe, C)        # Hue-saturation correlation (color harmony)
 ]
 ```
 
-#### Step 4: Hypersphere Projection
+**Dimension:** 10 features (expandable)
+
+### Step 4: Hypersphere Projection
 
 Normalize to unit length:
 
 $$|\psi\rangle = \frac{\vec{v}}{||\vec{v}||_2}$$
 
-#### Step 5: Geodesic Distance (The Metric)
+This projection ensures that:
+- Absolute scale differences are removed
+- Only the relative distribution of features matters
+- Two images with proportionally similar features map to nearby points
 
-The loss function measures angular distance:
+### Step 5: Geodesic Distance (The Loss Metric)
 
-$$\mathcal{L} = 1 - |\langle \psi_{raw} | \psi_{ref} \rangle|^2$$
+The loss function measures angular distance on the hypersphere:
 
----
+$$\mathcal{L} = 1 - |\langle \psi_{candidate} | \psi_{target} \rangle|^2$$
 
-## 3. System Architecture
-
-### 3.1 Component Overview
-
-```mermaid
-graph LR
-    A[Tune Tool] -- Dials (Theta) --> B[Pipe Executable]
-    B -- Candidate Image --> C[Diff Tool]
-    R[Reference Image] --> C
-    C -- Loss (Q-Spectral Divergence) --> A
-    A -- Update Dials (SPSA) --> A
-```
-
-### 3.2 The Engine: pipe
-
-- **Role:** Deterministic image generator.
-- **Throughput:** 30fps+ (Headless).
-- **Interface:** Accepts 45 normalized floats $[0, 1]$.
-
-### 3.3 The Observer: diff
-
-- **Role:** Compute spectral loss.
-- **Optimization:** Uses OpenCV cv::SVD (CPU optimized) on 512x512 thumbnail proxies. Execution time < 5ms.
-
-### 3.4 The Driver: tune
-
-- **Role:** Optimization Loop.
-- **Algorithm:** SPSA (Simultaneous Perturbation Stochastic Approximation).
-- **Efficiency:** Estimates gradient of 45 parameters with 2 measurements.
+**Properties:**
+- $\mathcal{L} = 0$: Identical style (parallel vectors)
+- $\mathcal{L} = 1$: Orthogonal styles (maximum difference)
+- Continuous and differentiable (suitable for optimization)
 
 ---
 
-## 4. SPSA Algorithm Details
+## Why This Approach Works
 
-### 4.1 The Update Rule
+### Comparison with Alternatives
+
+| Method | Problem | GeoS Solution |
+|--------|---------|---------------|
+| Pixel MSE | Fails when images differ structurally | Statistical fingerprint ignores spatial arrangement |
+| Histogram Matching | Loses spatial relationships | SVD captures spatial-chromatic correlations |
+| Neural Style Transfer | Slow, GPU-heavy, artifacts | SVD on 512×512 proxy, <5ms |
+| Perceptual Loss (VGG) | Black-box, heavy dependency | Interpretable statistical features |
+| SSIM + Color Diff | Requires geometric alignment | Content-invariant by design |
+
+### What GeoS Captures (Color/Tone)
+
+1. **Energy Distribution:** How contrast is distributed across the image (singular values)
+2. **Tonal Character:** High-key vs low-key images (lightness skew)
+3. **Color Intensity:** Overall saturation level (mean chroma)
+4. **Color Harmony:** Which hues carry the most saturation (hue-chroma covariance)
+5. **Mood Correlation:** Whether bright areas are also saturated (lightness-chroma covariance)
+
+### What GeoS Does NOT Capture
+
+1. **Sharpness:** Edge definition, fine detail (use frequency loss instead)
+2. **Texture:** Surface patterns, grain (spatial frequency domain)
+3. **Geometry:** Framing, composition (user-controlled)
+
+See [tune.md](./tune.md) for the complete three-role tuning model.
+
+---
+
+## SPSA Optimization
+
+### Why SPSA?
+
+Traditional gradient descent requires computing partial derivatives for each of the 45 dials. This means 45+ evaluations per iteration.
+
+**SPSA (Simultaneous Perturbation Stochastic Approximation)** estimates the gradient of all 45 parameters with only **2 evaluations** per iteration.
+
+### The Algorithm
 
 At iteration $k$:
 
-1. Generate perturbation vector $\Delta_k \in \{-1, +1\}^{45}$ (Bernoulli).
-2. Evaluate Loss at two points:
-   - $L^+ = \text{Loss}(\theta_k + c_k \Delta_k)$
-   - $L^- = \text{Loss}(\theta_k - c_k \Delta_k)$
-3. Estimate Gradient: $\hat{g}_k = \frac{L^+ - L^-}{2 c_k \Delta_k}$
-4. Update Parameters: $\theta_{k+1} = \theta_k - a_k \hat{g}_k$
+1. **Generate perturbation:** $\Delta_k \in \{-1, +1\}^{45}$ (Bernoulli random)
 
-### 4.2 Hyperparameters (Tuned)
+2. **Evaluate loss at two points:**
+   - $L^+ = \mathcal{L}(\theta_k + c_k \Delta_k)$
+   - $L^- = \mathcal{L}(\theta_k - c_k \Delta_k)$
+
+3. **Estimate gradient:**
+   $$\hat{g}_k = \frac{L^+ - L^-}{2 c_k} \cdot \frac{1}{\Delta_k}$$
+
+4. **Update parameters:**
+   $$\theta_{k+1} = \theta_k - a_k \hat{g}_k$$
+
+### Hyperparameters
 
 Based on high-dimensional optimization research:
 
-- $a_0 = 0.16$ (Learning Rate)
-- $c_0 = 0.05$ (Perturbation Size)
-- $\alpha = 0.602$ (Decay rate for $a$)
-- $\gamma = 0.101$ (Decay rate for $c$)
-- $A = 100$ (Stability constant)
+| Parameter | Value | Purpose |
+|-----------|-------|---------|
+| $a_0$ | 0.16 | Initial learning rate |
+| $c_0$ | 0.05 | Initial perturbation size |
+| $\alpha$ | 0.602 | Learning rate decay |
+| $\gamma$ | 0.101 | Perturbation decay |
+| $A$ | 100 | Stability constant |
+
+**Decay schedules:**
+- $a_k = a_0 / (k + 1 + A)^\alpha$
+- $c_k = c_0 / (k + 1)^\gamma$
+
+### Multi-Start Strategy
+
+To avoid local minima, run SPSA from multiple random initializations (typically 5) and keep the best result.
 
 ---
 
-## 5. Implementation Roadmap
+## Implementation Considerations
 
-### Phase 1: The "Body"
+### Proxy Resolution
 
-- **Metric Implementation:** Write diff with OpenCV. Implement extract_style() with LCH conversion and SVD.
-- **Verify Singularity:** Run diff on a pure gray image vs a noisy gray image. Ensure Loss $\approx 0$.
-- **Loop Construction:** Write a simple C++ loop in tune that calls pipe -> diff -> updates parameters.
+Feature extraction uses 512×512 thumbnail proxies:
+- Full-resolution SVD is expensive
+- Statistical properties are preserved at lower resolution
+- Execution time <5ms per image
 
-### Phase 2: The "Mind"
+### Bounds Handling
 
-- **SPSA Logic:** Implement the Bernoulli perturbation and gradient estimator.
-- **Bounds Handling:** Ensure parameters clip to $[0, 1]$ (or specific ranges for Temp/Tint).
-- **Multi-Start:** Wrap the SPSA loop to run 5 times from random initializations and pick the best result.
+All dial values are constrained to $[0, 1]$:
+- After each update, clip values: $\theta = \max(0, \min(1, \theta))$
+- Gradient estimation remains valid at boundaries
 
-### Phase 3: The "Test"
+### Convergence Criteria
 
-- **The "Golden Hour" Test:** Match a neutral daylight raw to a sunset reference.
-- **The "Crop" Test:** Match a full raw to a cropped version of the reference. (Validates geometric invariance).
+Stop optimization when:
+- Loss falls below threshold (e.g., 0.01)
+- Maximum iterations reached (e.g., 500)
+- Loss improvement stalls (<0.001 over 50 iterations)
 
 ---
 
-## 6. Output Specification: The .vibe File
+## Theoretical Guarantees
 
-```json
-{
-  "meta": {
-    "algorithm": "geos-spsa-v1",
-    "timestamp": "2024-05-21T10:00:00Z",
-    "fidelity_score": 0.985
-  },
-  "dials": {
-    "exposure": 0.65,
-    "contrast": 0.72,
-    "temp": 0.55,
-    "tint": 0.48,
-    "saturation": 0.72,
-    "vibrance": 0.55,
-    "shadows": 0.35,
-    "highlights": 0.70,
-    "cdl_slope": [1.0, 0.98, 1.02],
-    "cdl_offset": [0.0, 0.01, -0.01],
-    "sharpening": 0.4,
-    "clarity": 0.5
-  }
-}
-```
+### SPSA Convergence
+
+Under standard assumptions (smooth loss function, bounded gradients), SPSA converges to a local minimum with probability 1. The convergence rate is:
+
+$$\mathbb{E}[||\theta_k - \theta^*||^2] = O(k^{-1/3})$$
+
+### Geodesic Metric Properties
+
+The geodesic loss function satisfies:
+- **Non-negativity:** $\mathcal{L} \geq 0$
+- **Identity:** $\mathcal{L} = 0 \iff$ identical style vectors
+- **Symmetry:** $\mathcal{L}(a, b) = \mathcal{L}(b, a)$
+- **Smoothness:** Continuous first and second derivatives
+
+---
+
+## References
+
+- Spall, J.C. (1992). "Multivariate Stochastic Approximation Using a Simultaneous Perturbation Gradient Approximation." IEEE Transactions on Automatic Control.
+- Sra, S. (2012). "A Short Note on Parameter Approximation for von Mises-Fisher Distributions." Computational Statistics.
+
+---
+
+## See Also
+
+- [diff.md](./diff.md) - Spectral mode implementation
+- [tune.md](./tune.md) - SPSA algorithm implementation
+- [data.md](./data.md) - .vibe file format specification

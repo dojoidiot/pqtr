@@ -61,6 +61,12 @@ Passive voice is acceptable for:
 - **tune** (the optimization tool/process)
 - **diff** (the comparison tool/metric)
 - **HEAD → BODY → TAIL** (pipeline stages)
+- **spectral loss** (diff: geodesic distance for color/tone)
+- **frequency loss** (diff: Laplacian variance for sharpness)
+- **SPSA** (tune Stage 1: color/tone optimizer, 35 dials)
+- **Edge optimizer** (tune Stage 2: sharpness optimizer, 4 dials)
+- **vibe** (style preset file with 39 creative dials)
+- **three roles** (color/tone, sharpness, geometry)
 
 #### ❌ AVOID - Inconsistent Terms
 - ❌ "adjustment step" instead of "edit step"
@@ -84,17 +90,28 @@ Passive voice is acceptable for:
 **Specification docs** (pipe.md, diff.md, tune.md, test.md):
 1. [back] link to parent
 2. Purpose
-3. Architecture/concept
+3. Architecture/concept (for diff/tune: document both modes/algorithms)
 4. Details (modules, dials, etc.)
 5. Examples (configuration, usage)
 6. API interface (if applicable)
+7. Mode/algorithm selection guidelines (diff, tune)
+
+**Theory docs** (geos.md):
+1. [back] link to parent
+2. Purpose (what theory this explains)
+3. Mathematical foundation
+4. Comparison with alternatives
+5. Implementation considerations
+6. References to implementation docs
 
 **Test documentation** (test.md):
 1. [back] link to parent
 2. Test philosophy (synthetic images, mathematical verification)
 3. Test structure (directory layout, Makefile targets)
 4. Module test coverage (test cases per module)
-5. Tool test sections (labs, diff, tune - filled incrementally)
+5. Tool test sections:
+   - Diff: spectral loss tests, frequency loss tests, feature extraction tests
+   - Tune: SPSA algorithm tests (color/tone), Edge optimizer tests (sharpness), style transfer tests
 6. Running tests (commands, visual inspection)
 
 **Module docs** (geometric_adjustments.md, etc.):

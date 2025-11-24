@@ -212,38 +212,99 @@ After exposure (dial=0.75, +2 EV, ×4):
 
 ## Diff Testing
 
-*Section to be filled as diff tool is implemented.*
+### Spectral Loss Tests (Color/Tone)
 
-### Planned Tests
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Identical images | Same image twice | Spectral loss = 0.0 |
+| Same style, different content | Two sunset photos | Low spectral loss (<0.1) |
+| Different style, same content | Same photo, different grade | High spectral loss (>0.3) |
+| Achromatic singularity | Pure gray image | No NaN, stable features |
+| Scale invariance | 1024px vs 512px same image | Spectral loss ≈ 0.0 |
+| Content invariance | Portrait vs landscape, same vibe | Low spectral loss |
 
-- [ ] SSIM calculation accuracy
-- [ ] Color difference metrics
-- [ ] Luminance comparison
-- [ ] Visual diff output
+### Frequency Loss Tests (Sharpness)
 
-### Reference Comparisons
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Identical images | Same image twice | Frequency loss = 0.0 |
+| Sharp vs blurred | Same image, one Gaussian blurred | Frequency loss > 0.5 |
+| Same sharpness, different content | Two sharp photos | Low frequency loss |
+| Noise sensitivity | Clean vs noisy | Noisy has higher Laplacian var |
 
-- Camera JPEG vs pipeline output
-- Known test images with expected metrics
+### Feature Extraction Tests
+
+| Test Case | Input | Verification |
+|-----------|-------|--------------|
+| SVD correctness | Known matrix | Singular values match analytical |
+| LCH conversion | sRGB patches | L, C, H values match reference |
+| Chroma weighting | Gray gradient | H_safe ≈ 0 throughout |
+| Hypersphere projection | Random vector | ||ψ|| = 1.0 |
+| Covariance calculation | Synthetic gradient | cov(L,C) matches expected |
+| Laplacian variance | Known edge image | Variance matches expected |
+
+### Visual Diff Tests
+
+- [ ] Visual diff highlights changed regions
+- [ ] Scale factor amplifies differences correctly
+- [ ] Output image has correct dimensions
 
 ---
 
 ## Tune Testing
 
-*Section to be filled as tune tool is implemented.*
+### Stage 1: SPSA Tests (Color/Tone - 35 dials)
 
-### Planned Tests
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Gradient estimation | Known loss surface | Gradient direction correct |
+| Bounds handling | Parameters near 0 or 1 | Values stay in [0, 1] |
+| Multi-start | 5 random starts | Best result selected |
+| Convergence | Style transfer task | Spectral loss < 0.05 within 500 iterations |
+| Hyperparameter decay | 100 iterations | a_k and c_k decrease correctly |
 
-- [ ] Sensitivity analysis
-- [ ] Convergence behavior
-- [ ] Optimization accuracy
-- [ ] Performance benchmarks
+### Stage 2: Edge Tests (Sharpness - 4 dials)
 
-### Optimization Targets
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Golden section convergence | Single dial optimization | Finds minimum in <20 evals |
+| Sharp reference matching | Blurred source + sharp ref | Sharpen dials increase |
+| Soft reference matching | Sharp source + soft ref | Sharpen dials decrease |
+| Denoise matching | Noisy vs clean reference | Denoise dials adjust |
 
-- Match camera JPEG from RAW
-- Minimize perceptual difference
-- Dial value stability
+### Style Transfer Tests (Full Pipeline)
+
+| Test Case | Input | Expected Result |
+|-----------|-------|-----------------|
+| Golden hour transfer | Neutral RAW + sunset reference | Warm tones, appropriate sharpness |
+| High contrast transfer | Flat RAW + punchy reference | Increased contrast dial |
+| Desaturated transfer | Vibrant RAW + muted reference | Lower saturation/vibrance |
+| Content invariance | Different scenes, same style | Similar dial values |
+| Output format | Full optimization | Valid .vibe format |
+
+### Three Roles Verification
+
+| Role | Dials | Handled By | Test |
+|------|-------|------------|------|
+| Color/Tone | 35 | SPSA | Spectral loss decreases |
+| Sharpness | 4 | Edge | Frequency loss decreases |
+| Geometry | 6 | User | Not in .vibe output |
+
+### Performance Tests
+
+| Test | Target |
+|------|--------|
+| SPSA stage (35 dials) | < 60 seconds |
+| Edge stage (4 dials) | < 5 seconds |
+| Full optimization | < 65 seconds |
+| Single pipe evaluation | < 33ms (30fps) |
+
+### Validation Tests
+
+- [ ] Vibe output contains 39 dials (35 + 4)
+- [ ] Vibe output does NOT contain geometric dials
+- [ ] Vibe output loads correctly in pipe
+- [ ] Progress callback fires at expected intervals
 
 ---
 

@@ -24,12 +24,13 @@ labs/
     │   ├── global_color.md
     │   ├── selective_color.md
     │   └── tone_mapping.md
-    ├── data.md   # Data file format standards
-    ├── diff.md   # Diff tool specification
+    ├── data.md   # Data file format standards (.json, .vibe)
+    ├── diff.md   # Diff tool specification (perceptual + spectral modes)
+    ├── geos.md   # GeoS theoretical foundation (spectral analysis)
     ├── labs.md   # Labs system integration and overview
     ├── pipe.md   # Pipe tool specification
     ├── test.md   # Test strategy and verification
-    └── tune.md   # Tune tool specification
+    └── tune.md   # Tune tool specification (greedy + SPSA algorithms)
 ```
 
 ## Pipeline Philosophy
@@ -47,16 +48,16 @@ Parts are modular libraries that provide specific functionalities. They expose a
     *   **HEAD**: Decodes the RAW file into a scene-referred linear space. The specific decoder is selectable via the `labs` configuration.
     *   **BODY**: A sequence of configurable **edit steps**. Each step can enable/disable specific modules from the 6 available modules (geometric adjustments, color correction, tone mapping, global color, selective color, detail + output transform). Geometry is always its own separate step, positioned before tune steps or after creative editing steps depending on the workflow.
     *   **TAIL**: Renders the final image to a **PNG** file (lossless format to preserve quality during development and tuning).
-*   [**`diff`**](./doc/diff.md): A library to mathematically compare a RAW-derived image with a reference image (e.g., a camera-generated JPEG). It reports differences and can inform the `tune` part.
-*   [**`tune`**](./doc/tune.md): A library that uses `diff` to optimize pipeline settings. It adjusts color/tone parameters in the `pipe`'s edit steps to minimize the difference between the pipeline's output and a reference image. When matching social media images, a separate geometry step (user-adjusted) is placed before the tune step to account for cropping or transformations.
+*   [**`diff`**](./doc/diff.md): A library to compute loss metrics between images. Provides **spectral loss** (color/tone, geodesic distance) and **frequency loss** (sharpness, Laplacian variance). Both are content-invariant.
+*   [**`tune`**](./doc/tune.md): A library that uses `diff` to optimize pipeline settings. Handles three roles: **color/tone** (35 dials, SPSA + spectral), **sharpness** (4 dials, greedy + frequency), and **geometry** (6 dials, user-controlled). Outputs `.vibe` presets.
 
 ## Headless Tools (Programs)
 
 These are command-line executables located in `bin/` that use the parts to perform tasks.
 
 *   [**`pipe`**](./doc/pipe.md): A headless tool that processes a RAW file into a final image using a specified `labs` project file.
-*   [**`tune`**](./doc/tune.md): A headless tool that automatically adjusts `pipe` settings to match a reference image. It finds the optimal parameters and can save them as a new edit step in the `labs` file.
-*   [**`diff`**](./doc/diff.md): A headless tool that provides a detailed comparison between a RAW file and a reference image.
+*   [**`tune`**](./doc/tune.md): A headless tool that automatically optimizes 39 creative dials to match a reference style. Two-stage process: SPSA for color/tone (35 dials), greedy for sharpness (4 dials). User handles geometry (6 dials).
+*   [**`diff`**](./doc/diff.md): A headless tool that computes spectral loss (color/tone) and frequency loss (sharpness) between images.
 
 ## Development Tools
 
@@ -81,9 +82,9 @@ The `PQTR:LABS` system achieves its goals when:
 
 1.  **RAW to "LABS GOLD" PNG Image Handoff Works Seamlessly**: Linear RGB format validated, no data loss or corruption, and metadata preserved.
 2.  **Pipe Produces Perceptually Accurate Output**: All 45 dials (across 6 modules including geometric) functional, default dials result in a neutral look, and output matches professional tools (Lightroom, darktable).
-3.  **Diff Provides Accurate Perceptual Loss**: SSIM, color, and luminance metrics validated, visual diff is interpretable, and standalone program works.
-4.  **Tune Finds Optimal Dials**: Converges in under 10 seconds, produces visually similar output, and provides real-time progress feedback.
-5.  **Performance Targets Met**: `pipe`: 30+ fps @ 1080p, `tune`: under 10 seconds for 15 dials, Full pipeline: under 1 second per image.
+3.  **Diff Provides Accurate Loss Metrics**: Spectral loss (geodesic) validated for color/tone; frequency loss (Laplacian) validated for sharpness. Both content-invariant.
+4.  **Tune Optimizes All Three Roles**: SPSA converges in ~60 seconds for 35 color/tone dials; edge optimizer converges in ~2 seconds for 4 detail dials; user handles 6 geometric dials.
+5.  **Performance Targets Met**: `pipe`: 30+ fps @ 1080p, `tune`: ~65 seconds total (SPSA + edge), Full pipeline: under 1 second per image.
 
 ## Documentation Quality Standards
 

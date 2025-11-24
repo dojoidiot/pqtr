@@ -23,9 +23,10 @@ The `LABS` system consists of several independent programs (executables and libr
      │                                  │
      ↓                                  ↓
 ┌─────────┐                        ┌─────────┐
-│  diff   │  Perceptual diff       │  tune   │  Dial optimizer
-└─────────┘  Computation           └─────────┘  Finds optimal dials
-                                                Uses diff for feedback
+│  diff   │  Spectral loss         │  tune   │  Two-stage optimizer
+└─────────┘  (color/tone) +        └─────────┘  SPSA (35 color dials)
+             Frequency loss                     + Edge (4 detail dials)
+             (sharpness)                        User: 6 geometric dials
 ```
 
 ## Data Flow and Integration Patterns
@@ -49,26 +50,43 @@ cv::UMat display_rgb = pipeline.process(linear_rgb, dials);
 cv::imwrite("output.png", display_rgb);
 ```
 
-### Pattern 2: Style Transfer (`raws` → `tune` → `pipe`)
+### Pattern 2: Style Transfer (`tune`)
 
-This pattern is used to automatically discover optimal dial settings for `pipe` by comparing a reference image to a target-styled image.
+Transfer the "vibe" from any reference image to your photos.
 
 ```cpp
-// 1. Load reference and target (raws for reference, imread for target)
-cv::UMat reference_linear = raws.process("reference.ARW");
-cv::UMat target_display = cv::imread("target_styled.png", cv::IMREAD_COLOR);
+// 1. Load source RAW and any reference image
+cv::UMat source_linear = raws.process("my_photo.ARW");
+cv::UMat reference = cv::imread("inspiring_photo.png", cv::IMREAD_COLOR);
 
-// 2. Find optimal dials using tune
+// 2. Run tune (two-stage: SPSA for color/tone, Edge for sharpness)
 pqtr::Tune tuner(pipeline, diff_tool);
-pqtr::TuneResult result = tuner.optimize(reference_linear, target_display);
+pqtr::TuneResult result = tuner.optimize(source_linear, reference);
 
-// 3. Apply optimal dials to new images
-pqtr::Dials optimal_dials;
-std::copy_n(result.dials, 45, optimal_dials.begin()); // 45 dials
+// Result contains:
+// - color_dials[35]: SPSA-optimized (exposure, contrast, saturation, etc.)
+// - detail_dials[4]: Edge-optimized (sharpen, denoise)
+// - Geometric dials NOT included (user responsibility)
 
-cv::UMat new_image_linear = raws.process("new_image.ARW");
-cv::UMat styled_output = pipeline.process(new_image_linear, optimal_dials);
+// 3. Save as .vibe for reuse
+saveVibe("sunset_vibe.vibe", result);
+
+// 4. Apply to new photos
+cv::UMat new_photo = raws.process("another_photo.ARW");
+
+// User sets geometry for this specific photo
+link.geometric().crop().top(0.1);  // Example crop
+
+// Apply vibe (39 creative dials)
+applyVibe(link, result);
+
+cv::UMat styled = pipeline.process();
 ```
+
+**The three roles:**
+- **Color/Tone** (35 dials): Automated via SPSA + spectral loss (~60s)
+- **Sharpness** (4 dials): Automated via Edge + frequency loss (~2s)
+- **Geometry** (6 dials): User-controlled per image
 
 ### Pattern 3: Real-Time Dial Tuning (`pipe` + `diff`)
 
@@ -107,18 +125,30 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 |---------|-------------------|----------|
 | `raws`   | Existing (validated) | Any |
 | `pipe`   | 30-60 fps @ 1080p | RTX 3060+, RX 6700+ |
-| `diff`   | <16ms per comparison | GPU |
-| `tune`   | 5-8 seconds (15 dials) | GPU |
+| `diff` (spectral) | <5ms per comparison | GPU |
+| `diff` (frequency) | <2ms per comparison | GPU |
+| `tune` (full) | ~65 seconds | GPU |
 
 **Full Pipeline (`raws` + `pipe`)**:
 - `raws`: ~500ms (decode + demosaic)
 - `pipe`: ~16ms @ 1080p (real-time)
 - **Total**: ~520ms per image (acceptable for batch processing)
 
-**`tune` Optimization**:
-- Sensitivity analysis: ~1-2 seconds (41 renders)
-- Greedy optimization: ~5-6 seconds (15 dials × 20 evaluations)
-- **Total**: ~7-8 seconds (acceptable for one-time style discovery)
+**`tune` Two-Stage Optimization**:
+
+*Stage 1: SPSA (Color/Tone)*
+- 35 dials optimized
+- ~60ms per iteration (2 pipe evaluations + spectral diff)
+- 200-400 iterations typical
+- Multi-start (5×) for robustness
+- **Subtotal**: ~60 seconds
+
+*Stage 2: Edge (Sharpness)*
+- 4 dials optimized
+- Greedy search, ~15 evaluations per dial
+- **Subtotal**: ~2 seconds
+
+**Total tune time**: ~65 seconds for complete style transfer
 
 ## Notes and Considerations
 
