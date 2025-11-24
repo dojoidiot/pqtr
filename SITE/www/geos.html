@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>GeoS</title>
+<style>
+body { background: white; color: black; font-family: system-ui, sans-serif; max-width: 800px; margin: 0 auto; padding: 2rem; line-height: 1.6; }
+h1, h2, h3, h4 { margin-top: 2rem; }
+h1 { border-bottom: 2px solid black; }
+h2 { border-bottom: 1px solid #ccc; }
+hr { border: none; border-top: 1px solid #ccc; margin: 2rem 0; }
+pre, code { background: #f5f5f5; font-family: monospace; }
+pre { padding: 1rem; overflow-x: auto; }
+code { padding: 0.2rem 0.4rem; }
+table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+th, td { border: 1px solid #ccc; padding: 0.5rem; text-align: left; }
+th { background: #f5f5f5; }
+ul, ol { padding-left: 2rem; }
+</style>
+</head>
+<body>
+
+<h1>PQTR:GeoS: Geodesic Spectrum Analysis</h1>
+
+<p>Automated Aesthetic Replication via Spectral Hypersphere Optimization</p>
+
+<hr>
+
+<h2>What This Does (The Simple Version)</h2>
+
+<p><strong>Show the system any photo with a "vibe" you like. It figures out how to make your photos look like that.</strong></p>
+
+<ul>
+<li>You have a RAW photo from your camera</li>
+<li>You have a reference image with the mood you want (rainy day, golden hour, film noir, whatever)</li>
+<li>The system adjusts 45 color/tone sliders automatically to match that vibe</li>
+<li>Works even when the photos are completely different scenes</li>
+</ul>
+
+<p><strong>Example:</strong> You love a daytime pit lane shot you took in Austin. Feed it that shot plus your shot taken today at noon in Miami. Out comes settings that give your today shot that same feel.</p>
+
+<p><strong>Why it works:</strong> Every "look" has a statistical fingerprint—how bright, how saturated, which colors dominate, how contrast is distributed. Two photos can look completely different yet share the same fingerprint. The system matches fingerprints, not pixels.</p>
+
+<p><strong>What you get:</strong> A <code>.vibe</code> file with all 45 settings. Apply it to any future photo instantly.</p>
+
+<hr>
+
+<h2>1. Executive Summary</h2>
+
+<h3>The Objective</h3>
+
+<p>Automate color grading and image stylization. The system takes a source RAW image and adjusts the 45 parameters of the production pipeline (pipe) to match the aesthetic of a target reference image.</p>
+
+<h3>The Challenge</h3>
+
+<table>
+<tr><th>Method</th><th>Problem</th></tr>
+<tr><td>Pixel MSE</td><td>Fails when images differ structurally (crop, rotation, different scene)</td></tr>
+<tr><td>Histogram Matching</td><td>Loses spatial relationships, can produce flat results</td></tr>
+<tr><td>Neural Style Transfer</td><td>Slow, introduces artifacts, requires GPU</td></tr>
+<tr><td>Perceptual Loss (VGG)</td><td>Heavy dependency, black-box features</td></tr>
+</table>
+
+<h3>The Solution: Spectral Hypersphere Optimization</h3>
+
+<p>Treat an image's style as a normalized spectral signature rather than a grid of pixels. By projecting image statistics onto a unit hypersphere, we measure angular distance (geodesic) rather than Euclidean distance. This captures the distribution of light and color while remaining invariant to:</p>
+
+<ul>
+<li>Absolute brightness</li>
+<li>Spatial arrangement</li>
+<li>Image dimensions</li>
+<li>Content differences</li>
+</ul>
+
+<h3>The Value</h3>
+
+<table>
+<tr><th>Property</th><th>Benefit</th></tr>
+<tr><td>Speed</td><td>Leverages C++ pipe (&gt;30fps). Full optimization in &lt;1 minute (single pass).</td></tr>
+<tr><td>Portability</td><td>Outputs standard .vibe JSON, compatible with existing tools.</td></tr>
+<tr><td>Robustness</td><td>Content-invariant. Works across different scenes.</td></tr>
+<tr><td>Safety</td><td>Uses SVD on statistical features, avoiding privacy/copyright pixel leaks.</td></tr>
+</table>
+
+<hr>
+
+<h2>2. Theoretical Foundation</h2>
+
+<h3>2.1 Core Insight: Style as Geometry</h3>
+
+<p>Two images with the same "vibe" have similar statistical fingerprints even if their pixels differ entirely. We encode this fingerprint as a point on a high-dimensional unit sphere. Style similarity becomes angular proximity.</p>
+
+<h3>2.2 The Mathematics (Refined)</h3>
+
+<h4>Step 1: Color Space Transform (The Safe LCH)</h4>
+
+<p>Convert to LCH (Lightness, Chroma, Hue).</p>
+
+<p><strong>CRITICAL:</strong> To prevent the "Achromatic Singularity" (where Hue swings wildly in gray areas), we apply Chroma-Weighting to the Hue channel.</p>
+
+<p><code>H_safe = H · tanh(k · C)</code></p>
+
+<p>This ensures that as Chroma (C) → 0, the Hue contribution → 0, preventing noise from driving the optimization.</p>
+
+<h4>Step 2: Spectral Decomposition (SVD)</h4>
+
+<p>Reshape the image to matrix A ∈ ℝ<sup>N×3</sup>.</p>
+
+<p><code>A = U Σ V<sup>T</sup></code></p>
+
+<table>
+<tr><th>Component</th><th>Interpretation</th></tr>
+<tr><td>Σ (Singular Values)</td><td>Energy spectrum (Contrast magnitude)</td></tr>
+<tr><td>U (Left Singular Vectors)</td><td>Spatial-chromatic correlations</td></tr>
+</table>
+
+<h4>Step 3: Feature Extraction</h4>
+
+<p>Build the style vector v from descriptors. Note the addition of Hue-Chroma Covariance to capture "Color Harmony."</p>
+
+<pre>v = [
+    σ₁, σ₂, σ₃,                    # Singular values (Energy)
+    μ_L, μ_C,                      # Mean Lightness/Chroma
+    std_L, std_C,                  # Contrast/Saturation spread
+    skew_L,                        # High-key vs Low-key distribution
+    cov(L, C),                     # Does brightness correlate with saturation?
+    cov(H_safe, C)                 # Do specific hues carry more saturation?
+]</pre>
+
+<h4>Step 4: Hypersphere Projection</h4>
+
+<p>Normalize to unit length:</p>
+
+<p><code>|ψ⟩ = v / ||v||₂</code></p>
+
+<h4>Step 5: Geodesic Distance (The Metric)</h4>
+
+<p>The loss function measures angular distance:</p>
+
+<p><code>L = 1 - |⟨ψ_raw|ψ_ref⟩|²</code></p>
+
+<hr>
+
+<h2>3. System Architecture</h2>
+
+<h3>3.1 Component Overview</h3>
+
+<pre>Tune Tool --[Dials (Theta)]--> Pipe Executable
+Pipe Executable --[Candidate Image]--> Diff Tool
+Reference Image --> Diff Tool
+Diff Tool --[Loss (Q-Spectral Divergence)]--> Tune Tool
+Tune Tool --[Update Dials (SPSA)]--> Tune Tool</pre>
+
+<h3>3.2 The Engine: pipe</h3>
+
+<ul>
+<li><strong>Role:</strong> Deterministic image generator.</li>
+<li><strong>Throughput:</strong> 30fps+ (Headless).</li>
+<li><strong>Interface:</strong> Accepts 45 normalized floats [0, 1].</li>
+</ul>
+
+<h3>3.3 The Observer: diff</h3>
+
+<ul>
+<li><strong>Role:</strong> Compute spectral loss.</li>
+<li><strong>Optimization:</strong> Uses OpenCV cv::SVD (CPU optimized) on 512x512 thumbnail proxies. Execution time &lt; 5ms.</li>
+</ul>
+
+<h3>3.4 The Driver: tune</h3>
+
+<ul>
+<li><strong>Role:</strong> Optimization Loop.</li>
+<li><strong>Algorithm:</strong> SPSA (Simultaneous Perturbation Stochastic Approximation).</li>
+<li><strong>Efficiency:</strong> Estimates gradient of 45 parameters with 2 measurements.</li>
+</ul>
+
+<hr>
+
+<h2>4. SPSA Algorithm Details</h2>
+
+<h3>4.1 The Update Rule</h3>
+
+<p>At iteration k:</p>
+
+<ol>
+<li>Generate perturbation vector Δ_k ∈ {-1, +1}⁴⁵ (Bernoulli).</li>
+<li>Evaluate Loss at two points:
+<ul>
+<li>L⁺ = Loss(θ_k + c_k Δ_k)</li>
+<li>L⁻ = Loss(θ_k - c_k Δ_k)</li>
+</ul></li>
+<li>Estimate Gradient: ĝ_k = (L⁺ - L⁻) / (2 c_k Δ_k)</li>
+<li>Update Parameters: θ_{k+1} = θ_k - a_k ĝ_k</li>
+</ol>
+
+<h3>4.2 Hyperparameters (Tuned)</h3>
+
+<p>Based on high-dimensional optimization research:</p>
+
+<ul>
+<li>a₀ = 0.16 (Learning Rate)</li>
+<li>c₀ = 0.05 (Perturbation Size)</li>
+<li>α = 0.602 (Decay rate for a)</li>
+<li>γ = 0.101 (Decay rate for c)</li>
+<li>A = 100 (Stability constant)</li>
+</ul>
+
+<hr>
+
+<h2>5. Implementation Roadmap</h2>
+
+<h3>Phase 1: The "Body"</h3>
+
+<ul>
+<li><strong>Metric Implementation:</strong> Write diff with OpenCV. Implement extract_style() with LCH conversion and SVD.</li>
+<li><strong>Verify Singularity:</strong> Run diff on a pure gray image vs a noisy gray image. Ensure Loss ≈ 0.</li>
+<li><strong>Loop Construction:</strong> Write a simple C++ loop in tune that calls pipe → diff → updates parameters.</li>
+</ul>
+
+<h3>Phase 2: The "Mind"</h3>
+
+<ul>
+<li><strong>SPSA Logic:</strong> Implement the Bernoulli perturbation and gradient estimator.</li>
+<li><strong>Bounds Handling:</strong> Ensure parameters clip to [0, 1] (or specific ranges for Temp/Tint).</li>
+<li><strong>Multi-Start:</strong> Wrap the SPSA loop to run 5 times from random initializations and pick the best result.</li>
+</ul>
+
+<h3>Phase 3: The "Test"</h3>
+
+<ul>
+<li><strong>The "Golden Hour" Test:</strong> Match a neutral daylight raw to a sunset reference.</li>
+<li><strong>The "Crop" Test:</strong> Match a full raw to a cropped version of the reference. (Validates geometric invariance).</li>
+</ul>
+
+<hr>
+
+<h2>6. Output Specification: The .vibe File</h2>
+
+<pre>{
+  "meta": {
+    "algorithm": "geos-spsa-v1",
+    "timestamp": "2024-05-21T10:00:00Z",
+    "fidelity_score": 0.985
+  },
+  "dials": {
+    "exposure": 0.65,
+    "contrast": 0.72,
+    "temp": 0.55,
+    "tint": 0.48,
+    "saturation": 0.72,
+    "vibrance": 0.55,
+    "shadows": 0.35,
+    "highlights": 0.70,
+    "cdl_slope": [1.0, 0.98, 1.02],
+    "cdl_offset": [0.0, 0.01, -0.01],
+    "sharpening": 0.4,
+    "clarity": 0.5
+  }
+}</pre>
+
+</body>
+</html>
