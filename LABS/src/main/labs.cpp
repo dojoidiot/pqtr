@@ -9,6 +9,7 @@
 #include <sink.hpp>
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <filesystem>
 #include <opencv2/core.hpp>
@@ -20,14 +21,32 @@
 
 namespace fs = std::filesystem;
 
-// Generate bare .labs.json for given RAW file
-std::string generateLabsJson(const std::string& decoder = "sony")
+// Generate .labs.json with camera info from metadata
+std::string generateLabsJson(const sony::RawMetadata& metadata, const std::string& decoder = "sony")
 {
-    return R"({
-  "version": "1.0",
-  "decoder": ")" + decoder + R"(",
-  "links": []
-})";
+    std::ostringstream json;
+    json << "{\n";
+    json << "  \"version\": \"1.0\",\n";
+    json << "  \"decoder\": \"" << decoder << "\",\n";
+    json << "  \"camera\": {\n";
+    json << "    \"make\": \"" << metadata.camera_make << "\",\n";
+    json << "    \"model\": \"" << metadata.camera_model << "\",\n";
+    json << "    \"lens\": \"" << metadata.lens_model << "\"\n";
+    json << "  },\n";
+    json << "  \"exif\": {\n";
+    json << "    \"iso\": " << metadata.iso << ",\n";
+    json << "    \"shutter_speed\": " << metadata.shutter_speed << ",\n";
+    json << "    \"aperture\": " << metadata.aperture << ",\n";
+    json << "    \"focal_length\": " << metadata.focal_length << ",\n";
+    json << "    \"orientation\": " << metadata.orientation << "\n";
+    json << "  },\n";
+    json << "  \"image\": {\n";
+    json << "    \"width\": " << metadata.width << ",\n";
+    json << "    \"height\": " << metadata.height << "\n";
+    json << "  },\n";
+    json << "  \"links\": []\n";
+    json << "}";
+    return json.str();
 }
 
 // Get output filenames from input RAW path and optional output directory
@@ -164,7 +183,7 @@ int main(int argc, char** argv)
         // === Save .labs.json sidecar ===
         std::cout << "\n[SIDECAR] Saving .labs.json..." << std::endl;
 
-        std::string labsJson = generateLabsJson("sony");
+        std::string labsJson = generateLabsJson(metadata, "sony");
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {
