@@ -16,7 +16,7 @@ The pipe uses a **functional interface** with three stages:
 
 1. **HEAD**: `pipe::open()` decodes RAW → scene-linear RGB + metadata
 2. **BODY**: `pipe::mods::*` functions apply the 6 golden modules
-3. **TAIL**: `pipe::gamma()` + `pipe::save()` output PNG
+3. **TAIL**: `pipe::save()` applies gamma and outputs PNG
 
 ## Architecture
 
@@ -64,11 +64,9 @@ Processing modules in `pipe::mods::*` (see [libs.md](./libs.md) for details):
 ### TAIL Functions
 
 ```cpp
-// Apply sRGB gamma (OETF)
-bool pipe::gamma(const View& linear, View& output);
-
-// Save to PNG file
-bool pipe::save(const View& view, const std::string& path);
+// Apply gamma and save to PNG file
+// Gamma encoding (sRGB OETF) is applied internally
+bool pipe::save(const View& linear, const std::string& path);
 ```
 
 ---
@@ -191,27 +189,27 @@ void processRaw(const std::string& rawPath, const std::string& outPath) {
     pipe::mods::global_color(result, colored, 0.6f, 0.55f, 0.5f);
     result = colored;
 
-    // TAIL: Apply gamma and save
-    cv::UMat output;
-    pipe::gamma(result, output);
-    pipe::save(output, outPath);
+    // TAIL: Save (gamma applied internally)
+    pipe::save(result, outPath);
 }
 ```
 
 ### Command-Line Tool
 
-The `labs` executable provides headless processing:
+The `pipe` executable provides headless processing:
 
 ```bash
 # Process with default (neutral) dials
-./labs input.ARW
+./pipe input.ARW
 
 # Process with display-referred tone mapping
-./labs input.ARW --default-display
+./pipe input.ARW --default-display
 
 # Process with output directory
-./labs input.ARW --default-display /path/to/output
+./pipe input.ARW --default-display /path/to/output
 ```
+
+**Output**: Creates `<input>.png` and `<input>.ARW.pipe.json` sidecar.
 
 **Note**: Configuration file format is documented in [data.md](./data.md).
 
@@ -225,7 +223,7 @@ The `tune` tool uses pipe to optimize dial values:
 1. Tune loads RAW via `pipe::open()`
 2. Tune iteratively adjusts dial values in `pipe::mods::*` calls
 3. Tune uses `diff` to measure loss against reference
-4. Optimized dial values saved to `.pipe.json` sidecar
+4. Optimized dial values saved to `.pipe.json` sidecar (in body section)
 
 ### With Diff
 

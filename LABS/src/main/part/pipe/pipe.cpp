@@ -72,21 +72,21 @@ bool open(pqtr::Sink& sink, const std::string& decoderName, Head& head)
     return false;
 }
 
-// TAIL: Apply sRGB gamma (OETF)
-bool gamma(const View& linear, View& output)
+// TAIL: Apply gamma and save to PNG file
+bool save(const View& linear, const std::string& path)
 {
-    // Use Sony decoder's gamma function (it's the standard sRGB OETF)
-    return sony::Decoder::apply_gamma(linear, output);
-}
+    // Apply sRGB gamma (OETF)
+    cv::UMat gamma_encoded;
+    if (!sony::Decoder::apply_gamma(linear, gamma_encoded))
+    {
+        return false;
+    }
 
-// TAIL: Save to PNG file
-bool save(const View& view, const std::string& path)
-{
     // Convert to 8-bit for PNG
     cv::UMat output8bit;
-    view.convertTo(output8bit, CV_8UC3, 255.0);
+    gamma_encoded.convertTo(output8bit, CV_8UC3, 255.0);
 
-    // Clamp values (in case of any overflow)
+    // Copy to CPU for imwrite
     cv::Mat cpuMat;
     output8bit.copyTo(cpuMat);
 

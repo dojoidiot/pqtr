@@ -45,7 +45,7 @@ LIBS     = -llabs
 
 | Header | Location | Namespace | Purpose |
 |--------|----------|-----------|---------|
-| `pipe.hpp` | `inc/` | `pipe` | HEAD/TAIL abstraction (decode, gamma, save) |
+| `pipe.hpp` | `inc/` | `pipe` | HEAD/TAIL abstraction (decode, save) |
 | `mods.h` | `src/main/part/pipe/mods/` | `pipe::mods` | BODY processing modules (45 dials) |
 | `hold.hpp` | `inc/` | `pqtr` | Owning smart pointer |
 | `sink.hpp` | `inc/` | `pqtr` | Chunked buffer for I/O |
@@ -105,10 +105,8 @@ delete sink;
 
 // ... apply BODY processing via pipe::mods::* ...
 
-// TAIL: Apply gamma and save
-cv::UMat output;
-pipe::gamma(head.view, output);
-pipe::save(output, "output.png");
+// TAIL: Save (gamma applied internally)
+pipe::save(head.view, "output.png");
 ```
 
 ### pipe::mods
@@ -206,10 +204,8 @@ void processRaw(const std::string& rawPath) {
     cv::UMat processed;
     pipe::mods::tone_map(head.view, processed);
 
-    // TAIL: Apply gamma and save
-    cv::UMat output;
-    pipe::gamma(processed, output);
-    pipe::save(output, "output.png");
+    // TAIL: Save (gamma applied internally)
+    pipe::save(processed, "output.png");
 }
 ```
 

@@ -1,10 +1,10 @@
-// labs.cpp
-// Main executable: Processes RAW file → PNG + .labs.json sidecar
+// pipe.cpp
+// Main executable: Processes RAW file → PNG + .pipe.json sidecar
 //
-// Usage: labs <input.ARW> [options] [output_dir]
+// Usage: pipe <input.ARW> [options] [output_dir]
 // Options:
-//   --default-display  Apply minimal display-referred processing (color matrix + tone map)
-// Output: <input.png> and <input.ARW.labs.json>
+//   --default-display  Apply minimal display-referred processing (tone map)
+// Output: <input.png> and <input.ARW.pipe.json>
 // If output_dir specified: copies RAW there (if not present), creates outputs in output_dir
 
 #include <tool.hpp>
@@ -22,8 +22,8 @@
 
 namespace fs = std::filesystem;
 
-// Generate .labs.json with camera info from metadata
-std::string generateLabsJson(const pipe::Info& info, bool defaultDisplay = false)
+// Generate .pipe.json with head/body/tail structure
+std::string generatePipeJson(const pipe::Info& info, const std::string& outputName, bool defaultDisplay = false)
 {
     // Helper to get value with default
     auto get = [&info](const std::string& key, const std::string& def = "") {
@@ -34,40 +34,52 @@ std::string generateLabsJson(const pipe::Info& info, bool defaultDisplay = false
     std::ostringstream json;
     json << "{\n";
     json << "  \"version\": \"1.0\",\n";
-    json << "  \"decoder\": \"" << get("decoder", "sony_arw2") << "\",\n";
-    json << "  \"camera\": {\n";
-    json << "    \"make\": \"" << get("camera_make") << "\",\n";
-    json << "    \"model\": \"" << get("camera_model") << "\",\n";
-    json << "    \"lens\": \"" << get("lens_model") << "\"\n";
-    json << "  },\n";
-    json << "  \"exif\": {\n";
-    json << "    \"iso\": " << get("iso", "0") << ",\n";
-    json << "    \"shutter_speed\": " << get("shutter_speed", "0") << ",\n";
-    json << "    \"aperture\": " << get("aperture", "0") << ",\n";
-    json << "    \"focal_length\": " << get("focal_length", "0") << ",\n";
-    json << "    \"orientation\": " << get("orientation", "1") << "\n";
-    json << "  },\n";
-    json << "  \"image\": {\n";
-    json << "    \"width\": " << get("width", "0") << ",\n";
-    json << "    \"height\": " << get("height", "0") << "\n";
-    json << "  },\n";
+    json << "  \"pipe\": {\n";
 
+    // HEAD
+    json << "    \"head\": {\n";
+    json << "      \"decoder\": \"" << get("decoder", "sony_arw2") << "\",\n";
+    json << "      \"camera\": {\n";
+    json << "        \"make\": \"" << get("camera_make") << "\",\n";
+    json << "        \"model\": \"" << get("camera_model") << "\",\n";
+    json << "        \"lens\": \"" << get("lens_model") << "\"\n";
+    json << "      },\n";
+    json << "      \"exif\": {\n";
+    json << "        \"iso\": " << get("iso", "0") << ",\n";
+    json << "        \"shutter_speed\": " << get("shutter_speed", "0") << ",\n";
+    json << "        \"aperture\": " << get("aperture", "0") << ",\n";
+    json << "        \"focal_length\": " << get("focal_length", "0") << ",\n";
+    json << "        \"orientation\": " << get("orientation", "1") << "\n";
+    json << "      },\n";
+    json << "      \"image\": {\n";
+    json << "        \"width\": " << get("width", "0") << ",\n";
+    json << "        \"height\": " << get("height", "0") << "\n";
+    json << "      }\n";
+    json << "    },\n";
+
+    // BODY
     if (defaultDisplay)
     {
-        json << "  \"links\": [\n";
-        json << "    {\n";
-        json << "      \"name\": \"default-display\",\n";
-        json << "      \"modules\": {\n";
-        json << "        \"tone_mapping\": { \"white_point\": 1.0, \"contrast\": 1.0 }\n";
+        json << "    \"body\": [\n";
+        json << "      {\n";
+        json << "        \"name\": \"default-display\",\n";
+        json << "        \"modules\": {\n";
+        json << "          \"tone_mapping\": { \"white_point\": 1.0, \"contrast\": 1.0 }\n";
+        json << "        }\n";
         json << "      }\n";
-        json << "    }\n";
-        json << "  ]\n";
+        json << "    ],\n";
     }
     else
     {
-        json << "  \"links\": []\n";
+        json << "    \"body\": [],\n";
     }
 
+    // TAIL
+    json << "    \"tail\": {\n";
+    json << "      \"output\": \"" << outputName << "\"\n";
+    json << "    }\n";
+
+    json << "  }\n";
     json << "}";
     return json.str();
 }
@@ -77,7 +89,8 @@ struct OutputPaths
 {
     std::string rawPath;  // Path to RAW file to process (may be copied)
     std::string png;      // Output PNG path
-    std::string sidecar;  // Output .labs.json path
+    std::string sidecar;  // Output .pipe.json path
+    std::string pngName;  // Just the PNG filename for tail.output
     bool needsCopy;       // True if RAW needs to be copied to output_dir
 };
 
@@ -88,12 +101,14 @@ OutputPaths getOutputPaths(const std::string& inputRaw, const std::string& outpu
     std::string baseName = inputPath.stem().string();
     std::string rawFileName = inputPath.filename().string();
 
+    out.pngName = baseName + ".png";
+
     if (outputDir.empty())
     {
         // No output dir: create outputs next to input RAW
         out.rawPath = inputRaw;
         out.png = (inputPath.parent_path() / baseName).string() + ".png";
-        out.sidecar = inputRaw + ".labs.json";
+        out.sidecar = inputRaw + ".pipe.json";
         out.needsCopy = false;
     }
     else
@@ -115,7 +130,7 @@ OutputPaths getOutputPaths(const std::string& inputRaw, const std::string& outpu
         }
 
         out.png = (outDir / baseName).string() + ".png";
-        out.sidecar = rawInOutDir.string() + ".labs.json";
+        out.sidecar = rawInOutDir.string() + ".pipe.json";
     }
 
     return out;
@@ -197,60 +212,49 @@ int main(int argc, char** argv)
         // === BODY: Process through pipeline ===
         std::cout << "\n[BODY] Processing..." << std::endl;
 
-        cv::UMat outputRgb;
+        cv::UMat result = head.view;
 
         if (defaultDisplay)
         {
-            // Display-referred pipeline: linear sRGB → tone map → gamma
+            // Display-referred pipeline: linear sRGB → tone map
             std::cout << "  Mode: default-display (tone map)" << std::endl;
             std::cout << "  Scene-linear sRGB: " << head.view.cols << "x" << head.view.rows << std::endl;
 
-            // Step 1: Apply tone mapping (HDR → SDR compression)
+            // Apply tone mapping (HDR → SDR compression)
             cv::UMat toneMapped;
             if (!pipe::mods::tone_map(head.view, toneMapped, 1.0f, 1.0f))
             {
                 throw std::runtime_error("Failed to apply tone mapping");
             }
             std::cout << "  Tone mapping applied" << std::endl;
-
-            // Step 2: Apply gamma (sRGB OETF)
-            if (!pipe::gamma(toneMapped, outputRgb))
-            {
-                throw std::runtime_error("Failed to apply gamma");
-            }
-            std::cout << "  Gamma applied" << std::endl;
+            result = toneMapped;
         }
         else
         {
-            // Standard pipeline: just apply gamma to linear RGB
-            if (!pipe::gamma(head.view, outputRgb))
-            {
-                throw std::runtime_error("Failed to apply gamma");
-            }
-            std::cout << "  Output RGB: " << outputRgb.cols << "x" << outputRgb.rows << std::endl;
+            std::cout << "  Mode: passthrough (no modules)" << std::endl;
+            std::cout << "  Scene-linear sRGB: " << head.view.cols << "x" << head.view.rows << std::endl;
         }
 
-        // === TAIL: Output ===
+        // === TAIL: Save PNG (gamma applied internally) ===
         std::cout << "\n[TAIL] Saving PNG..." << std::endl;
 
-        // Save PNG using pipe interface
-        if (!pipe::save(outputRgb, out.png))
+        if (!pipe::save(result, out.png))
         {
             throw std::runtime_error("Failed to save PNG");
         }
 
         std::cout << "  Saved: " << out.png << std::endl;
 
-        // === Save .labs.json sidecar ===
-        std::cout << "\n[SIDECAR] Saving .labs.json..." << std::endl;
+        // === Save .pipe.json sidecar ===
+        std::cout << "\n[SIDECAR] Saving .pipe.json..." << std::endl;
 
-        std::string labsJson = generateLabsJson(head.info, defaultDisplay);
+        std::string pipeJson = generatePipeJson(head.info, out.pngName, defaultDisplay);
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {
             throw std::runtime_error("Failed to create sidecar file");
         }
-        sidecarFile << labsJson;
+        sidecarFile << pipeJson;
         sidecarFile.close();
 
         std::cout << "  Saved: " << out.sidecar << std::endl;

@@ -48,9 +48,9 @@ Parts are modular libraries that provide specific functionalities. They expose a
 
 *   [**`labs`**](./doc/labs.md): The central data model for all LABS operations. It manages settings for the entire pipeline, stored in a single JSON sidecar file accompanying each RAW file. Each part has its own dedicated section within this JSON file.
 *   [**`pipe`**](./doc/pipe.md): The core image processing pipeline.
-    *   **HEAD**: Decodes the RAW file into a scene-referred linear space. The specific decoder is selectable via the `labs` configuration.
+    *   **HEAD**: Decodes the RAW file into a scene-referred linear space. The specific decoder is selectable via the `.pipe.json` configuration.
     *   **BODY**: A sequence of configurable **edit steps**. Each step can enable/disable specific modules from the 6 available modules (geometric adjustments, color correction, tone mapping, global color, selective color, detail + output transform). Geometry is always its own separate step, positioned before tune steps or after creative editing steps depending on the workflow.
-    *   **TAIL**: Renders the final image to a **PNG** file (lossless format to preserve quality during development and tuning).
+    *   **TAIL**: Renders the final image to a **PNG** file (lossless format to preserve quality during development and tuning). Gamma encoding is applied internally.
 *   [**`diff`**](./doc/diff.md): A library to compute loss metrics between images. Provides **spectral loss** (color/tone, geodesic distance) and **frequency loss** (sharpness, Laplacian variance). Both are content-invariant.
 *   [**`tune`**](./doc/tune.md): A library that uses `diff` to optimize pipeline settings. Handles three roles: **color/tone** (35 dials, SPSA + spectral), **sharpness** (4 dials, greedy + frequency), and **geometry** (6 dials, user-controlled). Outputs `.geos.json` and `.edge.json` style sidecars.
 
@@ -58,7 +58,7 @@ Parts are modular libraries that provide specific functionalities. They expose a
 
 These are command-line executables located in `bin/` that use the parts to perform tasks.
 
-*   [**`pipe`**](./doc/pipe.md): A headless tool that processes a RAW file into a final image using a specified `labs` project file.
+*   [**`pipe`**](./doc/pipe.md): A headless tool that processes a RAW file into a final image, producing a `.pipe.json` sidecar with pipeline configuration.
 *   [**`tune`**](./doc/tune.md): A headless tool that automatically optimizes 39 creative dials to match a reference style. Two-stage process: SPSA for color/tone (35 dials), greedy for sharpness (4 dials). User handles geometry (6 dials).
 *   [**`diff`**](./doc/diff.md): A headless tool that computes spectral loss (color/tone) and frequency loss (sharpness) between images.
 

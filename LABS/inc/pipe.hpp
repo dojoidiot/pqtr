@@ -37,17 +37,12 @@ namespace pipe
     // Returns: true on success
     bool open(pqtr::Sink& sink, const std::string& decoder, Head& head);
 
-    // TAIL: Apply sRGB gamma (OETF)
+    // TAIL: Apply gamma and save to PNG file
     // Input:  linear - Scene-linear RGB (CV_32FC3)
-    // Output: output - Gamma-encoded RGB (CV_32FC3, [0,1] range)
+    //         path   - Output file path
     // Returns: true on success
-    bool gamma(const View& linear, View& output);
-
-    // TAIL: Save to PNG file
-    // Input:  view - Gamma-encoded RGB (CV_32FC3)
-    //         path - Output file path
-    // Returns: true on success
-    bool save(const View& view, const std::string& path);
+    // Note: Gamma encoding (sRGB OETF) is applied internally
+    bool save(const View& linear, const std::string& path);
 
     // BODY: Processing modules
     // Use pipe::mods::* functions from mods.h:

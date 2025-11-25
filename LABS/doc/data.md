@@ -29,20 +29,27 @@ Pipe data persists the complete pipeline configuration from RAW decode (HEAD) th
 ```json
 {
   "version": "1.0",
-  "decoder": "sony_arw2",
-  "links": [
-    {
-      "name": "tune_optimize",
-      "modules": {
-        "geometric": { /* dial values */ },
-        "color_correction": { /* dial values */ },
-        "tone_mapping": { /* dial values */ },
-        "global_color": { /* dial values */ },
-        "selective_color": { /* dial values */ },
-        "detail": { /* dial values */ }
+  "pipe": {
+    "head": {
+      "decoder": "sony_arw2"
+    },
+    "body": [
+      {
+        "name": "tune_optimize",
+        "modules": {
+          "geometric": { /* dial values */ },
+          "color_correction": { /* dial values */ },
+          "tone_mapping": { /* dial values */ },
+          "global_color": { /* dial values */ },
+          "selective_color": { /* dial values */ },
+          "detail": { /* dial values */ }
+        }
       }
+    ],
+    "tail": {
+      "output": "image.png"
     }
-  ]
+  }
 }
 ```
 
@@ -59,23 +66,81 @@ All dial values are normalized to the range `[0.0, 1.0]`:
 
 ## HEAD Configuration
 
-### Decoder Selection
-
-The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
+The `head` section specifies RAW decoder configuration and captures metadata:
 
 ```json
 {
-  "version": "1.0",
-  "decoder": "sony_arw2",
-  "links": []
+  "head": {
+    "decoder": "sony_arw2",
+    "camera": {
+      "make": "SONY",
+      "model": "ILCE-7M3",
+      "lens": "E PZ 18-105mm F4 G OSS"
+    },
+    "exif": {
+      "iso": 100,
+      "shutter_speed": 0.008,
+      "aperture": 5.6,
+      "focal_length": 25,
+      "orientation": 1
+    },
+    "image": {
+      "width": 3936,
+      "height": 2624
+    }
+  }
 }
 ```
+
+**Fields:**
+- `"decoder"`: RAW decoder to use
+- `"camera"`: Camera identification (read from RAW)
+- `"exif"`: Exposure metadata (read from RAW)
+- `"image"`: Output dimensions after crop
 
 **Supported decoders:**
 - `"sony_arw2"`: Sony .ARW format (default)
 - Future: `"nikon_nef"`, `"canon_cr2"`, `"fuji_raf"`, etc.
 
 **Default behavior**: If `decoder` is omitted, the system selects based on file extension.
+
+---
+
+## BODY Configuration
+
+The `body` array contains processing links (edit steps):
+
+```json
+{
+  "body": [
+    {
+      "name": "link_name",
+      "modules": { /* module configurations */ }
+    }
+  ]
+}
+```
+
+Links execute in array order. See Module Schemas below for module configurations.
+
+---
+
+## TAIL Configuration
+
+The `tail` section specifies output configuration:
+
+```json
+{
+  "tail": {
+    "output": "image.png"
+  }
+}
+```
+
+**Fields:**
+- `"output"`: Output filename (PNG format, gamma applied internally)
+
+**Default behavior**: If `tail` is omitted, output filename defaults to `<input_name>.png`.
 
 ---
 
@@ -199,8 +264,15 @@ The `decoder` field specifies which RAW decoder to use in the pipeline HEAD:
 ```json
 {
   "version": "1.0",
-  "decoder": "sony_arw2",
-  "links": []
+  "pipe": {
+    "head": {
+      "decoder": "sony_arw2"
+    },
+    "body": [],
+    "tail": {
+      "output": "image.png"
+    }
+  }
 }
 ```
 
@@ -208,50 +280,46 @@ This represents a pipeline with:
 - Sony ARW decoder in HEAD
 - No processing steps in BODY (direct pass-through to TAIL)
 - All modules at default/neutral settings
+- Output to `image.png` (gamma applied internally)
 
 ### Full Configuration Example
 
 ```json
 {
   "version": "1.0",
-  "decoder": "sony_arw2",
-  "links": [
-    {
-      "name": "geometric_adjust",
-      "modules": {
-        "geometric": {
-          "crop": {
-            "top": 0.1,
-            "left": 0.05
-          },
-          "zoom": {
-            "scale": 0.6
-          }
-        }
-      }
+  "pipe": {
+    "head": {
+      "decoder": "sony_arw2",
+      "camera": { "make": "SONY", "model": "ILCE-7M3", "lens": "..." },
+      "exif": { "iso": 100, "shutter_speed": 0.008, "aperture": 5.6, "focal_length": 25, "orientation": 1 },
+      "image": { "width": 3936, "height": 2624 }
     },
-    {
-      "name": "tune_optimize",
-      "modules": {
-        "color_correction": {
-          "exposure": {
-            "value": 0.65
-          },
-          "white_balance": {
-            "temperature": 0.52
-          }
-        },
-        "global_color": {
-          "saturation": 0.68
-        },
-        "tone_mapping": {
-          "contrast": {
-            "value": 0.58
+    "body": [
+      {
+        "name": "geometric_adjust",
+        "modules": {
+          "geometric": {
+            "crop": { "top": 0.1, "left": 0.05 },
+            "zoom": { "scale": 0.6 }
           }
         }
+      },
+      {
+        "name": "tune_optimize",
+        "modules": {
+          "color_correction": {
+            "exposure": { "value": 0.65 },
+            "white_balance": { "temperature": 0.52 }
+          },
+          "global_color": { "saturation": 0.68 },
+          "tone_mapping": { "contrast": { "value": 0.58 } }
+        }
       }
+    ],
+    "tail": {
+      "output": "processed.png"
     }
-  ]
+  }
 }
 ```
 

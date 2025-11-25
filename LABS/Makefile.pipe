@@ -1,5 +1,5 @@
-# LABS Makefile
-# Builds bin/labs executable
+# Pipe Makefile
+# Builds bin/pipe executable
 
 # Compiler
 CXX = g++
@@ -21,12 +21,12 @@ LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB
 # Directories
 SRC_DIR = src/main
 OPT_RAWS_DIR = opt/raws/src/main
-TMP_DIR = tmp/labs
+TMP_DIR = tmp/pipe
 BIN_DIR = $(TMP_DIR)/bin
 OBJ_DIR = $(TMP_DIR)/obj
 
 # Source files
-LABS_SRC = $(SRC_DIR)/labs.cpp
+PIPE_MAIN_SRC = $(SRC_DIR)/pipe.cpp
 RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/prepare.cpp \
             $(OPT_RAWS_DIR)/part/sony/process.cpp \
@@ -36,12 +36,12 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
             $(OPT_RAWS_DIR)/part/sony/crop.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
-PIPE_SRC = $(SRC_DIR)/part/pipe/pipe.cpp
+PIPE_PART_SRC = $(SRC_DIR)/part/pipe/pipe.cpp
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/tone_map.cpp
 
 # Object files
-LABS_OBJ = $(OBJ_DIR)/labs.o
+PIPE_MAIN_OBJ = $(OBJ_DIR)/pipe.o
 RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
             $(OBJ_DIR)/part/sony/prepare.o \
             $(OBJ_DIR)/part/sony/process.o \
@@ -51,25 +51,25 @@ RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
             $(OBJ_DIR)/part/sony/color_matrix.o \
             $(OBJ_DIR)/part/sony/crop.o \
             $(OBJ_DIR)/part/sony/gamma_oetf.o
-PIPE_OBJ = $(OBJ_DIR)/pipe/pipe.o
+PIPE_PART_OBJ = $(OBJ_DIR)/pipe/pipe.o
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/tone_map.o
 
 # Target executable
-LABS_BIN = $(BIN_DIR)/labs
+PIPE_BIN = $(BIN_DIR)/pipe
 
 # Test configuration
 TEST_INPUT = var/pics/DSC00144.ARW
-TEST_OUTPUT_DIR = tmp/var/labs
+TEST_OUTPUT_DIR = tmp/var/pipe
 
 .PHONY: all clean test test-display
 
-all: $(LABS_BIN)
+all: $(PIPE_BIN)
 
-$(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) $(PIPE_OBJ) $(MODS_OBJS) | $(BIN_DIR)
+$(PIPE_BIN): $(PIPE_MAIN_OBJ) $(RAWS_OBJS) $(PIPE_PART_OBJ) $(MODS_OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-$(OBJ_DIR)/labs.o: $(LABS_SRC) | $(OBJ_DIR)
+$(OBJ_DIR)/pipe.o: $(PIPE_MAIN_SRC) | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJ_DIR)/part/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)
@@ -97,12 +97,12 @@ $(OBJ_DIR):
 clean:
 	rm -rf $(TMP_DIR)
 
-test: $(LABS_BIN)
+test: $(PIPE_BIN)
 	@mkdir -p $(TEST_OUTPUT_DIR)
-	@echo "Running labs on $(TEST_INPUT)..."
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_INPUT) $(TEST_OUTPUT_DIR)
+	@echo "Running pipe on $(TEST_INPUT)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(PIPE_BIN) $(TEST_INPUT) $(TEST_OUTPUT_DIR)
 
-test-display: $(LABS_BIN)
+test-display: $(PIPE_BIN)
 	@mkdir -p $(TEST_OUTPUT_DIR)
-	@echo "Running labs with --default-display on $(TEST_INPUT)..."
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_INPUT) --default-display $(TEST_OUTPUT_DIR)
+	@echo "Running pipe with --default-display on $(TEST_INPUT)..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(PIPE_BIN) $(TEST_INPUT) --default-display $(TEST_OUTPUT_DIR)

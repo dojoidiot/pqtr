@@ -36,6 +36,9 @@ TMP_DIR = tmp/libs
 OBJ_DIR = $(TMP_DIR)/obj
 LIB_DIR = lib
 
+# Pipe sources (HEAD/TAIL)
+PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp
+
 # Module sources (processing)
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/exposure.cpp \
@@ -58,6 +61,8 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
 
 # Object files
+PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o
+
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/exposure.o \
             $(OBJ_DIR)/mods/white_balance.o \
@@ -77,7 +82,7 @@ RAWS_OBJS = $(OBJ_DIR)/raws/sony.o \
             $(OBJ_DIR)/raws/sony/crop.o \
             $(OBJ_DIR)/raws/sony/gamma_oetf.o
 
-ALL_OBJS = $(MODS_OBJS) $(RAWS_OBJS)
+ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS) $(RAWS_OBJS)
 
 # Target shared library
 LABS_SO = $(LIB_DIR)/labs.so
@@ -89,6 +94,10 @@ all: $(LABS_SO)
 $(LABS_SO): $(ALL_OBJS) | $(LIB_DIR)
 	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
 	@echo "Built: $@"
+
+# Pipe objects
+$(OBJ_DIR)/pipe/pipe.o: $(SRC_DIR)/part/pipe/pipe.cpp | $(OBJ_DIR)/pipe
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Module objects
 $(OBJ_DIR)/mods/%.o: $(SRC_DIR)/part/pipe/mods/%.cpp | $(OBJ_DIR)/mods
@@ -104,6 +113,9 @@ $(OBJ_DIR)/raws/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)/raws/sony
 # Directory creation
 $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
+
+$(OBJ_DIR)/pipe:
+	mkdir -p $(OBJ_DIR)/pipe
 
 $(OBJ_DIR)/mods:
 	mkdir -p $(OBJ_DIR)/mods
