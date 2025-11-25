@@ -89,6 +89,14 @@ namespace sony
         int contrast;                // -3 to +3
         int saturation;              // -3 to +3
         int sharpness;               // -3 to +3
+
+        // Lens correction parameters (from Sony MakerNotes tag 0x7037)
+        // Variable number of knots (up to 16): radial distortion at equi-spaced positions center→edge
+        // First value in tag is knot count, followed by the knot values
+        // Values are scaled by 2^-14 to get correction factor: g(r) = 1 + value * 2^-14
+        int16_t distortion_params[16];
+        int distortion_knot_count;  // Number of valid knots (1-16)
+        bool has_distortion_params;
     };
 
     // Sony RAW decoder with a static interface.
@@ -133,8 +141,9 @@ namespace sony
         static bool wb_bayer(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         // Stage 3: Demosaic (CV_32FC1 → CV_32FC3 RGB)
         static bool demosaic(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-        // Stage 4-5: On RGB (CV_32FC3)
+        // Stage 4-6: On RGB (CV_32FC3)
         static bool color_matrix(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool undistort(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         static bool crop(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         // Display-referred (not used for scene-referred output)
         static bool gamma_oetf(const cv::UMat &input, cv::UMat &output);

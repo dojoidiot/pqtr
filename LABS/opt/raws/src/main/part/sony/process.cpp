@@ -15,7 +15,8 @@ namespace sony
     //   2. WB on Bayer     - apply gains before color interpolation
     //   3. Demosaic        - Bayer → RGB
     //   4. Color Matrix    - camera RGB → linear sRGB
-    //   5. Crop            - remove optical black borders
+    //   5. Undistort       - lens distortion correction
+    //   6. Crop            - remove optical black borders
     //
     // Output is scene-linear sRGB, ready for BODY modules (styling/grading)
     //
@@ -60,9 +61,18 @@ namespace sony
                 return false;
             }
 
-            // Stage 5: Crop (CV_32FC3 → CV_32FC3)
+            // Stage 5: Undistort (CV_32FC3 → CV_32FC3)
+            // Corrects lens barrel/pincushion distortion using Sony coefficients
+            cv::UMat rgb_undistort;
+            if (!undistort(rgb_srgb, rgb_undistort, metadata))
+            {
+                std::cerr << "[process_linear] Undistort failed" << std::endl;
+                return false;
+            }
+
+            // Stage 6: Crop (CV_32FC3 → CV_32FC3)
             // Removes optical black border pixels
-            if (!crop(rgb_srgb, rgb, metadata))
+            if (!crop(rgb_undistort, rgb, metadata))
             {
                 std::cerr << "[process_linear] Crop failed" << std::endl;
                 return false;

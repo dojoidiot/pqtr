@@ -57,6 +57,7 @@ namespace sony
         enum SonyMakerTag
         {
             SONY_TAG_TONE_CURVE = 0x7010,
+            SONY_TAG_DISTORTION_CORR_PARAMS = 0x7037,  // Lens distortion correction (int16s[17])
             SONY_TAG_WB_RGGB = 0x7313,
             // Style metadata (in MakerNotes)
             SONY_TAG_CONTRAST = 0x2004,
@@ -218,6 +219,11 @@ namespace sony
         metadata.saturation = 0;
         metadata.sharpness = 0;
 
+        // Initialize distortion params
+        metadata.has_distortion_params = false;
+        metadata.distortion_knot_count = 0;
+        memset(metadata.distortion_params, 0, sizeof(metadata.distortion_params));
+
         if (maker_note_offset != 0 && maker_note_offset + 10 <= static_cast<size_t>(file_size))
         {
             uint32_t maker_ifd_offset = maker_note_offset;
@@ -373,6 +379,27 @@ namespace sony
                         wb_rggb[j] = read_u16(&file_data[entry.value_offset + j * 2]);
                     }
                     found_sony_wb = true;
+                }
+            }
+
+            // Distortion correction params: tag 0x7037, int16s[N+1]
+            // First value is knot count (1-16), followed by that many coefficients
+            if (entry.tag == SONY_TAG_DISTORTION_CORR_PARAMS && !metadata.has_distortion_params)
+            {
+                if (entry.count >= 2 && entry.value_offset + entry.count * 2 <= static_cast<size_t>(file_size))
+                {
+                    // First value is the knot count
+                    int knot_count = static_cast<int16_t>(read_u16(&file_data[entry.value_offset]));
+                    if (knot_count > 0 && knot_count <= 16 && knot_count <= static_cast<int>(entry.count) - 1)
+                    {
+                        metadata.distortion_knot_count = knot_count;
+                        for (int j = 0; j < knot_count; j++)
+                        {
+                            metadata.distortion_params[j] = static_cast<int16_t>(
+                                read_u16(&file_data[entry.value_offset + (j + 1) * 2]));
+                        }
+                        metadata.has_distortion_params = true;
+                    }
                 }
             }
 

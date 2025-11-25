@@ -35,6 +35,7 @@ SONY_MODS = src/main/part/sony/prepare.cpp \
             src/main/part/sony/wb_bayer.cpp \
             src/main/part/sony/demosaic.cpp \
             src/main/part/sony/color_matrix.cpp \
+            src/main/part/sony/undistort.cpp \
             src/main/part/sony/crop.cpp \
             src/main/part/sony/gamma_oetf.cpp
 
@@ -51,6 +52,7 @@ SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
                $(OBJ_DIR)/wb_bayer.o \
                $(OBJ_DIR)/demosaic.o \
                $(OBJ_DIR)/color_matrix.o \
+               $(OBJ_DIR)/undistort.o \
                $(OBJ_DIR)/crop.o \
                $(OBJ_DIR)/gamma_oetf.o \
                $(OBJ_DIR)/sony_test.o
