@@ -1,0 +1,103 @@
+# DESK Makefile
+# Builds bin/desk executable
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# Library paths
+IMGUI_DIR = ./lib/imgui
+GLFW_DIR = ./lib/glfw
+GLFW_BUILD = $(GLFW_DIR)/build
+FILEDIALOG_DIR = ./lib/ImGuiFileDialog
+
+# Include paths
+INCLUDES = -I$(IMGUI_DIR) \
+           -I$(IMGUI_DIR)/backends \
+           -I$(GLFW_DIR)/include \
+           -I$(FILEDIALOG_DIR)
+
+# Library flags
+LDFLAGS = -L$(GLFW_BUILD)/src
+LIBS = -lglfw3 -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama
+
+# Directories
+SRC_DIR = src/main
+TMP_DIR = tmp/desk
+BIN_DIR = bin
+OBJ_DIR = $(TMP_DIR)/obj
+
+# ImGui sources
+IMGUI_SRCS = $(IMGUI_DIR)/imgui.cpp \
+             $(IMGUI_DIR)/imgui_draw.cpp \
+             $(IMGUI_DIR)/imgui_tables.cpp \
+             $(IMGUI_DIR)/imgui_widgets.cpp \
+             $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp \
+             $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+
+# Application sources
+DESK_SRC = $(SRC_DIR)/desk.cpp
+
+# Object files
+IMGUI_OBJS = $(OBJ_DIR)/imgui.o \
+             $(OBJ_DIR)/imgui_draw.o \
+             $(OBJ_DIR)/imgui_tables.o \
+             $(OBJ_DIR)/imgui_widgets.o \
+             $(OBJ_DIR)/imgui_impl_glfw.o \
+             $(OBJ_DIR)/imgui_impl_opengl3.o
+
+DESK_OBJ = $(OBJ_DIR)/desk.o
+
+# Target
+DESK_BIN = $(BIN_DIR)/desk
+
+.PHONY: all clean glfw
+
+all: glfw $(DESK_BIN)
+
+# Build GLFW if not present
+glfw:
+	@if [ ! -f $(GLFW_BUILD)/src/libglfw3.a ]; then \
+		echo "Building GLFW..."; \
+		mkdir -p $(GLFW_BUILD); \
+		cd $(GLFW_BUILD) && cmake .. -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF && make -j$$(nproc); \
+	fi
+
+$(DESK_BIN): $(IMGUI_OBJS) $(DESK_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# ImGui core
+$(OBJ_DIR)/imgui.o: $(IMGUI_DIR)/imgui.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_draw.o: $(IMGUI_DIR)/imgui_draw.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_tables.o: $(IMGUI_DIR)/imgui_tables.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_widgets.o: $(IMGUI_DIR)/imgui_widgets.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# ImGui backends
+$(OBJ_DIR)/imgui_impl_glfw.o: $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_impl_opengl3.o: $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Application
+$(OBJ_DIR)/desk.o: $(SRC_DIR)/desk.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR) $(BIN_DIR)/desk
+
+clean-all: clean
+	rm -rf $(GLFW_BUILD)
