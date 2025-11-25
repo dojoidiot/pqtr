@@ -18,6 +18,23 @@ Project management interface for `LABS`. Provides a graphical environment for ma
 | Input | Sony ARW (more formats planned) |
 | Output | PNG |
 
+## Build
+
+```bash
+cd DESK
+make -f Makefile.desk
+```
+
+Run with default project folder (`var/`):
+```bash
+./bin/desk
+```
+
+Run with custom project folder:
+```bash
+./bin/desk /path/to/photos
+```
+
 ## Documentation
 
 - [Specification](doc/desk.md) - Full application spec

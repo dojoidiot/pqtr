@@ -8,6 +8,8 @@
 
 #include <GLFW/glfw3.h>
 #include <cstdio>
+#include <string>
+#include <filesystem>
 
 #include "part/state.hpp"
 #include "part/files.hpp"
@@ -23,7 +25,14 @@ static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-int main(int, char**) {
+int main(int argc, char** argv) {
+    // Parse command line for root folder
+    // Default to "var/" for development
+    std::string initial_root = "var";
+    if (argc > 1) {
+        initial_root = argv[1];
+    }
+
     // Setup GLFW
     glfwSetErrorCallback(glfw_error_callback);
     if (!glfwInit()) {
@@ -58,6 +67,15 @@ int main(int, char**) {
 
     // Application state
     desk::State state;
+
+    // Set initial root folder from command line
+    namespace fs = std::filesystem;
+    fs::path root_path = fs::absolute(initial_root);
+    if (fs::exists(root_path) && fs::is_directory(root_path)) {
+        state.root_folder = root_path;
+        state.root_folder_set = true;
+        desk::scan_projects(state);
+    }
 
     // Track previous selection for image loading
     int prev_project = -1;
