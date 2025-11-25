@@ -30,8 +30,12 @@ SONY_DECODER = src/main/part/sony.cpp
 SONY_MODS = src/main/part/sony/prepare.cpp \
             src/main/part/sony/process.cpp \
             src/main/part/sony/blc.cpp \
+            src/main/part/sony/blc_bayer.cpp \
             src/main/part/sony/wb_gain.cpp \
+            src/main/part/sony/wb_bayer.cpp \
             src/main/part/sony/demosaic.cpp \
+            src/main/part/sony/color_matrix.cpp \
+            src/main/part/sony/crop.cpp \
             src/main/part/sony/gamma_oetf.cpp
 
 # Test program
@@ -42,8 +46,12 @@ SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
                $(OBJ_DIR)/prepare.o \
                $(OBJ_DIR)/process.o \
                $(OBJ_DIR)/blc.o \
+               $(OBJ_DIR)/blc_bayer.o \
                $(OBJ_DIR)/wb_gain.o \
+               $(OBJ_DIR)/wb_bayer.o \
                $(OBJ_DIR)/demosaic.o \
+               $(OBJ_DIR)/color_matrix.o \
+               $(OBJ_DIR)/crop.o \
                $(OBJ_DIR)/gamma_oetf.o \
                $(OBJ_DIR)/sony_test.o
 

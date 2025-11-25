@@ -1,5 +1,5 @@
 // state.hpp - DESK application state
-// Holds all runtime state for the DESK application
+// Internal state management for the DESK application
 
 #pragma once
 
@@ -10,52 +10,102 @@
 
 namespace desk {
 
-// Forward declarations
-struct Project;
-struct Link;
-struct Module;
+// ============================================================
+// Type Aliases
+// ============================================================
 
-// Dial value (normalized 0.0-1.0)
-using Dial = float;
+using Dial = float;                               // Normalized dial value (0.0 - 1.0)
+using Info = std::map<std::string, std::string>;  // Metadata key-value pairs
 
-// Module with dials
+// ============================================================
+// Module - Processing unit with named dials
+// ============================================================
+
 struct Module {
     std::string name;
     std::map<std::string, Dial> dials;
 };
 
-// Link (named collection of 6 modules)
+// ============================================================
+// Link - Named collection of 6 modules (45 dials total)
+// ============================================================
+
 struct Link {
     std::string name;
     bool editing_name = false;
 
-    // 6 modules per link
-    Module geometric;
-    Module color_correction;
-    Module tone_mapping;
-    Module global_color;
-    Module selective_color;
-    Module detail;
+    // 6 golden modules
+    Module geometric;        // 6 dials: crop (4), zoom (1), rotation (1)
+    Module color_correction; // 3 dials: exposure (1), white balance (2)
+    Module tone_mapping;     // 5 dials: contrast (1), curve (2), clip (2)
+    Module global_color;     // 3 dials: vibrance, saturation, density
+    Module selective_color;  // 24 dials: 8 colors x 3 HSL
+    Module detail;           // 4 dials: sharpen (2), denoise (2)
 
-    Link(const std::string& n = "New Link");
+    explicit Link(const std::string& n = "New Link");
 };
 
-// Project (RAW file with sidecars)
+// ============================================================
+// Project - RAW file with sidecars
+// ============================================================
+
 struct Project {
-    std::string name;              // File name without extension
-    std::filesystem::path raw_path; // Full path to .ARW
-    std::filesystem::path desk_path; // .desk.json
-    std::filesystem::path pipe_path; // .pipe.json
-    std::filesystem::path png_path;  // Output .png
+    std::string name;                     // File name without extension
+    std::filesystem::path raw_path;       // Full path to .ARW
+    std::filesystem::path desk_path;      // .desk.json
+    std::filesystem::path pipe_path;      // .pipe.json
+    std::filesystem::path png_path;       // Output .png
 
     bool hidden = false;
-    bool expanded = false;         // Tree node state
+    bool expanded = false;
     std::string decoder = "sony_arw2";
+    std::string tail_output;
     std::vector<Link> links;
-    std::string tail_output;       // Output filename from tail section
 };
 
-// Application state
+// ============================================================
+// Panel Visibility
+// ============================================================
+
+struct PanelVisibility {
+    bool projects = false;
+    bool info = false;
+    bool link_editor = false;
+};
+
+// ============================================================
+// Texture - OpenGL texture handle
+// ============================================================
+
+struct Texture {
+    unsigned int id = 0;
+    int width = 0;
+    int height = 0;
+    bool loaded = false;
+
+    void reset() {
+        id = 0;
+        width = 0;
+        height = 0;
+        loaded = false;
+    }
+};
+
+// ============================================================
+// Selection - Current UI selection state
+// ============================================================
+
+struct Selection {
+    int project = -1;       // Selected project index (-1 = none)
+    int link = -1;          // Selected link index (-1 = none)
+    int module = 0;         // Selected module (0-5)
+    int dial = 0;           // Selected dial within module
+};
+
+// ============================================================
+// State - Complete application state
+// ============================================================
+
 struct State {
     // Root folder
     std::filesystem::path root_folder;
@@ -63,38 +113,58 @@ struct State {
 
     // Projects
     std::vector<Project> projects;
-    int selected_project = -1;
-    int selected_link = -1;
+
+    // Selection
+    Selection selection;
+
+    // Panel visibility
+    PanelVisibility panels;
 
     // Image texture
-    unsigned int texture_id = 0;
-    int texture_width = 0;
-    int texture_height = 0;
-    bool texture_loaded = false;
+    Texture texture;
 
-    // UI state
+    // RAW metadata
+    Info raw_info;
+
+    // Status
     bool needs_refresh = false;
     bool needs_reprocess = false;
     std::string status_message;
     std::string error_message;
 
-    // Link Editor state
-    int selected_module = 0;   // 0-5: EXP, WB, TONE, COLOR, SEL, DTL
-    int selected_dial = 0;     // Index within module's dial list
+    // Check if a project is currently open
+    bool has_project() const {
+        return selection.project >= 0 &&
+               selection.project < static_cast<int>(projects.size());
+    }
+
+    // Get current project (valid only if has_project() is true)
+    Project& current_project() {
+        return projects[selection.project];
+    }
+
+    const Project& current_project() const {
+        return projects[selection.project];
+    }
 };
 
-// Module identifiers (6 golden modules - no geometric)
+// ============================================================
+// Module identifiers
+// ============================================================
+
 enum ModuleId {
-    MOD_EXP = 0,
-    MOD_WB,
-    MOD_TONE,
-    MOD_COLOR,
-    MOD_SEL,
-    MOD_DTL,
+    MOD_COLOR_CORRECTION = 0,
+    MOD_TONE_MAPPING,
+    MOD_GLOBAL_COLOR,
+    MOD_SELECTIVE_COLOR,
+    MOD_DETAIL,
     MOD_COUNT
 };
 
-// Initialize default dial values for a module
+// ============================================================
+// Module initialization functions
+// ============================================================
+
 void init_geometric(Module& m);
 void init_color_correction(Module& m);
 void init_tone_mapping(Module& m);

@@ -6,7 +6,6 @@
 #include <fstream>
 #include <sstream>
 #include <regex>
-#include <cstring>
 
 // LABS pipe
 #include <pipe.hpp>
@@ -22,13 +21,25 @@ namespace desk {
 
 namespace fs = std::filesystem;
 
-// Simple JSON helpers (minimal implementation for desk/pipe formats)
+// ============================================================
+// JSON Helpers (minimal implementation for desk/pipe formats)
+// ============================================================
+
 namespace json {
 
-std::string trim(const std::string& s) {
-    size_t start = s.find_first_not_of(" \t\n\r");
-    size_t end = s.find_last_not_of(" \t\n\r");
-    return (start == std::string::npos) ? "" : s.substr(start, end - start + 1);
+std::string read_file(const fs::path& path) {
+    std::ifstream f(path);
+    if (!f) return "";
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+bool write_file(const fs::path& path, const std::string& content) {
+    std::ofstream f(path);
+    if (!f) return false;
+    f << content;
+    return true;
 }
 
 std::string extract_string(const std::string& json, const std::string& key) {
@@ -58,27 +69,16 @@ float extract_float(const std::string& json, const std::string& key, float def =
     return def;
 }
 
-std::string read_file(const fs::path& path) {
-    std::ifstream f(path);
-    if (!f) return "";
-    std::stringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
-
-bool write_file(const fs::path& path, const std::string& content) {
-    std::ofstream f(path);
-    if (!f) return false;
-    f << content;
-    return true;
-}
-
 } // namespace json
+
+// ============================================================
+// Project Discovery
+// ============================================================
 
 void scan_projects(State& state) {
     state.projects.clear();
-    state.selected_project = -1;
-    state.selected_link = -1;
+    state.selection.project = -1;
+    state.selection.link = -1;
 
     if (!state.root_folder_set || !fs::exists(state.root_folder)) {
         return;
@@ -100,22 +100,20 @@ void scan_projects(State& state) {
         proj.pipe_path = state.root_folder / (proj.name + ".pipe.json");
         proj.png_path = state.root_folder / (proj.name + ".png");
 
-        // Load desk.json if exists
+        // Load or create desk.json
         if (fs::exists(proj.desk_path)) {
             load_desk_json(proj);
         } else {
-            // Create default desk.json
             save_desk_json(proj);
         }
 
         // Skip hidden projects
         if (proj.hidden) continue;
 
-        // Load pipe.json if exists
+        // Load or create pipe.json
         if (fs::exists(proj.pipe_path)) {
             load_pipe_json(proj);
         } else {
-            // Create default pipe.json
             save_pipe_json(proj);
         }
 
@@ -124,6 +122,10 @@ void scan_projects(State& state) {
 
     state.status_message = "Found " + std::to_string(state.projects.size()) + " projects";
 }
+
+// ============================================================
+// Sidecar File Operations
+// ============================================================
 
 bool load_desk_json(Project& project) {
     std::string content = json::read_file(project.desk_path);
@@ -151,7 +153,6 @@ bool load_pipe_json(Project& project) {
         project.decoder = "sony_arw2";
     }
 
-    // Parse tail section
     project.tail_output = json::extract_string(content, "output");
     if (project.tail_output.empty()) {
         project.tail_output = project.name + ".png";
@@ -160,15 +161,13 @@ bool load_pipe_json(Project& project) {
     // Parse links array
     project.links.clear();
 
-    // Find links array
     size_t links_start = content.find("\"links\"");
     if (links_start == std::string::npos) return true;
 
-    // Find array start
     size_t arr_start = content.find('[', links_start);
     if (arr_start == std::string::npos) return true;
 
-    // Find array end
+    // Find matching bracket
     int bracket_count = 1;
     size_t pos = arr_start + 1;
     while (pos < content.size() && bracket_count > 0) {
@@ -198,7 +197,6 @@ bool load_pipe_json(Project& project) {
         Link link(name);
 
         // Parse modules if present
-        // Geometric
         if (link_json.find("\"geometric\"") != std::string::npos) {
             link.geometric.dials["crop_top"] = json::extract_float(link_json, "top", 0.0f);
             link.geometric.dials["crop_right"] = json::extract_float(link_json, "right", 0.0f);
@@ -208,14 +206,12 @@ bool load_pipe_json(Project& project) {
             link.geometric.dials["tilt_angle"] = json::extract_float(link_json, "tilt_angle", 0.5f);
         }
 
-        // Color correction
         if (link_json.find("\"color_correction\"") != std::string::npos) {
             link.color_correction.dials["temperature"] = json::extract_float(link_json, "temperature", 0.5f);
             link.color_correction.dials["tint"] = json::extract_float(link_json, "tint", 0.5f);
             link.color_correction.dials["exposure"] = json::extract_float(link_json, "value", 0.5f);
         }
 
-        // Tone mapping
         if (link_json.find("\"tone_mapping\"") != std::string::npos) {
             link.tone_mapping.dials["contrast"] = json::extract_float(link_json, "contrast", 0.5f);
             link.tone_mapping.dials["highlights"] = json::extract_float(link_json, "highlights", 0.5f);
@@ -224,14 +220,12 @@ bool load_pipe_json(Project& project) {
             link.tone_mapping.dials["white"] = json::extract_float(link_json, "white", 0.85f);
         }
 
-        // Global color
         if (link_json.find("\"global_color\"") != std::string::npos) {
             link.global_color.dials["vibrance"] = json::extract_float(link_json, "vibrance", 0.5f);
             link.global_color.dials["saturation"] = json::extract_float(link_json, "saturation", 0.5f);
             link.global_color.dials["color_density"] = json::extract_float(link_json, "color_density", 0.5f);
         }
 
-        // Detail
         if (link_json.find("\"detail\"") != std::string::npos) {
             link.detail.dials["sharpen_amount"] = json::extract_float(link_json, "amount", 0.5f);
             link.detail.dials["sharpen_radius"] = json::extract_float(link_json, "radius", 0.5f);
@@ -339,13 +333,16 @@ bool save_pipe_json(const Project& project) {
     return json::write_file(project.pipe_path, ss.str());
 }
 
+// ============================================================
+// Project Operations
+// ============================================================
+
 bool create_project(State& state, const fs::path& raw_file) {
     if (!fs::exists(raw_file)) {
         state.error_message = "File not found: " + raw_file.string();
         return false;
     }
 
-    // Copy RAW to root folder
     std::string name = raw_file.stem().string();
     fs::path dest = state.root_folder / raw_file.filename();
 
@@ -358,7 +355,6 @@ bool create_project(State& state, const fs::path& raw_file) {
         }
     }
 
-    // Create project
     Project proj;
     proj.name = name;
     proj.raw_path = dest;
@@ -366,7 +362,6 @@ bool create_project(State& state, const fs::path& raw_file) {
     proj.pipe_path = state.root_folder / (name + ".pipe.json");
     proj.png_path = state.root_folder / (name + ".png");
 
-    // Save sidecars
     save_desk_json(proj);
     save_pipe_json(proj);
 
@@ -380,14 +375,12 @@ bool create_project(State& state, const fs::path& raw_file) {
 bool render_project(State& state, const Project& project) {
     state.status_message = "Rendering: " + project.name;
 
-    // Load RAW into sink
     pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
     if (!sink) {
         state.error_message = "Failed to read: " + project.name;
         return false;
     }
 
-    // Create pipe and decode (HEAD stage)
     pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
     pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
     if (!head) {
@@ -395,7 +388,6 @@ bool render_project(State& state, const Project& project) {
         return false;
     }
 
-    // Body-free: skip to tail and save (no links = passthrough)
     if (!head->body().tail().save(project.png_path.string())) {
         state.error_message = "Failed to save: " + project.name;
         return false;
@@ -404,6 +396,10 @@ bool render_project(State& state, const Project& project) {
     state.status_message = "Rendered: " + project.name;
     return true;
 }
+
+// ============================================================
+// Texture Operations
+// ============================================================
 
 bool load_texture(State& state, const fs::path& png_path) {
     unload_texture(state);
@@ -430,39 +426,68 @@ bool load_texture(State& state, const fs::path& png_path) {
 
     stbi_image_free(data);
 
-    state.texture_id = texture;
-    state.texture_width = width;
-    state.texture_height = height;
-    state.texture_loaded = true;
+    state.texture.id = texture;
+    state.texture.width = width;
+    state.texture.height = height;
+    state.texture.loaded = true;
 
     return true;
 }
 
 void unload_texture(State& state) {
-    if (state.texture_loaded && state.texture_id != 0) {
-        GLuint tex = state.texture_id;
+    if (state.texture.loaded && state.texture.id != 0) {
+        GLuint tex = state.texture.id;
         glDeleteTextures(1, &tex);
     }
-    state.texture_id = 0;
-    state.texture_width = 0;
-    state.texture_height = 0;
-    state.texture_loaded = false;
+    state.texture.reset();
 }
 
-fs::path open_folder_dialog() {
-    // Use ImGuiFileDialog
+// ============================================================
+// RAW Metadata
+// ============================================================
+
+bool load_raw_info(State& state, const Project& project) {
+    state.raw_info.clear();
+
+    if (!fs::exists(project.raw_path)) {
+        return false;
+    }
+
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
+    if (!sink) {
+        return false;
+    }
+
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
+        return false;
+    }
+
+    pipe::Info info = head->data().info();
+    for (const auto& [key, value] : info) {
+        state.raw_info[key] = value;
+    }
+
+    return true;
+}
+
+// ============================================================
+// File Dialogs
+// ============================================================
+
+void open_folder_dialog() {
     IGFD::FileDialogConfig config;
     config.path = ".";
     ImGuiFileDialog::Instance()->OpenDialog(
         "ChooseFolderDlg",
         "Select Root Folder",
-        nullptr,  // nullptr for folder selection
+        nullptr,
         config
     );
-    return fs::path();  // Actual selection handled in main loop
 }
 
-fs::path open_raw_file_dialog() {
+void open_raw_file_dialog() {
     IGFD::FileDialogConfig config;
     config.path = ".";
     ImGuiFileDialog::Instance()->OpenDialog(
@@ -471,7 +496,6 @@ fs::path open_raw_file_dialog() {
         ".ARW,.arw",
         config
     );
-    return fs::path();  // Actual selection handled in main loop
 }
 
 } // namespace desk

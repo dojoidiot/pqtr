@@ -405,10 +405,12 @@ namespace sony
             metadata.bayer_pattern = 46; // Default to RGGB
         }
 
-        // Set default black/white levels, typical for 14-bit Sony sensors.
-        // These are used if not found in the file's metadata.
+        // Set default black/white levels for Sony sensors.
+        // Black level 512 is standard for Sony 14-bit sensors.
+        // White level 15360 is the practical clipping point (not theoretical 16383).
+        // Using 15360 preserves highlight headroom per Sony metadata.
         metadata.black_level = 512;
-        metadata.white_level = 16383;
+        metadata.white_level = 15360;
 
         if (found_sony_wb && wb_rggb[1] > 0)
         {
@@ -426,11 +428,17 @@ namespace sony
             metadata.wb_rggb[3] = 1024;
         }
 
-        // Standard sRGB conversion matrix for Sony ILCE-7M3.
+        // Color matrix: camera RGB → linear sRGB
+        // From Sony metadata tag 0x7310 (SR2SubIFD "Color Matrix")
+        // Values are fixed-point /1024:
+        //   1344 -211  -76
+        //     -9 1224 -159
+        //      7  -41 1090
+        // This is the pure colorimetric transform (WB not baked in)
         metadata.color_matrix = cv::Matx33f(
-            1.9413f, -0.6498f, -0.2915f,
-            -0.3204f, 1.2907f, 0.0297f,
-            -0.0625f, 0.2271f, 0.8354f);
+            1344.0f / 1024.0f, -211.0f / 1024.0f,  -76.0f / 1024.0f,
+              -9.0f / 1024.0f, 1224.0f / 1024.0f, -159.0f / 1024.0f,
+               7.0f / 1024.0f,  -41.0f / 1024.0f, 1090.0f / 1024.0f);
 
         // Active area crop - removes optical black borders
         // Read from DNG DefaultCropOrigin/DefaultCropSize tags

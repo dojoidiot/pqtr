@@ -3,8 +3,13 @@
 #include "projects.hpp"
 #include "files.hpp"
 #include "imgui.h"
+#include <cstring>
 
 namespace desk {
+
+// ============================================================
+// Projects Panel
+// ============================================================
 
 bool render_projects_panel(State& state) {
     bool selection_changed = false;
@@ -25,7 +30,7 @@ bool render_projects_panel(State& state) {
     ImGui::Separator();
 
     if (!state.root_folder_set) {
-        ImGui::TextWrapped("No root folder selected.\n\nUse File > Select Root Folder to begin.");
+        ImGui::TextWrapped("No root folder selected.\n\nUse Open Folder to begin.");
         return false;
     }
 
@@ -35,14 +40,15 @@ bool render_projects_panel(State& state) {
     }
 
     // Project tree
-    for (int p = 0; p < (int)state.projects.size(); p++) {
+    for (int p = 0; p < static_cast<int>(state.projects.size()); p++) {
         Project& proj = state.projects[p];
 
         ImGui::PushID(p);
 
-        // Tree node for project
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_OpenOnDoubleClick;
-        if (state.selected_project == p && state.selected_link == -1) {
+        // Tree node flags
+        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                   ImGuiTreeNodeFlags_OpenOnDoubleClick;
+        if (state.selection.project == p && state.selection.link == -1) {
             flags |= ImGuiTreeNodeFlags_Selected;
         }
         if (proj.links.empty()) {
@@ -53,14 +59,14 @@ bool render_projects_panel(State& state) {
 
         // Select project on click
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-            if (state.selected_project != p) {
-                state.selected_project = p;
-                state.selected_link = -1;
+            if (state.selection.project != p) {
+                state.selection.project = p;
+                state.selection.link = -1;
                 selection_changed = true;
             }
         }
 
-        // Project buttons (same line)
+        // Project buttons
         ImGui::SameLine(ImGui::GetWindowWidth() - 60);
 
         // Add link button
@@ -79,12 +85,11 @@ bool render_projects_panel(State& state) {
         if (ImGui::SmallButton("-##hide")) {
             proj.hidden = true;
             save_desk_json(proj);
-            if (state.selected_project == p) {
-                state.selected_project = -1;
-                state.selected_link = -1;
+            if (state.selection.project == p) {
+                state.selection.project = -1;
+                state.selection.link = -1;
                 selection_changed = true;
             }
-            // Remove from list (will be re-scanned as hidden)
             state.projects.erase(state.projects.begin() + p);
             p--;
             ImGui::PopID();
@@ -97,13 +102,14 @@ bool render_projects_panel(State& state) {
 
         // Links under project
         if (node_open) {
-            for (int l = 0; l < (int)proj.links.size(); l++) {
+            for (int l = 0; l < static_cast<int>(proj.links.size()); l++) {
                 Link& link = proj.links[l];
 
                 ImGui::PushID(l);
 
-                ImGuiTreeNodeFlags link_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (state.selected_project == p && state.selected_link == l) {
+                ImGuiTreeNodeFlags link_flags = ImGuiTreeNodeFlags_Leaf |
+                                                ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (state.selection.project == p && state.selection.link == l) {
                     link_flags |= ImGuiTreeNodeFlags_Selected;
                 }
 
@@ -112,11 +118,13 @@ bool render_projects_panel(State& state) {
                     static char name_buf[64];
                     if (ImGui::IsWindowAppearing() || !link.editing_name) {
                         strncpy(name_buf, link.name.c_str(), sizeof(name_buf) - 1);
+                        name_buf[sizeof(name_buf) - 1] = '\0';
                     }
 
                     ImGui::SetNextItemWidth(120);
                     if (ImGui::InputText("##name", name_buf, sizeof(name_buf),
-                                         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
+                                         ImGuiInputTextFlags_EnterReturnsTrue |
+                                         ImGuiInputTextFlags_AutoSelectAll)) {
                         link.name = name_buf;
                         link.editing_name = false;
                         save_pipe_json(proj);
@@ -127,10 +135,9 @@ bool render_projects_panel(State& state) {
                 } else {
                     ImGui::TreeNodeEx(link.name.c_str(), link_flags);
 
-                    // Select link on click
                     if (ImGui::IsItemClicked()) {
-                        state.selected_project = p;
-                        state.selected_link = l;
+                        state.selection.project = p;
+                        state.selection.link = l;
                         selection_changed = true;
                     }
                 }
@@ -152,11 +159,11 @@ bool render_projects_panel(State& state) {
                 if (ImGui::SmallButton("-##remove")) {
                     proj.links.erase(proj.links.begin() + l);
                     save_pipe_json(proj);
-                    if (state.selected_link == l) {
-                        state.selected_link = -1;
+                    if (state.selection.link == l) {
+                        state.selection.link = -1;
                         selection_changed = true;
-                    } else if (state.selected_link > l) {
-                        state.selected_link--;
+                    } else if (state.selection.link > l) {
+                        state.selection.link--;
                     }
                     state.needs_reprocess = true;
                     l--;
@@ -175,6 +182,40 @@ bool render_projects_panel(State& state) {
     }
 
     return selection_changed;
+}
+
+// ============================================================
+// Info Panel
+// ============================================================
+
+void render_info_panel(State& state) {
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "RAW Info");
+    ImGui::Separator();
+
+    if (state.raw_info.empty()) {
+        ImGui::TextDisabled("No metadata loaded");
+        return;
+    }
+
+    // Scrolling table of name-value pairs
+    if (ImGui::BeginTable("##info_table", 2,
+        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
+        ImVec2(0, ImGui::GetContentRegionAvail().y))) {
+
+        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 90.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableHeadersRow();
+
+        for (const auto& [key, value] : state.raw_info) {
+            ImGui::TableNextRow();
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(key.c_str());
+            ImGui::TableNextColumn();
+            ImGui::TextUnformatted(value.c_str());
+        }
+
+        ImGui::EndTable();
+    }
 }
 
 } // namespace desk

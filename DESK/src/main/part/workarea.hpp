@@ -1,5 +1,5 @@
 // workarea.hpp - Work area component
-// Central area displaying output PNG
+// Central area displaying output PNG (fullscreen background)
 
 #pragma once
 
@@ -7,7 +7,7 @@
 
 namespace desk {
 
-// Render the work area (image display)
+// Render the work area (centered image display)
 void render_work_area(State& state);
 
 } // namespace desk

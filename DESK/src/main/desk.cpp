@@ -1,5 +1,5 @@
-// DESK - Desktop GUI for LABS
-// Project management interface for RAW image processing
+// desk.cpp - DESK application entry point
+// Project management interface for LABS
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -12,24 +12,243 @@
 #include <filesystem>
 
 #include "part/state.hpp"
+#include "part/theme.hpp"
 #include "part/files.hpp"
 #include "part/projects.hpp"
 #include "part/workarea.hpp"
 #include "part/linkeditor.hpp"
 
-// Layout constants
-static const float LEFT_PANEL_WIDTH = 250.0f;   // Projects panel
-static const float RIGHT_PANEL_WIDTH = 300.0f;  // Future panel (empty)
-static const float BOTTOM_PANEL_HEIGHT = 150.0f; // Module menus + dial
-static const float DIAL_WIDTH = 150.0f;          // Dial control width
+namespace {
 
-static void glfw_error_callback(int error, const char* description) {
+// ============================================================
+// GLFW Error Callback
+// ============================================================
+
+void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
+// ============================================================
+// Menu Bar Rendering
+// ============================================================
+
+void render_menu_bar(desk::State& state, int display_w) {
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(display_w), desk::MENU_BAR_HEIGHT));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(10, 5));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(10, 0));
+
+    ImGui::Begin("##MenuBar", nullptr,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoScrollbar);
+
+    // Project buttons (always enabled)
+    if (ImGui::Button("New Project")) {
+        desk::open_raw_file_dialog();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Open Folder")) {
+        desk::open_folder_dialog();
+    }
+
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    // Panel toggle buttons (disabled until project is open)
+    bool project_open = state.has_project();
+    ImGui::BeginDisabled(!project_open);
+
+    if (ImGui::Button(state.panels.projects ? "Projects [x]" : "Projects [ ]")) {
+        state.panels.projects = !state.panels.projects;
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button(state.panels.info ? "Info [x]" : "Info [ ]")) {
+        state.panels.info = !state.panels.info;
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button(state.panels.link_editor ? "Editor [x]" : "Editor [ ]")) {
+        state.panels.link_editor = !state.panels.link_editor;
+    }
+
+    ImGui::EndDisabled();
+
+    // Status message on right side
+    if (!state.status_message.empty()) {
+        float status_width = ImGui::CalcTextSize(state.status_message.c_str()).x;
+        ImGui::SameLine(display_w - status_width - 20);
+        ImGui::TextDisabled("%s", state.status_message.c_str());
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+}
+
+// ============================================================
+// Image Background Rendering
+// ============================================================
+
+void render_image_background(desk::State& state, int display_w, int display_h) {
+    float content_y = desk::MENU_BAR_HEIGHT;
+    float content_h = display_h - desk::MENU_BAR_HEIGHT;
+
+    ImGui::SetNextWindowPos(ImVec2(0, content_y));
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(display_w), content_h));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+
+    ImGui::Begin("##ImageBackground", nullptr,
+        ImGuiWindowFlags_NoMove |
+        ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoTitleBar |
+        ImGuiWindowFlags_NoBringToFrontOnFocus |
+        ImGuiWindowFlags_NoScrollbar |
+        ImGuiWindowFlags_NoScrollWithMouse);
+
+    desk::render_work_area(state);
+
+    ImGui::End();
+    ImGui::PopStyleVar();
+}
+
+// ============================================================
+// Floating Panels Rendering
+// ============================================================
+
+bool render_floating_panels(desk::State& state, int display_w, int display_h) {
+    bool selection_changed = false;
+    float content_y = desk::MENU_BAR_HEIGHT;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, desk::PANEL_ALPHA);
+
+    // Projects Panel
+    if (state.panels.projects) {
+        ImGui::SetNextWindowPos(ImVec2(10, content_y + 10), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(
+            ImVec2(desk::PROJECTS_PANEL_WIDTH, desk::PROJECTS_PANEL_HEIGHT),
+            ImGuiCond_FirstUseEver);
+
+        ImGui::Begin("Projects", &state.panels.projects, ImGuiWindowFlags_NoCollapse);
+        selection_changed = desk::render_projects_panel(state);
+        ImGui::End();
+    }
+
+    // Info Panel
+    if (state.panels.info) {
+        ImGui::SetNextWindowPos(
+            ImVec2(10, content_y + desk::PROJECTS_PANEL_HEIGHT + 20),
+            ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(
+            ImVec2(desk::INFO_PANEL_WIDTH, desk::INFO_PANEL_HEIGHT),
+            ImGuiCond_FirstUseEver);
+
+        ImGui::Begin("RAW Info", &state.panels.info, ImGuiWindowFlags_NoCollapse);
+        desk::render_info_panel(state);
+        ImGui::End();
+    }
+
+    // Link Editor Panel
+    if (state.panels.link_editor) {
+        float editor_x = (display_w - desk::LINK_EDITOR_WIDTH) / 2.0f;
+        float editor_y = display_h - desk::LINK_EDITOR_HEIGHT - 20;
+        ImGui::SetNextWindowPos(ImVec2(editor_x, editor_y), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(
+            ImVec2(desk::LINK_EDITOR_WIDTH, desk::LINK_EDITOR_HEIGHT),
+            ImGuiCond_FirstUseEver);
+
+        ImGui::Begin("Link Editor", &state.panels.link_editor, ImGuiWindowFlags_NoCollapse);
+        desk::render_module_menus(state);
+        ImGui::End();
+    }
+
+    ImGui::PopStyleVar();
+
+    return selection_changed;
+}
+
+// ============================================================
+// File Dialogs Processing
+// ============================================================
+
+void process_file_dialogs(desk::State& state) {
+    namespace fs = std::filesystem;
+
+    // Folder selection dialog
+    if (ImGuiFileDialog::Instance()->Display("ChooseFolderDlg",
+        ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
+
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            state.root_folder = ImGuiFileDialog::Instance()->GetCurrentPath();
+            state.root_folder_set = true;
+            desk::scan_projects(state);
+            if (!state.projects.empty()) {
+                state.panels.projects = true;
+            }
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    // RAW file selection dialog
+    if (ImGuiFileDialog::Instance()->Display("ChooseRawDlg",
+        ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
+
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
+            desk::create_project(state, path);
+            state.panels.projects = true;
+            state.panels.link_editor = true;
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+}
+
+// ============================================================
+// Project Selection Change Handler
+// ============================================================
+
+void handle_selection_change(desk::State& state, int& prev_project, bool selection_changed) {
+    namespace fs = std::filesystem;
+
+    if (!selection_changed && state.selection.project == prev_project) {
+        return;
+    }
+
+    prev_project = state.selection.project;
+
+    if (state.has_project()) {
+        const auto& proj = state.current_project();
+
+        // Load RAW metadata
+        desk::load_raw_info(state, proj);
+
+        // Render if PNG missing or reprocess requested
+        if (!fs::exists(proj.png_path) || state.needs_reprocess) {
+            desk::render_project(state, proj);
+            state.needs_reprocess = false;
+        }
+
+        desk::load_texture(state, proj.png_path);
+    } else {
+        desk::unload_texture(state);
+        state.raw_info.clear();
+    }
+}
+
+} // anonymous namespace
+
+// ============================================================
+// Main Entry Point
+// ============================================================
+
 int main(int argc, char** argv) {
-    // Parse command line for root folder
-    // Default to "var/" for development
+    namespace fs = std::filesystem;
+
+    // Parse command line
     std::string initial_root = "var";
     if (argc > 1) {
         initial_root = argv[1];
@@ -54,7 +273,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // vsync
+    glfwSwapInterval(1);
 
     // Setup ImGui
     IMGUI_CHECKVERSION();
@@ -62,7 +281,7 @@ int main(int argc, char** argv) {
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    ImGui::StyleColorsDark();
+    desk::apply_theme();
 
     ImGui_ImplGlfw_InitForOpenGL(window, true);
     ImGui_ImplOpenGL3_Init("#version 330");
@@ -70,8 +289,7 @@ int main(int argc, char** argv) {
     // Application state
     desk::State state;
 
-    // Set initial root folder from command line
-    namespace fs = std::filesystem;
+    // Set initial root folder
     fs::path root_path = fs::absolute(initial_root);
     if (fs::exists(root_path) && fs::is_directory(root_path)) {
         state.root_folder = root_path;
@@ -79,7 +297,6 @@ int main(int argc, char** argv) {
         desk::scan_projects(state);
     }
 
-    // Track previous selection for image loading
     int prev_project = -1;
 
     // Main loop
@@ -90,155 +307,19 @@ int main(int argc, char** argv) {
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Get window dimensions
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
 
-        // Menu bar height
-        float menu_bar_height = 0.0f;
+        // Render UI components
+        render_menu_bar(state, display_w);
+        render_image_background(state, display_w, display_h);
+        bool selection_changed = render_floating_panels(state, display_w, display_h);
 
-        // Main Menu Bar
-        if (ImGui::BeginMainMenuBar()) {
-            menu_bar_height = ImGui::GetWindowSize().y;
+        // Process dialogs and handle selection changes
+        process_file_dialogs(state);
+        handle_selection_change(state, prev_project, selection_changed);
 
-            if (ImGui::BeginMenu("File")) {
-                if (ImGui::MenuItem("Select Root Folder...", "Ctrl+O")) {
-                    desk::open_folder_dialog();
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Refresh", "F5")) {
-                    desk::scan_projects(state);
-                }
-                ImGui::Separator();
-                if (ImGui::MenuItem("Exit", "Ctrl+Q")) {
-                    glfwSetWindowShouldClose(window, GLFW_TRUE);
-                }
-                ImGui::EndMenu();
-            }
-
-            // Status on right side of menu bar
-            if (!state.status_message.empty()) {
-                float status_width = ImGui::CalcTextSize(state.status_message.c_str()).x;
-                ImGui::SameLine(display_w - status_width - 20);
-                ImGui::TextDisabled("%s", state.status_message.c_str());
-            }
-
-            ImGui::EndMainMenuBar();
-        }
-
-        // Calculate layout dimensions
-        float content_height = display_h - menu_bar_height;
-        float center_width = display_w - LEFT_PANEL_WIDTH - RIGHT_PANEL_WIDTH;
-        float image_height = content_height - BOTTOM_PANEL_HEIGHT;
-        float menu_width = center_width - DIAL_WIDTH;
-
-        // === LEFT PANEL: Projects ===
-        ImGui::SetNextWindowPos(ImVec2(0, menu_bar_height));
-        ImGui::SetNextWindowSize(ImVec2(LEFT_PANEL_WIDTH, content_height));
-        ImGui::Begin("##ProjectPanel", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoTitleBar);
-
-        bool selection_changed = desk::render_projects_panel(state);
-
-        ImGui::End();
-
-        // === CENTER TOP: Work Area (Image) ===
-        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH, menu_bar_height));
-        ImGui::SetNextWindowSize(ImVec2(center_width, image_height));
-        ImGui::Begin("##WorkArea", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoTitleBar);
-
-        desk::render_work_area(state);
-
-        ImGui::End();
-
-        // === CENTER BOTTOM LEFT: Module Menus ===
-        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH, menu_bar_height + image_height));
-        ImGui::SetNextWindowSize(ImVec2(menu_width, BOTTOM_PANEL_HEIGHT));
-        ImGui::Begin("##ModuleMenus", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoTitleBar);
-
-        desk::render_module_menus(state);
-
-        ImGui::End();
-
-        // === CENTER BOTTOM RIGHT: Dial Control ===
-        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH + menu_width, menu_bar_height + image_height));
-        ImGui::SetNextWindowSize(ImVec2(DIAL_WIDTH, BOTTOM_PANEL_HEIGHT));
-        ImGui::Begin("##DialControl", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoTitleBar);
-
-        desk::render_dial_control(state);
-
-        ImGui::End();
-
-        // === RIGHT PANEL: Future (empty) ===
-        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH + center_width, menu_bar_height));
-        ImGui::SetNextWindowSize(ImVec2(RIGHT_PANEL_WIDTH, content_height));
-        ImGui::Begin("##RightPanel", nullptr,
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoTitleBar);
-
-        ImGui::TextDisabled("(future)");
-
-        ImGui::End();
-
-        // === File Dialogs ===
-
-        // Folder selection dialog
-        if (ImGuiFileDialog::Instance()->Display("ChooseFolderDlg",
-            ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
-            if (ImGuiFileDialog::Instance()->IsOk()) {
-                state.root_folder = ImGuiFileDialog::Instance()->GetCurrentPath();
-                state.root_folder_set = true;
-                desk::scan_projects(state);
-            }
-            ImGuiFileDialog::Instance()->Close();
-        }
-
-        // RAW file selection dialog
-        if (ImGuiFileDialog::Instance()->Display("ChooseRawDlg",
-            ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
-            if (ImGuiFileDialog::Instance()->IsOk()) {
-                std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
-                desk::create_project(state, path);
-            }
-            ImGuiFileDialog::Instance()->Close();
-        }
-
-        // Load image when project selection changes
-        if (selection_changed || state.selected_project != prev_project) {
-            prev_project = state.selected_project;
-            if (state.selected_project >= 0 && state.selected_project < (int)state.projects.size()) {
-                const auto& proj = state.projects[state.selected_project];
-
-                // Render if PNG missing or reprocess requested
-                if (!fs::exists(proj.png_path) || state.needs_reprocess) {
-                    desk::render_project(state, proj);
-                    state.needs_reprocess = false;
-                }
-
-                desk::load_texture(state, proj.png_path);
-            } else {
-                desk::unload_texture(state);
-            }
-        }
-
-        // Render
+        // Render frame
         ImGui::Render();
         glViewport(0, 0, display_w, display_h);
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);

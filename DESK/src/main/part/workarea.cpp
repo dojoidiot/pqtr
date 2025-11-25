@@ -2,27 +2,24 @@
 
 #include "workarea.hpp"
 #include "imgui.h"
+#include <cstdint>
 
 namespace desk {
 
 void render_work_area(State& state) {
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Image");
-    ImGui::Separator();
-
     if (!state.root_folder_set) {
         ImGui::TextWrapped("Select a root folder to begin.");
         return;
     }
 
-    if (state.selected_project < 0 || state.selected_project >= (int)state.projects.size()) {
+    if (!state.has_project()) {
         ImGui::TextWrapped("Select a project to view its output.");
         return;
     }
 
-    const Project& proj = state.projects[state.selected_project];
+    const Project& proj = state.current_project();
 
-    if (!state.texture_loaded) {
-        // Show status
+    if (!state.texture.loaded) {
         if (!state.error_message.empty()) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", state.error_message.c_str());
         } else {
@@ -35,7 +32,8 @@ void render_work_area(State& state) {
     ImVec2 avail = ImGui::GetContentRegionAvail();
 
     // Calculate image size maintaining aspect ratio
-    float img_aspect = (float)state.texture_width / (float)state.texture_height;
+    float img_aspect = static_cast<float>(state.texture.width) /
+                       static_cast<float>(state.texture.height);
     float avail_aspect = avail.x / avail.y;
 
     float display_w, display_h;
@@ -57,13 +55,13 @@ void render_work_area(State& state) {
     ImGui::SetCursorPos(ImVec2(cursor.x + offset_x, cursor.y + offset_y));
 
     // Display the image
-    ImGui::Image((ImTextureID)(intptr_t)state.texture_id, ImVec2(display_w, display_h));
+    ImGui::Image(static_cast<ImTextureID>(state.texture.id), ImVec2(display_w, display_h));
 
     // Show image info on hover
     if (ImGui::IsItemHovered()) {
         ImGui::BeginTooltip();
         ImGui::Text("%s", proj.name.c_str());
-        ImGui::Text("%d x %d", state.texture_width, state.texture_height);
+        ImGui::Text("%d x %d", state.texture.width, state.texture.height);
         ImGui::EndTooltip();
     }
 }

@@ -1,10 +1,16 @@
 // demosaic.cpp
-// Demosaic Module - Gold
-// Uses GPU-accelerated OpenCV demosaicing
+// Demosaic Module - Scene-Referred
+// Converts Bayer pattern to RGB (not BGR)
+//
+// Input: CV_32FC1 (white-balanced Bayer, normalized [0,1+])
+// Output: CV_32FC3 (linear RGB)
+//
+// Note: OpenCV demosaicing requires 8-bit or 16-bit input.
+// We scale float to 16-bit, demosaic, then scale back.
 
 #include "../sony.h"
 #include <opencv2/core.hpp>
-#include <opencv2/imgproc.hpp> // For cv::demosaicing
+#include <opencv2/imgproc.hpp>
 #include <iostream>
 
 namespace sony
@@ -20,41 +26,57 @@ namespace sony
             return false;
         }
 
-        if (input.type() != CV_16UC1)
+        if (input.type() != CV_32FC1)
         {
-            std::cerr << "[Demosaic] Error: Input must be CV_16UC1\n";
+            std::cerr << "[Demosaic] Error: Input must be CV_32FC1, got " << input.type() << "\n";
             return false;
         }
 
         try
         {
-            // The metadata.bayer_pattern is a custom code from the project's TIFF parsing.
-            // We map it to the correct OpenCV cv::ColorConversionCodes enum for BGR output.
+            // Map custom pattern codes to OpenCV RGB output codes
+            // IMPORTANT: Use RGB not BGR for correct color matrix application
             int cv_pattern_code;
             switch (metadata.bayer_pattern)
             {
-            case 46: // Custom code for RGGB
-                cv_pattern_code = cv::COLOR_BayerRG2BGR;
+            case 46: // RGGB
+                cv_pattern_code = cv::COLOR_BayerRG2RGB;
                 break;
-            case 47: // Custom code for GRBG
-                cv_pattern_code = cv::COLOR_BayerGR2BGR;
+            case 47: // GRBG
+                cv_pattern_code = cv::COLOR_BayerGR2RGB;
                 break;
-            case 48: // Custom code for BGGR
-                cv_pattern_code = cv::COLOR_BayerBG2BGR;
+            case 48: // BGGR
+                cv_pattern_code = cv::COLOR_BayerBG2RGB;
                 break;
-            case 49: // Custom code for GBRG
-                cv_pattern_code = cv::COLOR_BayerGB2BGR;
+            case 49: // GBRG
+                cv_pattern_code = cv::COLOR_BayerGB2RGB;
                 break;
             default:
                 std::cerr << "[Demosaic] Warning: Unknown bayer pattern "
-                            << metadata.bayer_pattern << ". Defaulting to RGGB." << std::endl;
-                cv_pattern_code = cv::COLOR_BayerRG2BGR; // Default to RGGB
+                          << metadata.bayer_pattern << ". Defaulting to RGGB.\n";
+                cv_pattern_code = cv::COLOR_BayerRG2RGB;
                 break;
             }
 
-            // Use OpenCV's accelerated demosaicing function.
-            // This performs bilinear interpolation by default.
-            cv::demosaicing(input, output, cv_pattern_code);
+            // OpenCV demosaicing requires integer input (8-bit or 16-bit)
+            // Scale float [0,1+] to 16-bit, demosaic, scale back
+            //
+            // HEURISTIC: Use 65535 scale with 4x headroom mapping
+            // - Input [0,1] maps to [0,16383] (normal range)
+            // - Input [1,4] maps to [16383,65535] (highlight headroom)
+            // - Values >4 are clipped (extreme overexposure)
+            // This preserves highlight detail from linearization curve expansion
+            // while staying within uint16 range for OpenCV
+
+            cv::UMat input_u16;
+            input.convertTo(input_u16, CV_16UC1, 16383.0);  // Scale: 1.0 -> 16383
+
+            // Demosaic to RGB
+            cv::UMat rgb_u16;
+            cv::demosaicing(input_u16, rgb_u16, cv_pattern_code);
+
+            // Convert back to float - don't clamp, preserve HDR headroom
+            rgb_u16.convertTo(output, CV_32FC3, 1.0 / 16383.0);
 
             return true;
         }

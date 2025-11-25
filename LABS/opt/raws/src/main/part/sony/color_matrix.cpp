@@ -1,6 +1,13 @@
 // color_matrix.cpp
-// Color Matrix Module - Applies camera RGB → sRGB color matrix
-// Part of HEAD automatic processing (not a dial-based module)
+// Color Matrix Module - Applies camera RGB → linear sRGB color matrix
+// Part of HEAD automatic processing
+//
+// Input: CV_32FC3 RGB (camera native, white-balanced)
+// Output: CV_32FC3 RGB (linear sRGB working space)
+//
+// The matrix transforms from camera-specific RGB primaries to standard
+// sRGB primaries. This is a pure colorimetric transform - WB is already
+// applied in wb_bayer stage.
 
 #include "../sony.h"
 #include <opencv2/core.hpp>
@@ -27,26 +34,17 @@ namespace sony
 
         try
         {
-            // Get color matrix from metadata
+            // Get color matrix from metadata (camera RGB → sRGB)
             const cv::Matx33f &matrix = metadata.color_matrix;
 
-            // Debug output
-            std::cout << "    Color matrix (camera → sRGB):\n";
-            std::cout << "      [" << matrix(0,0) << ", " << matrix(0,1) << ", " << matrix(0,2) << "]\n";
-            std::cout << "      [" << matrix(1,0) << ", " << matrix(1,1) << ", " << matrix(1,2) << "]\n";
-            std::cout << "      [" << matrix(2,0) << ", " << matrix(2,1) << ", " << matrix(2,2) << "]\n";
-
-            // Convert matrix to Mat for transform
+            // cv::transform applies matrix to each pixel: out = matrix * in
+            // Matrix is 3x3, applied to RGB channels
             cv::Mat matrixMat(matrix);
-
-            // Apply color matrix: output = input * matrix^T
-            // cv::transform applies the matrix to each pixel
-            cv::UMat transformed;
-            cv::transform(input, transformed, matrixMat);
+            cv::transform(input, output, matrixMat);
 
             // Don't clamp - allow values outside [0,1] for HDR headroom
-            // Clamping happens later in tone mapping or output
-            output = transformed;
+            // Scene-referred data may have highlights > 1.0
+            // Clamping happens in TAIL (output stage)
 
             return true;
         }

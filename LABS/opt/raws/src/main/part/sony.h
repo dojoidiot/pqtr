@@ -115,13 +115,21 @@ namespace sony
         // No instances - static interface only
         Decoder() = delete;
 
-        // Internal pipeline stages
+        // Internal pipeline stages (scene-referred order)
+        // Stage 1-2: On Bayer (CV_16UC1 → CV_32FC1)
+        static bool blc_bayer(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool wb_bayer(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        // Stage 3: Demosaic (CV_32FC1 → CV_32FC3 RGB)
         static bool demosaic(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-        static bool blc(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
-        static bool wb_gain(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        // Stage 4-5: On RGB (CV_32FC3)
         static bool color_matrix(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
         static bool crop(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        // Display-referred (not used for scene-referred output)
         static bool gamma_oetf(const cv::UMat &input, cv::UMat &output);
+
+        // Legacy (deprecated - kept for reference)
+        static bool blc(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
+        static bool wb_gain(const cv::UMat &input, cv::UMat &output, const RawMetadata &metadata);
     };
 
 } // namespace sony

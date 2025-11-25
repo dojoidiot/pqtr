@@ -55,6 +55,7 @@ FILEDIALOG_SRC = $(FILEDIALOG_DIR)/ImGuiFileDialog.cpp
 # Application sources
 DESK_SRC = $(SRC_DIR)/desk.cpp
 PART_SRCS = $(PART_DIR)/state.cpp \
+            $(PART_DIR)/theme.cpp \
             $(PART_DIR)/files.cpp \
             $(PART_DIR)/projects.cpp \
             $(PART_DIR)/workarea.cpp \
@@ -72,6 +73,7 @@ FILEDIALOG_OBJ = $(OBJ_DIR)/ImGuiFileDialog.o
 
 DESK_OBJ = $(OBJ_DIR)/desk.o
 PART_OBJS = $(OBJ_DIR)/part/state.o \
+            $(OBJ_DIR)/part/theme.o \
             $(OBJ_DIR)/part/files.o \
             $(OBJ_DIR)/part/projects.o \
             $(OBJ_DIR)/part/workarea.o \
@@ -121,6 +123,9 @@ $(OBJ_DIR)/ImGuiFileDialog.o: $(FILEDIALOG_SRC) | $(OBJ_DIR)
 
 # Application parts
 $(OBJ_DIR)/part/state.o: $(PART_DIR)/state.cpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/theme.o: $(PART_DIR)/theme.cpp $(PART_DIR)/theme.hpp | $(OBJ_DIR)/part
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJ_DIR)/part/files.o: $(PART_DIR)/files.cpp $(PART_DIR)/files.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part

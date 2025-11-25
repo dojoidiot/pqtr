@@ -118,3 +118,11 @@ test-display: $(PIPE_BIN)
 	@mkdir -p $(TEST_OUTPUT_DIR)
 	@echo "Running pipe with --default-display on $(TEST_INPUT)..."
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(PIPE_BIN) $(TEST_INPUT) --default-display $(TEST_OUTPUT_DIR)
+
+test-all: $(PIPE_BIN)
+	@mkdir -p $(TEST_OUTPUT_DIR)
+	@for f in var/pics/*.ARW; do \
+		echo "Processing $$f..."; \
+		LD_LIBRARY_PATH=$(OPENCV_LIB) $(PIPE_BIN) "$$f" $(TEST_OUTPUT_DIR); \
+	done
+	@echo "Done. Output in $(TEST_OUTPUT_DIR)"
