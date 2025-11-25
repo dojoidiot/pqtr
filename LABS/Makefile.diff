@@ -34,7 +34,7 @@ DIFF_OBJ = $(OBJ_DIR)/diff.o
 DIFF_BIN = $(BIN_DIR)/diff
 
 # Test configuration
-TEST_CANDIDATE = tmp/var/labs/DSC00144.png
+TEST_CANDIDATE = tmp/var/pipe/DSC00144.png
 TEST_TARGET = var/pics/DSC00144.JPG
 
 .PHONY: all clean test

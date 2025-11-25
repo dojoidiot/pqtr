@@ -8,6 +8,10 @@
 #include <regex>
 #include <cstring>
 
+// LABS pipe
+#include <pipe.hpp>
+#include <tool.hpp>
+
 // stb_image for PNG loading
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
@@ -145,6 +149,12 @@ bool load_pipe_json(Project& project) {
     project.decoder = json::extract_string(content, "decoder");
     if (project.decoder.empty()) {
         project.decoder = "sony_arw2";
+    }
+
+    // Parse tail section
+    project.tail_output = json::extract_string(content, "output");
+    if (project.tail_output.empty()) {
+        project.tail_output = project.name + ".png";
     }
 
     // Parse links array
@@ -320,7 +330,10 @@ bool save_pipe_json(const Project& project) {
         ss << "    }";
     }
 
-    ss << "\n  ]\n";
+    ss << "\n  ],\n";
+    ss << "  \"tail\": {\n";
+    ss << "    \"output\": \"" << (project.tail_output.empty() ? project.name + ".png" : project.tail_output) << "\"\n";
+    ss << "  }\n";
     ss << "}\n";
 
     return json::write_file(project.pipe_path, ss.str());
@@ -361,6 +374,31 @@ bool create_project(State& state, const fs::path& raw_file) {
     state.status_message = "Created project: " + name;
     state.needs_reprocess = true;
 
+    return true;
+}
+
+bool render_project(State& state, const Project& project) {
+    state.status_message = "Rendering: " + project.name;
+
+    // Load RAW into sink
+    pqtr::Sink* sink = pqtr::Tool::read(project.raw_path.string());
+
+    // Decode through pipe head
+    pipe::Head head;
+    if (!pipe::open(*sink, project.decoder, head)) {
+        delete sink;
+        state.error_message = "Failed to decode: " + project.name;
+        return false;
+    }
+    delete sink;
+
+    // TAIL: Save PNG (gamma applied internally)
+    if (!pipe::save(head.view, project.png_path.string())) {
+        state.error_message = "Failed save: " + project.name;
+        return false;
+    }
+
+    state.status_message = "Rendered: " + project.name;
     return true;
 }
 

@@ -94,7 +94,7 @@ pqtr::Tool::save(outputData, "output.png");
 ### HEAD: RAW Decoding
 
 ```cpp
-// In labs.cpp or pipe HEAD implementation
+// In pipe.cpp HEAD implementation
 pqtr::Sink* rawSink = pqtr::Tool::read("image.ARW");
 decoder.decode(*rawSink, outputImage, metadata);
 delete rawSink;

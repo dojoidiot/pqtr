@@ -8,15 +8,15 @@ The `pipe` part implements the 6 golden modules for RAW image processing. It tra
 
 ## Operating Model
 
-The pipe uses a **functional interface** with three stages:
+The pipe uses a **PIMPL builder pattern** with three stages:
 
 **HEAD → BODY → TAIL**
 
 ### Flow
 
-1. **HEAD**: `pipe::open()` decodes RAW → scene-linear RGB + metadata
-2. **BODY**: `pipe::mods::*` functions apply the 6 golden modules
-3. **TAIL**: `pipe::save()` applies gamma and outputs PNG
+1. **HEAD**: `pipe->open()` decodes RAW → scene-linear RGB + metadata
+2. **BODY**: `body.add()` creates Links with 6 golden modules (45 dials)
+3. **TAIL**: `tail.save()` applies gamma and outputs PNG
 
 ## Architecture
 
@@ -29,44 +29,70 @@ namespace pipe {
 }
 ```
 
-### Head
+### Data
 
 Contains decoded RAW data:
-- **view**: Scene-linear RGB (`CV_32FC3`, [0,1+] range)
-- **info**: Metadata (camera, EXIF, dimensions, etc.)
+- **view()**: Scene-linear RGB (`CV_32FC3`, [0,1+] range)
+- **info()**: Metadata (camera, EXIF, dimensions, etc.)
 
 ```cpp
-struct Head {
-    View view;
-    Info info;
+class Data {
+public:
+    virtual Info info() = 0;
+    virtual View view() = 0;
 };
 ```
 
-### HEAD Functions
+### HEAD Stage
 
 ```cpp
-// Decode RAW → scene-linear RGB
-// Decoder selection abstracted (sony_arw2, future decoders)
-bool pipe::open(pqtr::Sink& sink, const std::string& decoder, Head& head);
+// Create pipe instance
+pqtr::Hold<pipe::Pipe> pipe = pipe::make();
+
+// Decode RAW → scene-linear RGB (decoder auto-detected from file signature)
+pqtr::Hold<pipe::Head> head = pipe->open(sink);
+
+// Access decoded data
+pipe::Data& data = head->data();
 ```
 
-### BODY Functions
+### BODY Stage
 
-Processing modules in `pipe::mods::*` (see [libs.md](./libs.md) for details):
-- `geometric()` - 6 dials
-- `exposure()` - 1 dial
-- `white_balance()` - 2 dials
-- `tone_map()` - 5 dials
-- `global_color()` - 3 dials
-- `selective_color()` - 24 dials
-- `detail()` - 4 dials
+Processing via Links containing 6 golden modules.
 
-### TAIL Functions
+**Activation Model**: Modules only run when dials are set. Setting any dial activates its parent module. If no dials are set, the module is skipped (passthrough).
 
 ```cpp
-// Apply gamma and save to PNG file
-// Gamma encoding (sRGB OETF) is applied internally
-bool pipe::save(const View& linear, const std::string& path);
+// Continue from HEAD to BODY
+pipe::Body& body = head->body();
+
+// Create a named Link with all 6 modules
+pipe::Body::Link& link = body.add("tune");
+
+// Setting a dial activates that module
+link.colorCorrection().exposure().set(0.6f);        // activates ColorCorrection
+link.toneMapping().contrast().set(0.55f);           // activates ToneMapping
+link.globalColor().vibrance().set(0.6f);            // activates GlobalColor
+
+// Modules with no dials set are skipped (Geometric, SelectiveColour, Detail)
+```
+
+**Modules** (see [libs.md](./libs.md) for implementation details):
+- `geometric()` - 6 dials (Crop, Zoom, Rotation)
+- `colorCorrection()` - 3 dials (Exposure, WhiteBalance)
+- `toneMapping()` - 5 dials (Contrast, CurveAdjustment, ClippingPoint)
+- `globalColor()` - 3 dials (Vibrance, Saturation, ColourDensity)
+- `selectiveColour()` - 24 dials (8 colors × 3 HSL dials)
+- `detail()` - 4 dials (Sharpen, Denoise)
+
+### TAIL Stage
+
+```cpp
+// Continue from BODY to TAIL
+pipe::Tail& tail = body.tail();
+
+// Save to PNG (gamma encoding applied internally)
+tail.save("/path/to/output.png");
 ```
 
 ---
@@ -161,36 +187,30 @@ The pipe automatically handles color space conversions:
 
 ```cpp
 #include <pipe.hpp>
-#include <mods/mods.h>
 #include <tool.hpp>
 
 void processRaw(const std::string& rawPath, const std::string& outPath) {
-    // HEAD: Load and decode RAW
-    pqtr::Sink* sink = pqtr::Tool::read(rawPath);
-    pipe::Head head;
-    pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
-    delete sink;
+    // Load RAW file into Sink
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(rawPath));
 
-    // BODY: Apply processing modules
-    cv::UMat result = head.view;
+    // Create pipe and open HEAD (decoder auto-detected)
+    pqtr::Hold<pipe::Pipe> pipe = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipe->open(std::move(sink));
 
-    // Exposure adjustment
-    cv::UMat exposed;
-    pipe::mods::exposure(result, exposed, 0.6f);  // +0.8 EV
-    result = exposed;
+    // Continue to BODY
+    pipe::Body& body = head->body();
 
-    // Tone mapping
-    cv::UMat toned;
-    pipe::mods::tone_map(result, toned, 0.55f, 0.45f, 0.55f);
-    result = toned;
+    // Create and configure a Link (setting dials activates modules)
+    pipe::Body::Link& link = body.add("tune");
+    link.colorCorrection().exposure().set(0.6f);          // +0.8 EV
+    link.toneMapping().contrast().set(0.55f);
+    link.toneMapping().curveAdjustment().highlights().set(0.45f);
+    link.toneMapping().curveAdjustment().shadows().set(0.55f);
+    link.globalColor().vibrance().set(0.6f);
+    link.globalColor().saturation().set(0.55f);
 
-    // Global color
-    cv::UMat colored;
-    pipe::mods::global_color(result, colored, 0.6f, 0.55f, 0.5f);
-    result = colored;
-
-    // TAIL: Save (gamma applied internally)
-    pipe::save(result, outPath);
+    // Continue to TAIL and save (runs active modules, applies gamma)
+    body.tail().save(outPath);
 }
 ```
 
@@ -220,8 +240,8 @@ The `pipe` executable provides headless processing:
 ### With Tune
 
 The `tune` tool uses pipe to optimize dial values:
-1. Tune loads RAW via `pipe::open()`
-2. Tune iteratively adjusts dial values in `pipe::mods::*` calls
+1. Tune loads RAW via `pipe->open()`
+2. Tune creates Links and iteratively adjusts dial values via getters/setters
 3. Tune uses `diff` to measure loss against reference
 4. Optimized dial values saved to `.pipe.json` sidecar (in body section)
 
@@ -243,20 +263,29 @@ Dial values are persisted in `.pipe.json` sidecar files. See [data.md](./data.md
 
 ## Design Principles
 
-### Functional Interface
+### PIMPL Builder Pattern
 
-Simple function-based API:
-- `pipe::open()` - HEAD (decode)
-- `pipe::mods::*` - BODY (process)
-- `pipe::gamma()`, `pipe::save()` - TAIL (output)
+Clean object-oriented API with implementation hiding:
+- `pipe::make()` - Factory creates Pipe instance
+- `pipe->open()` - HEAD (decode) returns Head
+- `head->body()` - BODY (process) returns Body with Links
+- `body.tail()` - TAIL (output) returns Tail for save
 
-No complex class hierarchies or builder patterns.
+User apps only see `inc/pipe.hpp` and link against `lib/labs.so`. All module implementations are hidden in the library.
+
+### Activation Model
+
+Modules use lazy activation:
+- By default, no modules are active (passthrough)
+- Setting any dial value activates that module
+- Only active modules are processed in `body.tail()`
+- Zero overhead for unused modules
 
 ### Decoder Abstraction
 
 RAW decoders are internal implementation details:
-- Consumer code uses `pipe::open()` with decoder name
-- Decoder selection via `pipe::decoder::*` constants
+- Decoder auto-detected from file signature in sink
+- Consumer code simply calls `pipe->open(sink)`
 - Future decoders added without API changes
 
 ### Module Immutability

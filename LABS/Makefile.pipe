@@ -38,7 +38,13 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
 PIPE_PART_SRC = $(SRC_DIR)/part/pipe/pipe.cpp
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
-            $(SRC_DIR)/part/pipe/mods/tone_map.cpp
+            $(SRC_DIR)/part/pipe/mods/exposure.cpp \
+            $(SRC_DIR)/part/pipe/mods/white_balance.cpp \
+            $(SRC_DIR)/part/pipe/mods/tone_map.cpp \
+            $(SRC_DIR)/part/pipe/mods/global_color.cpp \
+            $(SRC_DIR)/part/pipe/mods/selective_color.cpp \
+            $(SRC_DIR)/part/pipe/mods/geometric.cpp \
+            $(SRC_DIR)/part/pipe/mods/detail.cpp
 
 # Object files
 PIPE_MAIN_OBJ = $(OBJ_DIR)/pipe.o
@@ -53,7 +59,13 @@ RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
             $(OBJ_DIR)/part/sony/gamma_oetf.o
 PIPE_PART_OBJ = $(OBJ_DIR)/pipe/pipe.o
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
-            $(OBJ_DIR)/mods/tone_map.o
+            $(OBJ_DIR)/mods/exposure.o \
+            $(OBJ_DIR)/mods/white_balance.o \
+            $(OBJ_DIR)/mods/tone_map.o \
+            $(OBJ_DIR)/mods/global_color.o \
+            $(OBJ_DIR)/mods/selective_color.o \
+            $(OBJ_DIR)/mods/geometric.o \
+            $(OBJ_DIR)/mods/detail.o
 
 # Target executable
 PIPE_BIN = $(BIN_DIR)/pipe

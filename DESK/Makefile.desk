@@ -11,6 +11,14 @@ GLFW_DIR = ./lib/glfw
 GLFW_BUILD = $(GLFW_DIR)/build
 FILEDIALOG_DIR = ./lib/ImGuiFileDialog
 STB_DIR = $(FILEDIALOG_DIR)/stb
+LABS_DIR = ../LABS
+LABS_INC = $(LABS_DIR)/inc
+LABS_LIB = $(LABS_DIR)/lib
+OPENCV_ROOT = $(LABS_DIR)/lib/opencv
+OPENCV_INC = -I$(OPENCV_ROOT)/build \
+             -I$(OPENCV_ROOT)/modules/core/include \
+             -I$(OPENCV_ROOT)/modules/imgproc/include \
+             -I$(OPENCV_ROOT)/modules/imgcodecs/include
 
 # Include paths
 INCLUDES = -I$(IMGUI_DIR) \
@@ -18,11 +26,13 @@ INCLUDES = -I$(IMGUI_DIR) \
            -I$(GLFW_DIR)/include \
            -I$(FILEDIALOG_DIR) \
            -I$(STB_DIR) \
+           -I$(LABS_INC) \
+           $(OPENCV_INC) \
            -I./src/main
 
 # Library flags
 LDFLAGS = -L$(GLFW_BUILD)/src
-LIBS = -lglfw3 -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama
+LIBS = -lglfw3 $(LABS_LIB)/labs.so -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama -Wl,-rpath,$(LABS_LIB)
 
 # Directories
 SRC_DIR = src/main

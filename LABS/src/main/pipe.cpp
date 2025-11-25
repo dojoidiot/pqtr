@@ -9,16 +9,13 @@
 
 #include <tool.hpp>
 #include <sink.hpp>
+#include <hold.hpp>
 #include <pipe.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <filesystem>
-#include <opencv2/core.hpp>
-
-// Pipe modules for display-referred processing
-#include "pipe/mods/mods.h"
 
 namespace fs = std::filesystem;
 
@@ -193,52 +190,52 @@ int main(int argc, char** argv)
         // === HEAD: Decode RAW ===
         std::cout << "\n[HEAD] Decoding RAW..." << std::endl;
 
-        // Load RAW file into Sink (use the potentially copied path)
-        pqtr::Sink* rawSink = pqtr::Tool::read(out.rawPath);
+        // Create pipe instance
+        pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
 
-        // Decode using pipe interface (abstracts decoder selection)
-        pipe::Head head;
-        if (!pipe::open(*rawSink, pipe::decoder::SONY_ARW2, head))
+        // Load RAW file into Sink
+        pqtr::Hold<pqtr::Sink> rawSink(pqtr::Tool::read(out.rawPath));
+
+        // Decode RAW (decoder auto-detected)
+        pqtr::Hold<pipe::Head> head = pipeline->open(std::move(rawSink));
+        if (!head)
         {
-            delete rawSink;
             throw std::runtime_error("Failed to decode RAW file");
         }
 
-        delete rawSink;  // Done with sink
-
-        std::cout << "  Decoded: " << head.info["width"] << "x" << head.info["height"] << std::endl;
-        std::cout << "  Camera: " << head.info["camera_make"] << " " << head.info["camera_model"] << std::endl;
+        // Get decoded data
+        pipe::Info info = head->data().info();
+        std::cout << "  Decoded: " << info["width"] << "x" << info["height"] << std::endl;
+        std::cout << "  Camera: " << info["camera_make"] << " " << info["camera_model"] << std::endl;
 
         // === BODY: Process through pipeline ===
         std::cout << "\n[BODY] Processing..." << std::endl;
 
-        cv::UMat result = head.view;
+        pipe::Body& body = head->body();
 
         if (defaultDisplay)
         {
-            // Display-referred pipeline: linear sRGB → tone map
+            // Display-referred pipeline: apply tone mapping via Link
             std::cout << "  Mode: default-display (tone map)" << std::endl;
-            std::cout << "  Scene-linear sRGB: " << head.view.cols << "x" << head.view.rows << std::endl;
 
-            // Apply tone mapping (HDR → SDR compression)
-            cv::UMat toneMapped;
-            if (!pipe::mods::tone_map(head.view, toneMapped, 1.0f, 1.0f))
-            {
-                throw std::runtime_error("Failed to apply tone mapping");
-            }
-            std::cout << "  Tone mapping applied" << std::endl;
-            result = toneMapped;
+            pipe::Body::Link& link = body.add("default-display");
+
+            // Configure tone mapping with sensible defaults
+            // Dial 0.5 = neutral for most, white_point 0.5 = 4.0 scene white
+            link.toneMapping().clippingPoint().white().set(0.5f);  // white_point = 4.0
+            link.toneMapping().contrast().set(0.5f);               // contrast = 1.0 (neutral)
+
+            std::cout << "  Tone mapping configured" << std::endl;
         }
         else
         {
             std::cout << "  Mode: passthrough (no modules)" << std::endl;
-            std::cout << "  Scene-linear sRGB: " << head.view.cols << "x" << head.view.rows << std::endl;
         }
 
         // === TAIL: Save PNG (gamma applied internally) ===
         std::cout << "\n[TAIL] Saving PNG..." << std::endl;
 
-        if (!pipe::save(result, out.png))
+        if (!body.tail().save(out.png))
         {
             throw std::runtime_error("Failed to save PNG");
         }
@@ -248,7 +245,7 @@ int main(int argc, char** argv)
         // === Save .pipe.json sidecar ===
         std::cout << "\n[SIDECAR] Saving .pipe.json..." << std::endl;
 
-        std::string pipeJson = generatePipeJson(head.info, out.pngName, defaultDisplay);
+        std::string pipeJson = generatePipeJson(info, out.pngName, defaultDisplay);
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {

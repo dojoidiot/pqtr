@@ -27,6 +27,9 @@ bool save_pipe_json(const Project& project);
 // Create new project from RAW file (copies to root, creates sidecars)
 bool create_project(State& state, const std::filesystem::path& raw_file);
 
+// Render project through LABS pipe (RAW → PNG)
+bool render_project(State& state, const Project& project);
+
 // Load PNG texture into OpenGL
 bool load_texture(State& state, const std::filesystem::path& png_path);
 

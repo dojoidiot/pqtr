@@ -195,6 +195,13 @@ int main(int argc, char** argv) {
             prev_project = state.selected_project;
             if (state.selected_project >= 0 && state.selected_project < (int)state.projects.size()) {
                 const auto& proj = state.projects[state.selected_project];
+
+                // Render if PNG missing or reprocess requested
+                if (!fs::exists(proj.png_path) || state.needs_reprocess) {
+                    desk::render_project(state, proj);
+                    state.needs_reprocess = false;
+                }
+
                 desk::load_texture(state, proj.png_path);
             } else {
                 desk::unload_texture(state);

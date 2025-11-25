@@ -59,6 +59,12 @@ namespace pqtr
         {
             return _ptr;
         }
+
+        // Check if holding a valid pointer
+        explicit operator bool() const
+        {
+            return _ptr != nullptr;
+        }
     };
 
 } // namespace pqtr

@@ -52,6 +52,7 @@ struct Project {
     bool expanded = false;         // Tree node state
     std::string decoder = "sony_arw2";
     std::vector<Link> links;
+    std::string tail_output;       // Output filename from tail section
 };
 
 // Application state
