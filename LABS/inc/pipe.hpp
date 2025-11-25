@@ -370,8 +370,11 @@ namespace pipe
     public:
         virtual ~Head() = default;
 
-        // Access decoded image data and metadata
+        // Access decoded image data and metadata for the pipeline.
         virtual Data& data() = 0;
+
+        // Access the embedded camera made view image.
+        virtual Data& view() = 0;
 
         // Continue to body processing (builder pattern)
         virtual Body& body() = 0;
