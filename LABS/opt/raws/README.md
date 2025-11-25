@@ -14,7 +14,9 @@ make -f Makefile.sony
 ./tmp/sony/sony var/sony.ARW
 ```
 
-**Output**: `./tmp/sony.png` (scene-linear RGB, 16-bit)
+**Output**:
+- `./tmp/sony.png` - Scene-linear RGB (processed)
+- `./tmp/sony_preview.png` - Embedded camera JPEG (reference)
 
 ---
 
@@ -36,7 +38,23 @@ RAW → BLC (Bayer) → WB (Bayer) → Demosaic → Color Matrix → Crop → Li
 
 **Output:** Scene-linear sRGB, [0,1+] range with HDR headroom preserved.
 
+### Embedded Preview Extraction
+
+The decoder also extracts the camera's embedded JPEG preview and style metadata:
+
+| Field | Description |
+|-------|-------------|
+| `preview` | Camera-rendered JPEG (1616x1080, sRGB) |
+| `creative_style` | "Standard", "Vivid", "Portrait", etc. |
+| `dro` | Dynamic Range Optimizer setting |
+| `contrast` | -3 to +3 |
+| `saturation` | -3 to +3 |
+| `sharpness` | -3 to +3 |
+
+This provides a reference target for tune - match the camera's look without reverse-engineering Sony's processing.
+
 See [doc/sony.md](doc/sony.md) for full technical documentation.
+See [doc/view.md](doc/view.md) for camera look extraction architecture.
 
 ---
 

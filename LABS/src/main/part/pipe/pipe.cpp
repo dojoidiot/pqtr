@@ -566,12 +566,16 @@ public:
 
 class HeadImpl : public Head
 {
-    DataImpl m_data;
+    DataImpl m_data;  // Scene-linear RGB + full metadata
+    DataImpl m_view;  // Embedded preview + view-specific metadata
     std::unique_ptr<BodyImpl> m_body;
 public:
-    HeadImpl(Info info, View view) : m_data(std::move(info), std::move(view)) {}
+    HeadImpl(Info dataInfo, View dataView, Info viewInfo, View viewImage)
+        : m_data(std::move(dataInfo), std::move(dataView))
+        , m_view(std::move(viewInfo), std::move(viewImage)) {}
 
     Data& data() override { return m_data; }
+    Data& view() override { return m_view; }
 
     Body& body() override
     {
@@ -596,26 +600,40 @@ public:
         if (!sony::Decoder::prepare(*sink, bayer, sonyInfo, meta))
             return pqtr::Hold<Head>(nullptr);
 
-        View view;
-        if (!sony::Decoder::process_linear(bayer, meta, view))
+        View sceneLinear;
+        if (!sony::Decoder::process_linear(bayer, meta, sceneLinear))
             return pqtr::Hold<Head>(nullptr);
 
-        Info info = sonyInfo;
-        info["decoder"] = "sony_arw2";
-        info["width"] = std::to_string(meta.crop_width);
-        info["height"] = std::to_string(meta.crop_height);
-        info["camera_make"] = meta.camera_make;
-        info["camera_model"] = meta.camera_model;
-        info["lens_model"] = meta.lens_model;
+        // Data info: scene-linear metadata
+        Info dataInfo = sonyInfo;
+        dataInfo["decoder"] = "sony_arw2";
+        dataInfo["width"] = std::to_string(meta.crop_width);
+        dataInfo["height"] = std::to_string(meta.crop_height);
+        dataInfo["camera_make"] = meta.camera_make;
+        dataInfo["camera_model"] = meta.camera_model;
+        dataInfo["lens_model"] = meta.lens_model;
 
         std::ostringstream oss;
-        oss << meta.iso; info["iso"] = oss.str();
-        oss.str(""); oss << meta.shutter_speed; info["shutter_speed"] = oss.str();
-        oss.str(""); oss << meta.aperture; info["aperture"] = oss.str();
-        oss.str(""); oss << meta.focal_length; info["focal_length"] = oss.str();
-        info["orientation"] = std::to_string(meta.orientation);
+        oss << meta.iso; dataInfo["iso"] = oss.str();
+        oss.str(""); oss << meta.shutter_speed; dataInfo["shutter_speed"] = oss.str();
+        oss.str(""); oss << meta.aperture; dataInfo["aperture"] = oss.str();
+        oss.str(""); oss << meta.focal_length; dataInfo["focal_length"] = oss.str();
+        dataInfo["orientation"] = std::to_string(meta.orientation);
 
-        return pqtr::Hold<Head>(new HeadImpl(std::move(info), std::move(view)));
+        // View info: preview-specific metadata (what produced the camera look)
+        Info viewInfo;
+        viewInfo["width"] = std::to_string(meta.preview_width);
+        viewInfo["height"] = std::to_string(meta.preview_height);
+        viewInfo["format"] = "srgb_8bit";
+        viewInfo["creative_style"] = meta.creative_style;
+        viewInfo["dro"] = meta.dro;
+        viewInfo["contrast"] = std::to_string(meta.contrast);
+        viewInfo["saturation"] = std::to_string(meta.saturation);
+        viewInfo["sharpness"] = std::to_string(meta.sharpness);
+
+        return pqtr::Hold<Head>(new HeadImpl(
+            std::move(dataInfo), std::move(sceneLinear),
+            std::move(viewInfo), std::move(meta.preview)));
     }
 };
 

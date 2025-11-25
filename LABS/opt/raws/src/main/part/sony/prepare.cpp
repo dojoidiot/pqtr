@@ -8,6 +8,8 @@
 #include <vector>
 #include <cstring>
 #include <opencv2/core.hpp>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 namespace sony
 {
@@ -37,7 +39,10 @@ namespace sony
             TAG_CFA_REPEAT_PATTERN_DIM = 33421,
             // DNG crop tags
             TAG_DEFAULT_CROP_ORIGIN = 0xc61f,
-            TAG_DEFAULT_CROP_SIZE = 0xc620
+            TAG_DEFAULT_CROP_SIZE = 0xc620,
+            // Preview image (IFD0)
+            TAG_PREVIEW_IMAGE_START = 0x0201,
+            TAG_PREVIEW_IMAGE_LENGTH = 0x0202
         };
 
         enum EXIFTag
@@ -52,7 +57,13 @@ namespace sony
         enum SonyMakerTag
         {
             SONY_TAG_TONE_CURVE = 0x7010,
-            SONY_TAG_WB_RGGB = 0x7313
+            SONY_TAG_WB_RGGB = 0x7313,
+            // Style metadata (in MakerNotes)
+            SONY_TAG_CONTRAST = 0x2004,
+            SONY_TAG_SATURATION = 0x2005,
+            SONY_TAG_SHARPNESS = 0x2006,
+            SONY_TAG_CREATIVE_STYLE = 0xb020,
+            SONY_TAG_DRO = 0xb04f
         };
     }
 
@@ -110,6 +121,8 @@ namespace sony
         uint32_t sub_ifd_offset = 0;
         uint32_t exif_ifd_offset = 0;
         uint32_t maker_note_offset = 0;
+        uint32_t preview_offset = 0;
+        uint32_t preview_length = 0;
 
         // Parse IFD0 entries
         for (int i = 0; i < num_entries; i++)
@@ -136,6 +149,12 @@ namespace sony
                 break;
             case TAG_EXIF_IFD:
                 exif_ifd_offset = get_entry_value(entry, file_data);
+                break;
+            case TAG_PREVIEW_IMAGE_START:
+                preview_offset = get_entry_value(entry, file_data);
+                break;
+            case TAG_PREVIEW_IMAGE_LENGTH:
+                preview_length = get_entry_value(entry, file_data);
                 break;
             }
         }
@@ -192,6 +211,13 @@ namespace sony
         bool found_sony_wb = false;
         uint16_t wb_rggb[4] = {0, 0, 0, 0};
 
+        // Initialize style metadata defaults
+        metadata.creative_style = "Standard";
+        metadata.dro = "Off";
+        metadata.contrast = 0;
+        metadata.saturation = 0;
+        metadata.sharpness = 0;
+
         if (maker_note_offset != 0 && maker_note_offset + 10 <= static_cast<size_t>(file_size))
         {
             uint32_t maker_ifd_offset = maker_note_offset;
@@ -220,6 +246,59 @@ namespace sony
                     if (entry.tag == 0x2010)
                     {
                         sony_tag2010_offset = entry.value_offset;
+                    }
+
+                    // Style metadata from MakerNotes
+                    // Sony stores these as signed values: -3 to +3 with 0 = Normal
+                    switch (entry.tag)
+                    {
+                    case SONY_TAG_CONTRAST:
+                        metadata.contrast = static_cast<int8_t>(get_entry_value(entry, file_data));
+                        break;
+                    case SONY_TAG_SATURATION:
+                        metadata.saturation = static_cast<int8_t>(get_entry_value(entry, file_data));
+                        break;
+                    case SONY_TAG_SHARPNESS:
+                        metadata.sharpness = static_cast<int8_t>(get_entry_value(entry, file_data));
+                        break;
+                    case SONY_TAG_CREATIVE_STYLE:
+                    {
+                        uint32_t style_val = get_entry_value(entry, file_data);
+                        switch (style_val)
+                        {
+                        case 1: metadata.creative_style = "Standard"; break;
+                        case 2: metadata.creative_style = "Vivid"; break;
+                        case 3: metadata.creative_style = "Portrait"; break;
+                        case 4: metadata.creative_style = "Landscape"; break;
+                        case 5: metadata.creative_style = "Sunset"; break;
+                        case 6: metadata.creative_style = "Night View"; break;
+                        case 7: metadata.creative_style = "Autumn Leaves"; break;
+                        case 8: metadata.creative_style = "Black & White"; break;
+                        case 9: metadata.creative_style = "Sepia"; break;
+                        case 12: metadata.creative_style = "Neutral"; break;
+                        case 13: metadata.creative_style = "Clear"; break;
+                        case 14: metadata.creative_style = "Deep"; break;
+                        case 15: metadata.creative_style = "Light"; break;
+                        default: metadata.creative_style = "Standard"; break;
+                        }
+                        break;
+                    }
+                    case SONY_TAG_DRO:
+                    {
+                        uint32_t dro_val = get_entry_value(entry, file_data);
+                        switch (dro_val)
+                        {
+                        case 0: metadata.dro = "Off"; break;
+                        case 1: metadata.dro = "Auto"; break;
+                        case 2: metadata.dro = "Lv1"; break;
+                        case 3: metadata.dro = "Lv2"; break;
+                        case 4: metadata.dro = "Lv3"; break;
+                        case 5: metadata.dro = "Lv4"; break;
+                        case 6: metadata.dro = "Lv5"; break;
+                        default: metadata.dro = "Auto"; break;
+                        }
+                        break;
+                    }
                     }
                 }
 
@@ -528,6 +607,37 @@ namespace sony
         }
 
         bayer_cpu.copyTo(output);
+
+        // Extract embedded preview JPEG
+        if (preview_offset != 0 && preview_length != 0 &&
+            preview_offset + preview_length <= static_cast<size_t>(file_size))
+        {
+            // Decode JPEG from raw bytes
+            std::vector<uint8_t> jpeg_data(
+                file_data.begin() + preview_offset,
+                file_data.begin() + preview_offset + preview_length);
+
+            cv::Mat preview_cpu = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
+            if (!preview_cpu.empty())
+            {
+                // Convert BGR (OpenCV default) to RGB
+                cv::cvtColor(preview_cpu, preview_cpu, cv::COLOR_BGR2RGB);
+                preview_cpu.copyTo(metadata.preview);
+                metadata.preview_width = preview_cpu.cols;
+                metadata.preview_height = preview_cpu.rows;
+            }
+            else
+            {
+                std::cerr << "RawLoader: Failed to decode embedded preview JPEG" << std::endl;
+                metadata.preview_width = 0;
+                metadata.preview_height = 0;
+            }
+        }
+        else
+        {
+            metadata.preview_width = 0;
+            metadata.preview_height = 0;
+        }
 
         // Populate info map for external consumers (e.g., embedding in PNG)
         info["camera_make"] = metadata.camera_make;

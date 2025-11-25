@@ -5,6 +5,7 @@
 #include <iostream>
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 #include <opencv2/core/ocl.hpp>
 #include <tool.hpp>
 #include "sony.h"
@@ -83,6 +84,16 @@ int main(int argc, char** argv) {
         std::cout << "  - Aperture: f/" << metadata.aperture << std::endl;
         std::cout << "  - Focal length: " << metadata.focal_length << "mm" << std::endl;
         std::cout << "  - Lens: " << metadata.lens_model << std::endl;
+        std::cout << std::endl;
+
+        // Preview and style metadata
+        std::cout << "Step 5c: Preview & Style metadata..." << std::endl;
+        std::cout << "  - Preview: " << metadata.preview_width << "x" << metadata.preview_height << std::endl;
+        std::cout << "  - Creative Style: " << metadata.creative_style << std::endl;
+        std::cout << "  - DRO: " << metadata.dro << std::endl;
+        std::cout << "  - Contrast: " << metadata.contrast << std::endl;
+        std::cout << "  - Saturation: " << metadata.saturation << std::endl;
+        std::cout << "  - Sharpness: " << metadata.sharpness << std::endl;
         std::cout << std::endl;
 
         // Also show Info map
@@ -177,6 +188,18 @@ int main(int argc, char** argv) {
         } else {
             std::cerr << "  ✗ FAIL: Could not save image" << std::endl;
             return 1;
+        }
+
+        // Save preview if available
+        if (metadata.preview_width > 0 && metadata.preview_height > 0) {
+            std::string preview_file = "./tmp/sony_preview.png";
+            cv::Mat preview_cpu;
+            metadata.preview.copyTo(preview_cpu);
+            // Convert RGB to BGR for OpenCV imwrite
+            cv::cvtColor(preview_cpu, preview_cpu, cv::COLOR_RGB2BGR);
+            if (cv::imwrite(preview_file, preview_cpu)) {
+                std::cout << "  ✓ Preview saved to: " << preview_file << std::endl;
+            }
         }
 
         std::cout << std::endl;

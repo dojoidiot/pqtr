@@ -60,6 +60,25 @@ This matrix transforms camera RGB to linear sRGB. WB is not baked in - applied s
 
 ---
 
+## Preview & Style Metadata
+
+The decoder extracts the embedded camera JPEG and rendering settings during `prepare()`:
+
+| Field | Tag | Description |
+|-------|-----|-------------|
+| preview | 0x0201/0x0202 | Embedded JPEG (1616x1080 sRGB) |
+| creative_style | 0xb020 | "Standard", "Vivid", "Portrait", etc. |
+| dro | 0xb04f | "Off", "Auto", "Lv1"-"Lv5" |
+| contrast | 0x2004 | -3 to +3 (0 = Normal) |
+| saturation | 0x2005 | -3 to +3 (0 = Normal) |
+| sharpness | 0x2006 | -3 to +3 (0 = Normal) |
+
+These are stored in `RawMetadata` and passed through to `pipe::Head::view()`.
+
+**Purpose:** The preview is the camera's display-referred rendering - the target for tune to match. Style metadata describes what camera settings produced it.
+
+---
+
 ## ARW2 Decompression
 
 Sony ARW2 uses proprietary lossy compression:
@@ -111,13 +130,15 @@ namespace sony {
 ```
 opt/raws/
 ├── doc/
-│   └── sony.md              ← This file
+│   ├── sony.md              ← This file
+│   ├── view.md              ← Camera look extraction architecture
+│   └── todo.md              ← Calibration tasks
 ├── src/
 │   ├── main/part/
 │   │   ├── sony.h           ← Public API
 │   │   ├── sony.cpp         ← TIFF parsing, ARW2 decompression
 │   │   └── sony/
-│   │       ├── prepare.cpp  ← File loading, metadata extraction
+│   │       ├── prepare.cpp  ← File loading, metadata + preview extraction
 │   │       ├── process.cpp  ← Pipeline orchestration
 │   │       ├── blc_bayer.cpp
 │   │       ├── wb_bayer.cpp
@@ -129,7 +150,8 @@ opt/raws/
 ├── var/
 │   └── sony.ARW             ← Test file (ILCE-7M3)
 └── tmp/
-    └── sony.png             ← Output
+    ├── sony.png             ← Scene-linear output
+    └── sony_preview.png     ← Embedded camera preview
 ```
 
 ---

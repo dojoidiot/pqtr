@@ -77,6 +77,18 @@ namespace sony
         float aperture;         // F-number (e.g., 2.8, 5.6, 11.0)
         float focal_length;     // Focal length in mm (e.g., 50.0, 85.0)
         std::string lens_model; // Lens description
+
+        // Embedded preview (camera-rendered JPEG)
+        cv::UMat preview;       // Display-referred sRGB (CV_8UC3)
+        int preview_width;
+        int preview_height;
+
+        // Camera rendering settings (what produced the preview)
+        std::string creative_style;  // "Standard", "Vivid", "Portrait", etc.
+        std::string dro;             // "Off", "Auto", "Lv1"-"Lv5"
+        int contrast;                // -3 to +3
+        int saturation;              // -3 to +3
+        int sharpness;               // -3 to +3
     };
 
     // Sony RAW decoder with a static interface.
