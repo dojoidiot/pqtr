@@ -1,6 +1,6 @@
-# VIEW: Calibration Todo
+# Calibration Todo
 
-[back](./view.md)
+[back](./sony.md)
 
 Task list for VIEW calibration images and implementation.
 

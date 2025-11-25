@@ -2,13 +2,13 @@
 
 [back](../README.md)
 
-The Sony ARW decoder produces scene-referred linear RGB from Sony .ARW files. Output feeds directly into the labs styling pipeline.
+The Sony ARW decoder is the reference "lab rat" implementation for RAW processing. It produces scene-referred linear RGB from Sony .ARW files, serving as the template for future camera support.
 
 ---
 
 ## Pipeline
 
-The decoder processes Bayer data through five stages in canonical scene-referred order:
+The decoder processes Bayer data through six stages in canonical scene-referred order:
 
 | Stage | Operation | Input | Output |
 |-------|-----------|-------|--------|
@@ -16,7 +16,8 @@ The decoder processes Bayer data through five stages in canonical scene-referred
 | 2 | WB on Bayer | CV_32FC1 | CV_32FC1 |
 | 3 | Demosaic | CV_32FC1 | CV_32FC3 RGB |
 | 4 | Color Matrix | CV_32FC3 | CV_32FC3 |
-| 5 | Crop | CV_32FC3 | CV_32FC3 |
+| 5 | Undistort | CV_32FC3 | CV_32FC3 |
+| 6 | Crop | CV_32FC3 | CV_32FC3 |
 
 **Output:** Scene-linear sRGB, [0,1+] range with HDR headroom preserved.
 
@@ -30,7 +31,60 @@ The decoder processes Bayer data through five stages in canonical scene-referred
 
 **Color Matrix:** Transforms camera-native RGB to linear sRGB using the 3x3 matrix from Sony metadata tag 0x7310.
 
+**Undistort:** Corrects lens barrel/pincushion distortion using Sony's embedded radial spline coefficients (tag 0x7037). See [Lens Distortion Correction](#lens-distortion-correction) below.
+
 **Crop:** Removes optical black border pixels using DNG DefaultCropOrigin/DefaultCropSize tags.
+
+---
+
+## Lens Distortion Correction
+
+Sony embeds lens-specific distortion correction data in each RAW file. The decoder extracts and applies this automatically.
+
+### Metadata Tags
+
+| Tag | Name | Format | Description |
+|-----|------|--------|-------------|
+| 0x7037 | DistortionCorrParams | int16s[N+1] | Radial spline knots |
+| 0x7036 | DistortionCorrection | int16u | 0=Off, 1=Auto |
+
+### Algorithm
+
+Sony uses a spline-based radial correction. The tag contains:
+- First value: knot count N (typically 11 or 16)
+- Following N values: correction coefficients at equi-spaced radii from center to corner
+
+The correction factor at radius r is:
+
+```
+g(r) = 1 + param[i] * 2^-14
+```
+
+Where `param[i]` is linearly interpolated from the N knots based on normalized radius (0=center, 1=corner).
+
+The remap formula for undistortion:
+
+```
+g_normalized = g(r) / max(g)
+source = center + (dest - center) * g_normalized
+```
+
+The `g_max` normalization prevents black borders by scaling the output to fit within the source image bounds.
+
+### Example Values
+
+**E PZ 18-105mm F4 G OSS @ 25mm:**
+- 11 knots: `29 14 14 43 101 173 288 446 733 1251 2070`
+- g_max = 1.126 (12.6% correction at corners)
+
+**FE 16-35mm F2.8 GM II @ 30mm:**
+- 16 knots: `-2 0 2 5 9 13 20 28 39 52 70 93 122 162 212 275`
+- g_max = 1.017 (1.7% correction at corners)
+
+### References
+
+- [stannum.io: Sony ARW distortion correction](https://stannum.io/blog/0PwljB)
+- [darktable lens.cc](https://github.com/darktable-org/darktable/blob/master/src/iop/lens.cc)
 
 ---
 
@@ -47,6 +101,7 @@ Values extracted from Sony ARW file metadata:
 | CFA Pattern | SubIFD | RGGB | Standard Sony pattern |
 | Crop Origin | 0xc61f | 12, 12 | DNG tag |
 | Crop Size | 0xc620 | 6000 x 4000 | DNG tag |
+| Distortion | 0x7037 | N + N knots | Radial spline coefficients |
 
 ### Color Matrix (0x7310)
 
@@ -79,6 +134,66 @@ These are stored in `RawMetadata` and passed through to `pipe::Head::view()`.
 
 ---
 
+## Camera Look Matching
+
+Match the camera's in-body rendering using the embedded preview as a tune reference.
+
+### Architecture
+
+```
+pipe::Pipe::open(sink)
+    │
+    ├──► head.data()  →  scene-linear RGB + camera metadata
+    │
+    └──► head.view()  →  embedded preview + style metadata
+                              │
+                              ▼
+                         tune reference
+```
+
+The decoder extracts both the scene-referred image and the camera's display-referred preview in a single `prepare()` call. No separate extraction step needed.
+
+### Strategy
+
+The embedded JPEG is just another reference image. Use tune.
+
+```
+head.data() ──► pipe (body) ──► output
+                                   │
+head.view() ─────────────────► diff ◄──┘
+                                   │
+                               tune (SPSA)
+```
+
+No special "camera look extraction" logic. Tune finds dials that minimize spectral loss against `head.view()`.
+
+### View Metadata
+
+Available via `head.view().info()`:
+
+| Key | Example | Description |
+|-----|---------|-------------|
+| width | 1616 | Preview width |
+| height | 1080 | Preview height |
+| format | srgb_8bit | Color space |
+| creative_style | Standard | Camera look preset |
+| dro | Auto | Dynamic Range Optimizer |
+| contrast | 0 | -3 to +3 |
+| saturation | 0 | -3 to +3 |
+| sharpness | 0 | -3 to +3 |
+
+Style metadata describes what camera settings produced the preview. Useful for caching calibrated dials by style.
+
+### Analysis Notes
+
+**Sony Tone Curve** (tag 0x7010): Fixed per Creative Style, not per-image. Values `8000 10400 12900 14100` are identical across all Standard images.
+
+**DRO Auto**: Scene-dependent processing. Camera doesn't record what it did - only that Auto was selected. Calibration captures the "average" behavior.
+
+**Resolution**: Preview is 1616x1080. Spectral loss is content-invariant, works across resolutions.
+
+---
+
 ## ARW2 Decompression
 
 Sony ARW2 uses proprietary lossy compression:
@@ -97,6 +212,43 @@ The linearization curve provides highlight recovery. Values above ~2000 expand 4
 **Demosaic scaling:** Float Bayer [0,1+] scales to 16-bit for OpenCV demosaic, then back. Values > 1.0 preserved as HDR headroom.
 
 **Color matrix output:** No clamping after matrix - scene-referred data may exceed [0,1] range. Clamping happens in TAIL output stage.
+
+---
+
+## Testing
+
+### Build & Run
+
+```bash
+make -f Makefile.sony        # Build decoder and tools
+make -f Makefile.sony test   # Run full test suite
+make -f Makefile.sony clean  # Clean build
+```
+
+### Test Suite
+
+The `test` target runs:
+
+1. **sony** - Process test ARW through full pipeline, output with numbered grid overlay
+2. **distortion_check** - Cross-correlation analysis comparing RAW output to camera preview
+
+### Distortion Check
+
+The distortion check tool measures pixel shift between processed RAW and embedded preview at grid intersections using normalized cross-correlation:
+
+```
+Grid intersection shifts (RAW vs Preview):
+  X    Y   |  dx    dy  | score | dist
+-----------|------------|-------|------
+  500  500 |    5    2 | 0.852 |   5.4
+ 1000  500 |    3    2 | 0.691 |   3.6
+ ...
+Average shift: 6.0 pixels
+```
+
+Output: `tmp/distortion_check.png` - overlay visualization with shift vectors (green dots, red arrows 5x magnified).
+
+A ~6px average shift on a 3936px image is ~0.15% error, acceptable given different processing pipelines.
 
 ---
 
@@ -131,11 +283,10 @@ namespace sony {
 opt/raws/
 ├── doc/
 │   ├── sony.md              ← This file
-│   ├── view.md              ← Camera look extraction architecture
 │   └── todo.md              ← Calibration tasks
 ├── src/
 │   ├── main/part/
-│   │   ├── sony.h           ← Public API
+│   │   ├── sony.h           ← Public API + RawMetadata struct
 │   │   ├── sony.cpp         ← TIFF parsing, ARW2 decompression
 │   │   └── sony/
 │   │       ├── prepare.cpp  ← File loading, metadata + preview extraction
@@ -144,14 +295,18 @@ opt/raws/
 │   │       ├── wb_bayer.cpp
 │   │       ├── demosaic.cpp
 │   │       ├── color_matrix.cpp
+│   │       ├── undistort.cpp  ← Lens distortion correction
 │   │       └── crop.cpp
 │   └── test/
-│       └── sony.cpp         ← Test program
+│       ├── sony.cpp           ← Main test program
+│       └── distortion_check.cpp ← Cross-correlation validation
 ├── var/
-│   └── sony.ARW             ← Test file (ILCE-7M3)
-└── tmp/
-    ├── sony.png             ← Scene-linear output
-    └── sony_preview.png     ← Embedded camera preview
+│   └── sony.ARW             ← Test file (DSC00144, E PZ 18-105mm)
+├── tmp/
+│   ├── sony.png             ← Scene-linear output with grid
+│   ├── sony_preview.png     ← Embedded camera preview with grid
+│   └── distortion_check.png ← Shift vector visualization
+└── Makefile.sony
 ```
 
 ---
@@ -161,3 +316,5 @@ opt/raws/
 - [LibRaw: RAW decoding pipeline](https://www.libraw.org/node/2309)
 - [RawSpeed: ArwDecoder.cpp](https://github.com/darktable-org/rawspeed)
 - [darktable: color calibration](https://docs.darktable.org/usermanual/4.0/en/module-reference/processing-modules/color-calibration/)
+- [stannum.io: Sony ARW distortion correction](https://stannum.io/blog/0PwljB)
+- [darktable PR #7092: Built-in lens correction](https://github.com/darktable-org/darktable/pull/7092)

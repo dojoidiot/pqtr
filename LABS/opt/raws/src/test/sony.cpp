@@ -183,6 +183,28 @@ int main(int argc, char** argv) {
         rgb_output.convertTo(output_8bit, CV_8UC3, 255.0);
         cv::Mat output_cpu = output_8bit.getMat(cv::ACCESS_READ);
 
+        // Draw sparse numbered grid for distortion reference
+        int grid_spacing = 500;  // pixels between grid lines
+        cv::Scalar grid_color(128, 128, 128);  // gray
+        int grid_thickness = 1;
+
+        // Vertical lines with numbers
+        int vline = 0;
+        for (int x = grid_spacing; x < output_cpu.cols; x += grid_spacing) {
+            cv::line(output_cpu, cv::Point(x, 0), cv::Point(x, output_cpu.rows - 1),
+                     grid_color, grid_thickness);
+            cv::putText(output_cpu, std::to_string(++vline), cv::Point(x + 5, 30),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.8, grid_color, 1);
+        }
+        // Horizontal lines with numbers
+        int hline = 0;
+        for (int y = grid_spacing; y < output_cpu.rows; y += grid_spacing) {
+            cv::line(output_cpu, cv::Point(0, y), cv::Point(output_cpu.cols - 1, y),
+                     grid_color, grid_thickness);
+            cv::putText(output_cpu, std::to_string(++hline), cv::Point(5, y - 5),
+                        cv::FONT_HERSHEY_SIMPLEX, 0.8, grid_color, 1);
+        }
+
         if (cv::imwrite(output_file, output_cpu)) {
             std::cout << "  ✓ Saved to: " << output_file << std::endl;
         } else {
@@ -190,13 +212,32 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        // Save preview if available
+        // Save preview if available (also with grid)
         if (metadata.preview_width > 0 && metadata.preview_height > 0) {
             std::string preview_file = "./tmp/sony_preview.png";
             cv::Mat preview_cpu;
             metadata.preview.copyTo(preview_cpu);
             // Convert RGB to BGR for OpenCV imwrite
             cv::cvtColor(preview_cpu, preview_cpu, cv::COLOR_RGB2BGR);
+
+            // Draw numbered grid on preview (scaled spacing)
+            int preview_grid = grid_spacing * metadata.preview_width / output_cpu.cols;
+            if (preview_grid < 50) preview_grid = 50;
+            vline = 0;
+            for (int x = preview_grid; x < preview_cpu.cols; x += preview_grid) {
+                cv::line(preview_cpu, cv::Point(x, 0), cv::Point(x, preview_cpu.rows - 1),
+                         grid_color, grid_thickness);
+                cv::putText(preview_cpu, std::to_string(++vline), cv::Point(x + 2, 15),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, grid_color, 1);
+            }
+            hline = 0;
+            for (int y = preview_grid; y < preview_cpu.rows; y += preview_grid) {
+                cv::line(preview_cpu, cv::Point(0, y), cv::Point(preview_cpu.cols - 1, y),
+                         grid_color, grid_thickness);
+                cv::putText(preview_cpu, std::to_string(++hline), cv::Point(2, y - 2),
+                            cv::FONT_HERSHEY_SIMPLEX, 0.4, grid_color, 1);
+            }
+
             if (cv::imwrite(preview_file, preview_cpu)) {
                 std::cout << "  ✓ Preview saved to: " << preview_file << std::endl;
             }

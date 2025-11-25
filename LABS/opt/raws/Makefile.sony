@@ -59,8 +59,11 @@ SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
 
 SONY_TEST = $(BUILD_DIR)/sony
 
+# Distortion check tool
+DISTORTION_CHECK = $(TMP_DIR)/distortion_check
+
 # Default target
-all: $(SONY_TEST)
+all: $(SONY_TEST) $(DISTORTION_CHECK)
 
 # Create build directories
 $(BUILD_DIR):
@@ -85,12 +88,21 @@ $(OBJ_DIR)/%.o: src/main/part/sony/%.cpp | $(OBJ_DIR)
 $(OBJ_DIR)/sony_test.o: src/test/sony.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
+# Distortion check tool (standalone)
+$(DISTORTION_CHECK): src/test/distortion_check.cpp | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(OPENCV_INCLUDE) $(LDFLAGS) -o $@ $< $(LIBS)
+
 # Clean
 clean:
 	rm -rf $(TMP_DIR)
 
 # Phony targets
-.PHONY: all clean
+.PHONY: all clean test
+
+# Test target: run decoder then check distortion
+test: $(SONY_TEST) $(DISTORTION_CHECK)
+	$(SONY_TEST) var/sony.ARW
+	$(DISTORTION_CHECK)
 
 # Dependencies (headers)
 $(OBJ_DIR)/sony_decoder.o: src/main/part/sony.h
