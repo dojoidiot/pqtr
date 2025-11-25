@@ -64,21 +64,22 @@ pqtr::Tune tuner(pipeline, diff_tool);
 pqtr::TuneResult result = tuner.optimize(source_linear, reference);
 
 // Result contains:
-// - color_dials[35]: SPSA-optimized (exposure, contrast, saturation, etc.)
-// - detail_dials[4]: Edge-optimized (sharpen, denoise)
+// - geos_link: 35 color/tone dials as a pipe Link
+// - edge_link: 4 detail dials as a pipe Link
 // - Geometric dials NOT included (user responsibility)
 
-// 3. Save as .vibe for reuse
-saveVibe("sunset_vibe.vibe", result);
+// 3. Save as style sidecars
+saveJson("sunset.geos.json", result.geos_link);
+saveJson("sunset.edge.json", result.edge_link);
 
 // 4. Apply to new photos
 cv::UMat new_photo = raws.process("another_photo.ARW");
 
 // User sets geometry for this specific photo
-link.geometric().crop().top(0.1);  // Example crop
+json geom_link = { {"name", "framing"}, {"modules", { {"geometric", { /* user values */ }} }} };
 
-// Apply vibe (39 creative dials)
-applyVibe(link, result);
+// Build pipe with geometry + style links
+pipe["links"] = { geom_link, result.geos_link, result.edge_link };
 
 cv::UMat styled = pipeline.process();
 ```

@@ -1,0 +1,123 @@
+# LABS Library Makefile
+# Builds lib/labs.so shared library
+#
+# Exposes:
+#   - sony::Decoder (RAW decoding)
+#   - pipe::mods::* (processing modules)
+#   - pqtr::Sink, pqtr::Tool, pqtr::Hold (infrastructure, header-only)
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2 -fPIC
+
+# OpenCV paths
+OPENCV_ROOT = ./lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) \
+           -I./inc \
+           -I./opt/raws/src/main/part \
+           -I./src/main/part/pipe
+
+# Library flags - embed rpath so consumers don't need LD_LIBRARY_PATH
+LDFLAGS = -shared -L$(OPENCV_LIB) \
+          -Wl,-rpath,'$$ORIGIN/opencv/build/lib'
+LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
+
+# Directories
+SRC_DIR = src/main
+OPT_RAWS_DIR = opt/raws/src/main
+TMP_DIR = tmp/libs
+OBJ_DIR = $(TMP_DIR)/obj
+LIB_DIR = lib
+
+# Module sources (processing)
+MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
+            $(SRC_DIR)/part/pipe/mods/exposure.cpp \
+            $(SRC_DIR)/part/pipe/mods/white_balance.cpp \
+            $(SRC_DIR)/part/pipe/mods/tone_map.cpp \
+            $(SRC_DIR)/part/pipe/mods/global_color.cpp \
+            $(SRC_DIR)/part/pipe/mods/selective_color.cpp \
+            $(SRC_DIR)/part/pipe/mods/geometric.cpp \
+            $(SRC_DIR)/part/pipe/mods/detail.cpp
+
+# Raws sources (Sony decoder)
+RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
+            $(OPT_RAWS_DIR)/part/sony/prepare.cpp \
+            $(OPT_RAWS_DIR)/part/sony/process.cpp \
+            $(OPT_RAWS_DIR)/part/sony/demosaic.cpp \
+            $(OPT_RAWS_DIR)/part/sony/blc.cpp \
+            $(OPT_RAWS_DIR)/part/sony/wb_gain.cpp \
+            $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
+            $(OPT_RAWS_DIR)/part/sony/crop.cpp \
+            $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
+
+# Object files
+MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
+            $(OBJ_DIR)/mods/exposure.o \
+            $(OBJ_DIR)/mods/white_balance.o \
+            $(OBJ_DIR)/mods/tone_map.o \
+            $(OBJ_DIR)/mods/global_color.o \
+            $(OBJ_DIR)/mods/selective_color.o \
+            $(OBJ_DIR)/mods/geometric.o \
+            $(OBJ_DIR)/mods/detail.o
+
+RAWS_OBJS = $(OBJ_DIR)/raws/sony.o \
+            $(OBJ_DIR)/raws/sony/prepare.o \
+            $(OBJ_DIR)/raws/sony/process.o \
+            $(OBJ_DIR)/raws/sony/demosaic.o \
+            $(OBJ_DIR)/raws/sony/blc.o \
+            $(OBJ_DIR)/raws/sony/wb_gain.o \
+            $(OBJ_DIR)/raws/sony/color_matrix.o \
+            $(OBJ_DIR)/raws/sony/crop.o \
+            $(OBJ_DIR)/raws/sony/gamma_oetf.o
+
+ALL_OBJS = $(MODS_OBJS) $(RAWS_OBJS)
+
+# Target shared library
+LABS_SO = $(LIB_DIR)/labs.so
+
+.PHONY: all clean info
+
+all: $(LABS_SO)
+
+$(LABS_SO): $(ALL_OBJS) | $(LIB_DIR)
+	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+	@echo "Built: $@"
+
+# Module objects
+$(OBJ_DIR)/mods/%.o: $(SRC_DIR)/part/pipe/mods/%.cpp | $(OBJ_DIR)/mods
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Raws objects
+$(OBJ_DIR)/raws/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)/raws
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/raws/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)/raws/sony
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Directory creation
+$(LIB_DIR):
+	mkdir -p $(LIB_DIR)
+
+$(OBJ_DIR)/mods:
+	mkdir -p $(OBJ_DIR)/mods
+
+$(OBJ_DIR)/raws:
+	mkdir -p $(OBJ_DIR)/raws
+
+$(OBJ_DIR)/raws/sony:
+	mkdir -p $(OBJ_DIR)/raws/sony
+
+clean:
+	rm -rf $(TMP_DIR) $(LABS_SO)
+
+info:
+	@echo "Target: $(LABS_SO)"
+	@echo "Objects: $(ALL_OBJS)"
+	@echo "OpenCV: $(OPENCV_LIB)"

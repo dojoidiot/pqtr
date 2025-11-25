@@ -57,15 +57,16 @@ Passive voice is acceptable for:
 - **edit step** (not "editing step", "step", or "stage")
 - **module** (not "component", "processor", or "filter")
 - **dial** (not "slider", "parameter", "control", or "knob")
+- **Link** (named collection of modules in pipe)
 - **camera to web** (project scope statement)
-- **tune** (the optimization tool/process)
+- **tune** (orchestrates geos + edge optimization)
+- **geos** (spectral optimizer: SPSA, 35 color/tone dials)
+- **edge** (frequency optimizer: greedy, 4 detail dials)
 - **diff** (the comparison tool/metric)
 - **HEAD → BODY → TAIL** (pipeline stages)
-- **spectral loss** (diff: geodesic distance for color/tone)
-- **frequency loss** (diff: Laplacian variance for sharpness)
-- **SPSA** (tune Stage 1: color/tone optimizer, 35 dials)
-- **Edge optimizer** (tune Stage 2: sharpness optimizer, 4 dials)
-- **vibe** (style preset file with 39 creative dials)
+- **spectral loss** (geos: geodesic distance for color/tone)
+- **frequency loss** (edge: Laplacian variance for sharpness)
+- **style sidecars** (.geos.json, .edge.json - pipe Link format)
 - **three roles** (color/tone, sharpness, geometry)
 
 #### ❌ AVOID - Inconsistent Terms
@@ -110,8 +111,10 @@ Passive voice is acceptable for:
 3. Test structure (directory layout, Makefile targets)
 4. Module test coverage (test cases per module)
 5. Tool test sections:
-   - Diff: spectral loss tests, frequency loss tests, feature extraction tests
-   - Tune: SPSA algorithm tests (color/tone), Edge optimizer tests (sharpness), style transfer tests
+   - Diff: spectral loss tests, frequency loss tests
+   - GeoS: SPSA algorithm tests (color/tone, 35 dials)
+   - Edge: greedy optimizer tests (sharpness, 4 dials)
+   - Tune: integration tests, style transfer tests
 6. Running tests (commands, visual inspection)
 
 **Module docs** (geometric_adjustments.md, etc.):
@@ -120,6 +123,30 @@ Passive voice is acceptable for:
 3. Dials (table with range, default, mapping, transfer function)
 4. Total dial count
 5. Notes (implementation details, color space, defaults)
+
+**Library docs** (libs.md):
+1. [back] link to parent
+2. Overview (what the library exposes)
+3. Library details (location, size, dependencies)
+4. Public headers (current and planned)
+5. API reference (key types and functions)
+6. Consumer example (linking, usage)
+7. Build instructions
+
+**Optimizer docs** (geos.md, edge.md):
+1. [back] link to parent
+2. Purpose (what this optimizer handles)
+3. Core insight (key principle)
+4. Mathematical foundation
+5. Algorithm details
+6. Implementation considerations
+7. API interface
+8. See Also links
+
+**Ideas doc** (idea.md):
+1. [back] link to parent
+2. Brief intro (out of scope ideas)
+3. Ideas with: current state, proposed approach, benefits, considerations
 
 ### 5. Technical Accuracy
 

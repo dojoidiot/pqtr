@@ -280,15 +280,15 @@ After exposure (dial=0.75, +2 EV, ×4):
 | High contrast transfer | Flat RAW + punchy reference | Increased contrast dial |
 | Desaturated transfer | Vibrant RAW + muted reference | Lower saturation/vibrance |
 | Content invariance | Different scenes, same style | Similar dial values |
-| Output format | Full optimization | Valid .vibe format |
+| Output format | Full optimization | Valid .geos.json + .edge.json |
 
 ### Three Roles Verification
 
 | Role | Dials | Handled By | Test |
 |------|-------|------------|------|
-| Color/Tone | 35 | SPSA | Spectral loss decreases |
-| Sharpness | 4 | Edge | Frequency loss decreases |
-| Geometry | 6 | User | Not in .vibe output |
+| Color/Tone | 35 | GeoS (SPSA) | Spectral loss decreases |
+| Sharpness | 4 | Edge (greedy) | Frequency loss decreases |
+| Geometry | 6 | User | Not in style sidecars |
 
 ### Performance Tests
 

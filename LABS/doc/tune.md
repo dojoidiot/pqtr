@@ -79,110 +79,84 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 
 ```bash
 # Optimize all 39 creative dials
-./tune source.ARW reference.png --output style.vibe
+# Outputs: style.geos.json + style.edge.json
+./tune source.ARW reference.png --output style
 
 # Color/tone only (skip sharpness)
-./tune source.ARW reference.png --skip-edge --output style.vibe
+# Outputs: style.geos.json only
+./tune source.ARW reference.png --skip-edge --output style
 
 # Sharpness only (skip color/tone)
-./tune source.ARW reference.png --skip-spsa --output style.vibe
+# Outputs: style.edge.json only
+./tune source.ARW reference.png --skip-geos --output style
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--output FILE` | Output .vibe file |
-| `--skip-spsa` | Skip color/tone optimization |
+| `--output NAME` | Output base name (creates NAME.geos.json, NAME.edge.json) |
+| `--skip-geos` | Skip color/tone optimization |
 | `--skip-edge` | Skip sharpness optimization |
-| `--spsa-starts N` | Multi-start count for SPSA (default: 5) |
-| `--spsa-max-iter N` | Max SPSA iterations (default: 500) |
+| `--geos-starts N` | Multi-start count for GeoS SPSA (default: 5) |
+| `--geos-max-iter N` | Max GeoS iterations (default: 500) |
 | `--visualize` | Show real-time progress |
 
 ---
 
-## Stage 1: SPSA Color/Tone Optimizer
+## Stage 1: GeoS Color/Tone Optimizer
 
-Optimizes 35 dials using spectral loss. See [geos.md](./geos.md) for theoretical foundation.
+Optimizes 35 dials using spectral loss (geodesic distance on hypersphere).
 
-### Algorithm
+**See [geos.md](./geos.md) for full theory and algorithm.**
 
-At each iteration:
-1. Generate random perturbation Δ ∈ {-1, +1}³⁵
-2. Evaluate spectral loss at θ + cΔ and θ - cΔ
-3. Estimate gradient from the two measurements
-4. Update parameters: θ ← θ - a·ĝ
-
-### Hyperparameters
-
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| a₀ | 0.16 | Initial learning rate |
-| c₀ | 0.05 | Initial perturbation |
-| α | 0.602 | Learning rate decay |
-| γ | 0.101 | Perturbation decay |
-| A | 100 | Stability constant |
-
-### Multi-Start Strategy
-
-Runs from 5 random starting points, keeps best result. Avoids local minima.
-
-### Convergence
-
-Stops when:
-- Loss < 0.01
-- 500 iterations reached
-- Loss improvement < 0.001 over 50 iterations
-
-### Performance
-
-- ~60 seconds typical
-- 200-400 iterations to converge
+| Aspect | Value |
+|--------|-------|
+| **Dials** | 35 (color correction, tone mapping, global color, selective color) |
+| **Algorithm** | SPSA (Simultaneous Perturbation Stochastic Approximation) |
+| **Loss** | Spectral (geodesic) - content-invariant |
+| **Time** | ~60 seconds |
+| **Multi-start** | 5 random initializations |
 
 ---
 
 ## Stage 2: Edge Sharpness Optimizer
 
-Optimizes 4 detail dials using frequency-based loss. See [diff.md](./diff.md) for metric details.
+Optimizes 4 detail dials using frequency-based loss (Laplacian variance).
 
-### Algorithm
+**See [edge.md](./edge.md) for full theory and algorithm.**
 
-Simple greedy search (only 4 dials):
-1. For each detail dial in order:
-   - Golden section search in [0, 1]
-   - Minimize frequency loss
-   - Fix at optimal value
-
-### Frequency Loss
-
-Matches Laplacian variance between candidate and reference:
-
-```
-edge_loss = |laplacian_var(candidate) - laplacian_var(reference)| / laplacian_var(reference)
-```
-
-### Performance
-
-- ~2 seconds
-- 4 dials × ~15 evaluations each
+| Aspect | Value |
+|--------|-------|
+| **Dials** | 4 (sharpen amount/radius, denoise luma/chroma) |
+| **Algorithm** | Greedy (golden section search per dial) |
+| **Loss** | Frequency (Laplacian variance) - content-invariant |
+| **Time** | ~2 seconds |
 
 ---
 
-## Output: .vibe File
+## Output: Sidecar Files
 
-The output contains all 39 optimized creative dials:
+Tune outputs two sidecar files, each in pipe Link format:
+
+```
+<name>.geos.json   # 35 color/tone dials
+<name>.edge.json   # 4 detail dials
+```
+
+These are standard pipe Links - they can be added directly to any pipe.json.
+
+### style.geos.json
 
 ```json
 {
+  "name": "geos",
   "meta": {
-    "version": "1.0",
-    "timestamp": "2024-05-21T10:00:00Z",
-    "spsa_loss": 0.0156,
-    "edge_loss": 0.0234,
-    "spsa_iterations": 342,
+    "loss": 0.0156,
+    "iterations": 342,
     "reference": "sunset_beach.png"
   },
-  "dials": {
+  "modules": {
     "color_correction": {
       "exposure": { "value": 0.65 },
       "white_balance": { "temperature": 0.55, "tint": 0.48 }
@@ -206,7 +180,21 @@ The output contains all 39 optimized creative dials:
       "blue": { "hue": 0.48, "saturation": 0.55, "luminance": 0.5 },
       "purple": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
       "magenta": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 }
-    },
+    }
+  }
+}
+```
+
+### style.edge.json
+
+```json
+{
+  "name": "edge",
+  "meta": {
+    "loss": 0.0234,
+    "reference": "sunset_beach.png"
+  },
+  "modules": {
     "detail": {
       "sharpen": { "amount": 0.4, "radius": 0.5 },
       "denoise": { "luminance": 0.3, "chroma": 0.5 }
@@ -219,30 +207,38 @@ The output contains all 39 optimized creative dials:
 
 ---
 
-## Applying a .vibe
+## Applying Style Sidecars
 
-When applying a vibe to a new image:
+When applying a tuned style to a new image:
 
 1. **User sets geometry** - Crop, zoom, rotate as desired
-2. **Apply vibe dials** - Load 39 dials from .vibe file
-3. **Process through pipe** - Output has reference style
+2. **Add geos Link** - Load `.geos.json` as a pipe Link
+3. **Add edge Link** - Load `.edge.json` as a pipe Link
+4. **Process through pipe** - Output has reference style
 
 ```cpp
-// Load vibe
-json vibe = loadVibe("sunset.vibe");
+// Load sidecars as Links
+json geos = loadJson("sunset.geos.json");
+json edge = loadJson("sunset.edge.json");
 
-// User handles geometry
-link.geometric().crop().top(user_crop_top);
-// ... other geometric dials ...
+// Build pipe.json
+json pipe;
+pipe["version"] = "1.0";
+pipe["decoder"] = "sony_arw2";
+pipe["links"] = json::array();
 
-// Apply color/tone (35 dials)
-applyColorTone(link, vibe["dials"]);
+// User geometry Link (optional)
+json geom;
+geom["name"] = "framing";
+geom["modules"]["geometric"] = { /* user values */ };
+pipe["links"].push_back(geom);
 
-// Apply detail (4 dials)
-applyDetail(link, vibe["dials"]);
+// Add tuned Links
+pipe["links"].push_back(geos);
+pipe["links"].push_back(edge);
 
 // Process
-cv::UMat output = pipe.process();
+cv::UMat output = processPipe(rawFile, pipe);
 ```
 
 ---
@@ -306,7 +302,8 @@ The user's responsibility is simple: **frame your shot**. The tool handles the r
 
 ## See Also
 
-- [geos.md](./geos.md) - Spectral loss theory (color/tone)
-- [diff.md](./diff.md) - Loss metrics (spectral + frequency)
-- [data.md](./data.md) - .vibe file format
+- [geos.md](./geos.md) - GeoS: Spectral loss theory + SPSA algorithm (color/tone)
+- [edge.md](./edge.md) - Edge: Frequency loss theory + greedy algorithm (sharpness)
+- [diff.md](./diff.md) - Loss metrics implementation
+- [data.md](./data.md) - Style sidecar format
 - [test.md](./test.md) - Test cases

@@ -10,12 +10,15 @@ IMGUI_DIR = ./lib/imgui
 GLFW_DIR = ./lib/glfw
 GLFW_BUILD = $(GLFW_DIR)/build
 FILEDIALOG_DIR = ./lib/ImGuiFileDialog
+STB_DIR = $(FILEDIALOG_DIR)/stb
 
 # Include paths
 INCLUDES = -I$(IMGUI_DIR) \
            -I$(IMGUI_DIR)/backends \
            -I$(GLFW_DIR)/include \
-           -I$(FILEDIALOG_DIR)
+           -I$(FILEDIALOG_DIR) \
+           -I$(STB_DIR) \
+           -I./src/main
 
 # Library flags
 LDFLAGS = -L$(GLFW_BUILD)/src
@@ -23,6 +26,7 @@ LIBS = -lglfw3 -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama
 
 # Directories
 SRC_DIR = src/main
+PART_DIR = $(SRC_DIR)/part
 TMP_DIR = tmp/desk
 BIN_DIR = bin
 OBJ_DIR = $(TMP_DIR)/obj
@@ -35,8 +39,16 @@ IMGUI_SRCS = $(IMGUI_DIR)/imgui.cpp \
              $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp \
              $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
 
+# ImGuiFileDialog source
+FILEDIALOG_SRC = $(FILEDIALOG_DIR)/ImGuiFileDialog.cpp
+
 # Application sources
 DESK_SRC = $(SRC_DIR)/desk.cpp
+PART_SRCS = $(PART_DIR)/state.cpp \
+            $(PART_DIR)/files.cpp \
+            $(PART_DIR)/projects.cpp \
+            $(PART_DIR)/workarea.cpp \
+            $(PART_DIR)/linkeditor.cpp
 
 # Object files
 IMGUI_OBJS = $(OBJ_DIR)/imgui.o \
@@ -46,7 +58,14 @@ IMGUI_OBJS = $(OBJ_DIR)/imgui.o \
              $(OBJ_DIR)/imgui_impl_glfw.o \
              $(OBJ_DIR)/imgui_impl_opengl3.o
 
+FILEDIALOG_OBJ = $(OBJ_DIR)/ImGuiFileDialog.o
+
 DESK_OBJ = $(OBJ_DIR)/desk.o
+PART_OBJS = $(OBJ_DIR)/part/state.o \
+            $(OBJ_DIR)/part/files.o \
+            $(OBJ_DIR)/part/projects.o \
+            $(OBJ_DIR)/part/workarea.o \
+            $(OBJ_DIR)/part/linkeditor.o
 
 # Target
 DESK_BIN = $(BIN_DIR)/desk
@@ -63,7 +82,7 @@ glfw:
 		cd $(GLFW_BUILD) && cmake .. -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF && make -j$$(nproc); \
 	fi
 
-$(DESK_BIN): $(IMGUI_OBJS) $(DESK_OBJ) | $(BIN_DIR)
+$(DESK_BIN): $(IMGUI_OBJS) $(FILEDIALOG_OBJ) $(PART_OBJS) $(DESK_OBJ) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # ImGui core
@@ -86,7 +105,27 @@ $(OBJ_DIR)/imgui_impl_glfw.o: $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp | $(OBJ_
 $(OBJ_DIR)/imgui_impl_opengl3.o: $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Application
+# ImGuiFileDialog
+$(OBJ_DIR)/ImGuiFileDialog.o: $(FILEDIALOG_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Application parts
+$(OBJ_DIR)/part/state.o: $(PART_DIR)/state.cpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/files.o: $(PART_DIR)/files.cpp $(PART_DIR)/files.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/projects.o: $(PART_DIR)/projects.cpp $(PART_DIR)/projects.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/workarea.o: $(PART_DIR)/workarea.cpp $(PART_DIR)/workarea.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/linkeditor.o: $(PART_DIR)/linkeditor.cpp $(PART_DIR)/linkeditor.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Main application
 $(OBJ_DIR)/desk.o: $(SRC_DIR)/desk.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
@@ -95,6 +134,9 @@ $(BIN_DIR):
 
 $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/part:
+	mkdir -p $(OBJ_DIR)/part
 
 clean:
 	rm -rf $(TMP_DIR) $(BIN_DIR)/desk

@@ -24,13 +24,16 @@ labs/
     │   ├── global_color.md
     │   ├── selective_color.md
     │   └── tone_mapping.md
-    ├── data.md   # Data file format standards (.json, .vibe)
-    ├── diff.md   # Diff tool specification (perceptual + spectral modes)
-    ├── geos.md   # GeoS theoretical foundation (spectral analysis)
+    ├── data.md   # Data file format standards (.json sidecars)
+    ├── diff.md   # Diff tool specification (loss metrics)
+    ├── edge.md   # Edge optimizer (frequency loss, sharpness)
+    ├── geos.md   # GeoS optimizer (spectral loss, color/tone)
+    ├── idea.md   # Future enhancement ideas
     ├── labs.md   # Labs system integration and overview
+    ├── libs.md   # Library interface (labs.so, public headers)
     ├── pipe.md   # Pipe tool specification
     ├── test.md   # Test strategy and verification
-    └── tune.md   # Tune tool specification (greedy + SPSA algorithms)
+    └── tune.md   # Tune tool (orchestrates GeoS + Edge)
 ```
 
 ## Pipeline Philosophy
@@ -49,7 +52,7 @@ Parts are modular libraries that provide specific functionalities. They expose a
     *   **BODY**: A sequence of configurable **edit steps**. Each step can enable/disable specific modules from the 6 available modules (geometric adjustments, color correction, tone mapping, global color, selective color, detail + output transform). Geometry is always its own separate step, positioned before tune steps or after creative editing steps depending on the workflow.
     *   **TAIL**: Renders the final image to a **PNG** file (lossless format to preserve quality during development and tuning).
 *   [**`diff`**](./doc/diff.md): A library to compute loss metrics between images. Provides **spectral loss** (color/tone, geodesic distance) and **frequency loss** (sharpness, Laplacian variance). Both are content-invariant.
-*   [**`tune`**](./doc/tune.md): A library that uses `diff` to optimize pipeline settings. Handles three roles: **color/tone** (35 dials, SPSA + spectral), **sharpness** (4 dials, greedy + frequency), and **geometry** (6 dials, user-controlled). Outputs `.vibe` presets.
+*   [**`tune`**](./doc/tune.md): A library that uses `diff` to optimize pipeline settings. Handles three roles: **color/tone** (35 dials, SPSA + spectral), **sharpness** (4 dials, greedy + frequency), and **geometry** (6 dials, user-controlled). Outputs `.geos.json` and `.edge.json` style sidecars.
 
 ## Headless Tools (Programs)
 
@@ -63,7 +66,7 @@ These are command-line executables located in `bin/` that use the parts to perfo
 
 These tools, located in `opt/`, are used for development and are not part of the core runtime.
 
-*   [**`raws`**](./opt/raws/README.md): A standalone development and testing environment for creating new RAW decoders. Once an encoder is validated, its code is manually copied into the `pipe` part to become a selectable decoder in the pipeline's HEAD.
+*   [**`raws`**](./opt/raws/README.md): A standalone development and testing environment for creating new RAW decoders. Once validated, the raws library is statically linked into `labs.so` and becomes available as a selectable decoder in the pipeline's HEAD.
 
 ## Out of Scope
 

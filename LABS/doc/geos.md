@@ -215,6 +215,7 @@ The geodesic loss function satisfies:
 
 ## See Also
 
-- [diff.md](./diff.md) - Spectral mode implementation
-- [tune.md](./tune.md) - SPSA algorithm implementation
-- [data.md](./data.md) - .vibe file format specification
+- [edge.md](./edge.md) - Edge: Frequency loss (sharpness)
+- [tune.md](./tune.md) - Orchestrates GeoS + Edge
+- [diff.md](./diff.md) - Loss metrics implementation
+- [data.md](./data.md) - Style sidecar format
