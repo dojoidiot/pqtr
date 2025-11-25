@@ -7,7 +7,7 @@
 namespace desk {
 
 void render_work_area(State& state) {
-    if (!state.root_folder_set) {
+    if (!state.project_folder_set) {
         ImGui::TextWrapped("Select a root folder to begin.");
         return;
     }

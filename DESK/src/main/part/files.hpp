@@ -61,7 +61,7 @@ bool load_raw_info(State& state, const Project& project);
 // Open folder selection dialog
 void open_folder_dialog();
 
-// Open RAW file selection dialog
-void open_raw_file_dialog();
+// Open RAW file selection dialog (starts in raw_source_folder)
+void open_raw_file_dialog(const State& state);
 
 } // namespace desk

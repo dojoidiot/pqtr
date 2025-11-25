@@ -47,7 +47,7 @@ void render_menu_bar(desk::State& state, int display_w) {
 
     // Project buttons (always enabled)
     if (ImGui::Button("New Project")) {
-        desk::open_raw_file_dialog();
+        desk::open_raw_file_dialog(state);
     }
     ImGui::SameLine();
     if (ImGui::Button("Open Folder")) {
@@ -58,9 +58,9 @@ void render_menu_bar(desk::State& state, int display_w) {
     ImGui::TextDisabled("|");
     ImGui::SameLine();
 
-    // Panel toggle buttons (disabled until project is open)
-    bool project_open = state.has_project();
-    ImGui::BeginDisabled(!project_open);
+    // Panel toggle buttons (disabled until project folder is set)
+    bool folder_set = state.project_folder_set;
+    ImGui::BeginDisabled(!folder_set);
 
     if (ImGui::Button(state.panels.projects ? "Projects [x]" : "Projects [ ]")) {
         state.panels.projects = !state.panels.projects;
@@ -178,13 +178,13 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
 void process_file_dialogs(desk::State& state) {
     namespace fs = std::filesystem;
 
-    // Folder selection dialog
+    // Folder selection dialog (changes project_folder)
     if (ImGuiFileDialog::Instance()->Display("ChooseFolderDlg",
         ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
 
         if (ImGuiFileDialog::Instance()->IsOk()) {
-            state.root_folder = ImGuiFileDialog::Instance()->GetCurrentPath();
-            state.root_folder_set = true;
+            state.project_folder = ImGuiFileDialog::Instance()->GetCurrentPath();
+            state.project_folder_set = true;
             desk::scan_projects(state);
             if (!state.projects.empty()) {
                 state.panels.projects = true;
@@ -200,8 +200,8 @@ void process_file_dialogs(desk::State& state) {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
             desk::create_project(state, path);
+            desk::scan_projects(state);  // Refresh project list
             state.panels.projects = true;
-            state.panels.link_editor = true;
         }
         ImGuiFileDialog::Instance()->Close();
     }
@@ -248,10 +248,18 @@ void handle_selection_change(desk::State& state, int& prev_project, bool selecti
 int main(int argc, char** argv) {
     namespace fs = std::filesystem;
 
-    // Parse command line
-    std::string initial_root = "var";
+    // Get executable directory for relative paths
+    fs::path exe_path = fs::canonical("/proc/self/exe").parent_path();
+    fs::path desk_root = exe_path.parent_path();  // DESK/
+    fs::path labs_root = desk_root.parent_path() / "LABS";  // ../LABS/
+
+    // Default paths
+    fs::path project_folder = desk_root / "var";           // DESK/var/
+    fs::path raw_source_folder = labs_root / "var" / "pics";  // LABS/var/pics/
+
+    // Override project folder from command line if provided
     if (argc > 1) {
-        initial_root = argv[1];
+        project_folder = fs::absolute(argv[1]);
     }
 
     // Setup GLFW
@@ -289,11 +297,13 @@ int main(int argc, char** argv) {
     // Application state
     desk::State state;
 
-    // Set initial root folder
-    fs::path root_path = fs::absolute(initial_root);
-    if (fs::exists(root_path) && fs::is_directory(root_path)) {
-        state.root_folder = root_path;
-        state.root_folder_set = true;
+    // Set RAW source folder (where file dialog starts)
+    state.raw_source_folder = raw_source_folder;
+
+    // Set project folder (where projects are stored)
+    if (fs::exists(project_folder) && fs::is_directory(project_folder)) {
+        state.project_folder = project_folder;
+        state.project_folder_set = true;
         desk::scan_projects(state);
     }
 

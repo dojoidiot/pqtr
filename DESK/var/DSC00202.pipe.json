@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "decoder": "sony_arw2",
+  "links": [
+  ],
+  "tail": {
+    "output": "DSC00202.png"
+  }
+}

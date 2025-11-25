@@ -80,11 +80,11 @@ void scan_projects(State& state) {
     state.selection.project = -1;
     state.selection.link = -1;
 
-    if (!state.root_folder_set || !fs::exists(state.root_folder)) {
+    if (!state.project_folder_set || !fs::exists(state.project_folder)) {
         return;
     }
 
-    for (const auto& entry : fs::directory_iterator(state.root_folder)) {
+    for (const auto& entry : fs::directory_iterator(state.project_folder)) {
         if (!entry.is_regular_file()) continue;
 
         auto path = entry.path();
@@ -96,9 +96,9 @@ void scan_projects(State& state) {
         Project proj;
         proj.name = path.stem().string();
         proj.raw_path = path;
-        proj.desk_path = state.root_folder / (proj.name + ".desk.json");
-        proj.pipe_path = state.root_folder / (proj.name + ".pipe.json");
-        proj.png_path = state.root_folder / (proj.name + ".png");
+        proj.desk_path = state.project_folder / (proj.name + ".desk.json");
+        proj.pipe_path = state.project_folder / (proj.name + ".pipe.json");
+        proj.png_path = state.project_folder / (proj.name + ".png");
 
         // Load or create desk.json
         if (fs::exists(proj.desk_path)) {
@@ -344,7 +344,7 @@ bool create_project(State& state, const fs::path& raw_file) {
     }
 
     std::string name = raw_file.stem().string();
-    fs::path dest = state.root_folder / raw_file.filename();
+    fs::path dest = state.project_folder / raw_file.filename();
 
     if (raw_file != dest) {
         try {
@@ -358,9 +358,9 @@ bool create_project(State& state, const fs::path& raw_file) {
     Project proj;
     proj.name = name;
     proj.raw_path = dest;
-    proj.desk_path = state.root_folder / (name + ".desk.json");
-    proj.pipe_path = state.root_folder / (name + ".pipe.json");
-    proj.png_path = state.root_folder / (name + ".png");
+    proj.desk_path = state.project_folder / (name + ".desk.json");
+    proj.pipe_path = state.project_folder / (name + ".pipe.json");
+    proj.png_path = state.project_folder / (name + ".png");
 
     save_desk_json(proj);
     save_pipe_json(proj);
@@ -487,9 +487,9 @@ void open_folder_dialog() {
     );
 }
 
-void open_raw_file_dialog() {
+void open_raw_file_dialog(const State& state) {
     IGFD::FileDialogConfig config;
-    config.path = ".";
+    config.path = state.raw_source_folder.string();
     ImGuiFileDialog::Instance()->OpenDialog(
         "ChooseRawDlg",
         "Select RAW File",

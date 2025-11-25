@@ -19,8 +19,8 @@ bool render_projects_panel(State& state) {
     // Add project button
     ImGui::SameLine(ImGui::GetWindowWidth() - 30);
     if (ImGui::SmallButton("+##add_project")) {
-        if (state.root_folder_set) {
-            open_raw_file_dialog();
+        if (state.project_folder_set) {
+            open_raw_file_dialog(state);
         }
     }
     if (ImGui::IsItemHovered()) {
@@ -29,8 +29,8 @@ bool render_projects_panel(State& state) {
 
     ImGui::Separator();
 
-    if (!state.root_folder_set) {
-        ImGui::TextWrapped("No root folder selected.\n\nUse Open Folder to begin.");
+    if (!state.project_folder_set) {
+        ImGui::TextWrapped("No project folder set.\n\nClick New Project to add a RAW file.");
         return false;
     }
 

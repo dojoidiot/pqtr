@@ -1,5 +1,5 @@
 # LABS Library Makefile
-# Builds lib/labs.so shared library
+# Builds lib/labs.a static library
 #
 # Exposes:
 #   - sony::Decoder (RAW decoding)
@@ -8,7 +8,7 @@
 
 # Compiler
 CXX = g++
-CXXFLAGS = -std=c++17 -Wall -O2 -fPIC
+CXXFLAGS = -std=c++17 -Wall -O2
 
 # OpenCV paths
 OPENCV_ROOT = ./lib/opencv
@@ -23,11 +23,6 @@ INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
            -I./opt/raws/src/main/part \
            -I./src/main/part/pipe
-
-# Library flags - embed rpath so consumers don't need LD_LIBRARY_PATH
-LDFLAGS = -shared -L$(OPENCV_LIB) \
-          -Wl,-rpath,'$$ORIGIN/opencv/build/lib'
-LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs
 
 # Directories
 SRC_DIR = src/main
@@ -54,8 +49,8 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/prepare.cpp \
             $(OPT_RAWS_DIR)/part/sony/process.cpp \
             $(OPT_RAWS_DIR)/part/sony/demosaic.cpp \
-            $(OPT_RAWS_DIR)/part/sony/blc.cpp \
-            $(OPT_RAWS_DIR)/part/sony/wb_gain.cpp \
+            $(OPT_RAWS_DIR)/part/sony/blc_bayer.cpp \
+            $(OPT_RAWS_DIR)/part/sony/wb_bayer.cpp \
             $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
             $(OPT_RAWS_DIR)/part/sony/crop.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
@@ -76,23 +71,23 @@ RAWS_OBJS = $(OBJ_DIR)/raws/sony.o \
             $(OBJ_DIR)/raws/sony/prepare.o \
             $(OBJ_DIR)/raws/sony/process.o \
             $(OBJ_DIR)/raws/sony/demosaic.o \
-            $(OBJ_DIR)/raws/sony/blc.o \
-            $(OBJ_DIR)/raws/sony/wb_gain.o \
+            $(OBJ_DIR)/raws/sony/blc_bayer.o \
+            $(OBJ_DIR)/raws/sony/wb_bayer.o \
             $(OBJ_DIR)/raws/sony/color_matrix.o \
             $(OBJ_DIR)/raws/sony/crop.o \
             $(OBJ_DIR)/raws/sony/gamma_oetf.o
 
 ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS) $(RAWS_OBJS)
 
-# Target shared library
-LABS_SO = $(LIB_DIR)/labs.so
+# Target static library
+LABS_A = $(LIB_DIR)/labs.a
 
 .PHONY: all clean info
 
-all: $(LABS_SO)
+all: $(LABS_A)
 
-$(LABS_SO): $(ALL_OBJS) | $(LIB_DIR)
-	$(CXX) $(LDFLAGS) -o $@ $^ $(LIBS)
+$(LABS_A): $(ALL_OBJS) | $(LIB_DIR)
+	ar rcs $@ $^
 	@echo "Built: $@"
 
 # Pipe objects
@@ -127,9 +122,9 @@ $(OBJ_DIR)/raws/sony:
 	mkdir -p $(OBJ_DIR)/raws/sony
 
 clean:
-	rm -rf $(TMP_DIR) $(LABS_SO)
+	rm -rf $(TMP_DIR) $(LABS_A)
 
 info:
-	@echo "Target: $(LABS_SO)"
+	@echo "Target: $(LABS_A)"
 	@echo "Objects: $(ALL_OBJS)"
 	@echo "OpenCV: $(OPENCV_LIB)"

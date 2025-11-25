@@ -107,9 +107,12 @@ struct Selection {
 // ============================================================
 
 struct State {
-    // Root folder
-    std::filesystem::path root_folder;
-    bool root_folder_set = false;
+    // Project folder (where projects are stored: DESK/var/)
+    std::filesystem::path project_folder;
+    bool project_folder_set = false;
+
+    // RAW source folder (where RAWs are browsed from: LABS/var/pics/)
+    std::filesystem::path raw_source_folder;
 
     // Projects
     std::vector<Project> projects;
