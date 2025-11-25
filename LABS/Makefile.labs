@@ -36,6 +36,7 @@ RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
             $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
             $(OPT_RAWS_DIR)/part/sony/crop.cpp \
             $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
+PIPE_SRC = $(SRC_DIR)/part/pipe/pipe.cpp
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/tone_map.cpp
 
@@ -50,6 +51,7 @@ RAWS_OBJS = $(OBJ_DIR)/part/sony.o \
             $(OBJ_DIR)/part/sony/color_matrix.o \
             $(OBJ_DIR)/part/sony/crop.o \
             $(OBJ_DIR)/part/sony/gamma_oetf.o
+PIPE_OBJ = $(OBJ_DIR)/pipe/pipe.o
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/tone_map.o
 
@@ -64,7 +66,7 @@ TEST_OUTPUT_DIR = tmp/var/labs
 
 all: $(LABS_BIN)
 
-$(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) $(MODS_OBJS) | $(BIN_DIR)
+$(LABS_BIN): $(LABS_OBJ) $(RAWS_OBJS) $(PIPE_OBJ) $(MODS_OBJS) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 $(OBJ_DIR)/labs.o: $(LABS_SRC) | $(OBJ_DIR)
@@ -75,6 +77,10 @@ $(OBJ_DIR)/part/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(OBJ_DIR)/part/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)
+	mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/pipe/pipe.o: $(SRC_DIR)/part/pipe/pipe.cpp | $(OBJ_DIR)
 	mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

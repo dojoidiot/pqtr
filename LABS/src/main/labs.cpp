@@ -9,45 +9,47 @@
 
 #include <tool.hpp>
 #include <sink.hpp>
+#include <pipe.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
 #include <string>
 #include <filesystem>
 #include <opencv2/core.hpp>
-#include <opencv2/imgcodecs.hpp>
-#include <opencv2/imgproc.hpp>
 
-// Direct integration of opt/raws decoder
-#include "sony.h"
-
-// Pipe modules for display-referred processing (tone mapping only - color matrix is in decoder)
+// Pipe modules for display-referred processing
 #include "pipe/mods/mods.h"
 
 namespace fs = std::filesystem;
 
 // Generate .labs.json with camera info from metadata
-std::string generateLabsJson(const sony::RawMetadata& metadata, const std::string& decoder = "sony", bool defaultDisplay = false)
+std::string generateLabsJson(const pipe::Info& info, bool defaultDisplay = false)
 {
+    // Helper to get value with default
+    auto get = [&info](const std::string& key, const std::string& def = "") {
+        auto it = info.find(key);
+        return it != info.end() ? it->second : def;
+    };
+
     std::ostringstream json;
     json << "{\n";
     json << "  \"version\": \"1.0\",\n";
-    json << "  \"decoder\": \"" << decoder << "\",\n";
+    json << "  \"decoder\": \"" << get("decoder", "sony_arw2") << "\",\n";
     json << "  \"camera\": {\n";
-    json << "    \"make\": \"" << metadata.camera_make << "\",\n";
-    json << "    \"model\": \"" << metadata.camera_model << "\",\n";
-    json << "    \"lens\": \"" << metadata.lens_model << "\"\n";
+    json << "    \"make\": \"" << get("camera_make") << "\",\n";
+    json << "    \"model\": \"" << get("camera_model") << "\",\n";
+    json << "    \"lens\": \"" << get("lens_model") << "\"\n";
     json << "  },\n";
     json << "  \"exif\": {\n";
-    json << "    \"iso\": " << metadata.iso << ",\n";
-    json << "    \"shutter_speed\": " << metadata.shutter_speed << ",\n";
-    json << "    \"aperture\": " << metadata.aperture << ",\n";
-    json << "    \"focal_length\": " << metadata.focal_length << ",\n";
-    json << "    \"orientation\": " << metadata.orientation << "\n";
+    json << "    \"iso\": " << get("iso", "0") << ",\n";
+    json << "    \"shutter_speed\": " << get("shutter_speed", "0") << ",\n";
+    json << "    \"aperture\": " << get("aperture", "0") << ",\n";
+    json << "    \"focal_length\": " << get("focal_length", "0") << ",\n";
+    json << "    \"orientation\": " << get("orientation", "1") << "\n";
     json << "  },\n";
     json << "  \"image\": {\n";
-    json << "    \"width\": " << metadata.width << ",\n";
-    json << "    \"height\": " << metadata.height << "\n";
+    json << "    \"width\": " << get("width", "0") << ",\n";
+    json << "    \"height\": " << get("height", "0") << "\n";
     json << "  },\n";
 
     if (defaultDisplay)
@@ -179,12 +181,9 @@ int main(int argc, char** argv)
         // Load RAW file into Sink (use the potentially copied path)
         pqtr::Sink* rawSink = pqtr::Tool::read(out.rawPath);
 
-        // Decode using Sony ARW decoder
-        cv::UMat bayerData;
-        sony::Info info;
-        sony::RawMetadata metadata;
-
-        if (!sony::Decoder::prepare(*rawSink, bayerData, info, metadata))
+        // Decode using pipe interface (abstracts decoder selection)
+        pipe::Head head;
+        if (!pipe::open(*rawSink, pipe::decoder::SONY_ARW2, head))
         {
             delete rawSink;
             throw std::runtime_error("Failed to decode RAW file");
@@ -192,8 +191,8 @@ int main(int argc, char** argv)
 
         delete rawSink;  // Done with sink
 
-        std::cout << "  Decoded: " << metadata.width << "x" << metadata.height << std::endl;
-        std::cout << "  Camera: " << metadata.camera_make << " " << metadata.camera_model << std::endl;
+        std::cout << "  Decoded: " << head.info["width"] << "x" << head.info["height"] << std::endl;
+        std::cout << "  Camera: " << head.info["camera_make"] << " " << head.info["camera_model"] << std::endl;
 
         // === BODY: Process through pipeline ===
         std::cout << "\n[BODY] Processing..." << std::endl;
@@ -203,28 +202,19 @@ int main(int argc, char** argv)
         if (defaultDisplay)
         {
             // Display-referred pipeline: linear sRGB → tone map → gamma
-            // Note: Color matrix is now automatic in decoder (process_linear)
             std::cout << "  Mode: default-display (tone map)" << std::endl;
+            std::cout << "  Scene-linear sRGB: " << head.view.cols << "x" << head.view.rows << std::endl;
 
-            // Step 1: Get scene-linear sRGB from decoder
-            // (Decoder now applies: Demosaic → BLC → WB → Color Matrix)
-            cv::UMat linearRgb;
-            if (!sony::Decoder::process_linear(bayerData, metadata, linearRgb))
-            {
-                throw std::runtime_error("Failed to process RAW to linear sRGB");
-            }
-            std::cout << "  Scene-linear sRGB: " << linearRgb.cols << "x" << linearRgb.rows << std::endl;
-
-            // Step 2: Apply tone mapping (HDR → SDR compression)
+            // Step 1: Apply tone mapping (HDR → SDR compression)
             cv::UMat toneMapped;
-            if (!pipe::mods::tone_map(linearRgb, toneMapped, 1.0f, 1.0f))
+            if (!pipe::mods::tone_map(head.view, toneMapped, 1.0f, 1.0f))
             {
                 throw std::runtime_error("Failed to apply tone mapping");
             }
             std::cout << "  Tone mapping applied" << std::endl;
 
-            // Step 3: Apply gamma (sRGB OETF)
-            if (!sony::Decoder::apply_gamma(toneMapped, outputRgb))
+            // Step 2: Apply gamma (sRGB OETF)
+            if (!pipe::gamma(toneMapped, outputRgb))
             {
                 throw std::runtime_error("Failed to apply gamma");
             }
@@ -232,10 +222,10 @@ int main(int argc, char** argv)
         }
         else
         {
-            // Standard pipeline (existing behavior)
-            if (!sony::Decoder::process(bayerData, metadata, outputRgb))
+            // Standard pipeline: just apply gamma to linear RGB
+            if (!pipe::gamma(head.view, outputRgb))
             {
-                throw std::runtime_error("Failed to process RAW file");
+                throw std::runtime_error("Failed to apply gamma");
             }
             std::cout << "  Output RGB: " << outputRgb.cols << "x" << outputRgb.rows << std::endl;
         }
@@ -243,12 +233,8 @@ int main(int argc, char** argv)
         // === TAIL: Output ===
         std::cout << "\n[TAIL] Saving PNG..." << std::endl;
 
-        // Convert to 8-bit (outputRgb is already gamma corrected)
-        cv::UMat output8bit;
-        outputRgb.convertTo(output8bit, CV_8UC3, 255.0);
-
-        // Save PNG
-        if (!cv::imwrite(out.png, output8bit))
+        // Save PNG using pipe interface
+        if (!pipe::save(outputRgb, out.png))
         {
             throw std::runtime_error("Failed to save PNG");
         }
@@ -258,7 +244,7 @@ int main(int argc, char** argv)
         // === Save .labs.json sidecar ===
         std::cout << "\n[SIDECAR] Saving .labs.json..." << std::endl;
 
-        std::string labsJson = generateLabsJson(metadata, "sony", defaultDisplay);
+        std::string labsJson = generateLabsJson(head.info, defaultDisplay);
         std::ofstream sidecarFile(out.sidecar);
         if (!sidecarFile)
         {

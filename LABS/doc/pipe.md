@@ -4,84 +4,72 @@
 
 ## Purpose
 
-The `pipe` part implements the 6 golden modules for RAW image processing. It transforms camera RAW data into scene-linear RGB, applies processing through a sequence of named links, and outputs PNG files. The pipe is designed for headless operation by diff and tune tools.
+The `pipe` part implements the 6 golden modules for RAW image processing. It transforms camera RAW data into scene-linear RGB, applies processing modules, and outputs PNG files. The pipe is designed for headless operation by diff and tune tools.
 
 ## Operating Model
 
-The pipe uses a **builder pattern** with three stages:
+The pipe uses a **functional interface** with three stages:
 
-**Pipe → Head → Body → Tail**
+**HEAD → BODY → TAIL**
 
 ### Flow
 
-1. **Open**: User provides RAW data via sink → receives Head
-2. **Decode**: Head decodes RAW → produces Data (View + Info)
-3. **Process**: Body creates/manages Links → each Link runs the 6 modules
-4. **Finalize**: Tail encodes PNG → writes to sink
+1. **HEAD**: `pipe::open()` decodes RAW → scene-linear RGB + metadata
+2. **BODY**: `pipe::mods::*` functions apply the 6 golden modules
+3. **TAIL**: `pipe::gamma()` + `pipe::save()` output PNG
 
 ## Architecture
 
-### Data
+### Types
 
-Combines image data with metadata:
-- **View**: GPU-accelerated image matrix (`cv::UMat`)
-- **Info**: Metadata map (EXIF, camera info, etc.)
-
-Data flows through the pipe and changes at each stage.
-
-### Task
-
-Base interface for all processing units:
 ```cpp
-class Task {
-    virtual View run(View view) = 0;  // Process view
-    virtual bool set() = 0;           // Returns true if any dial modified
-};
+namespace pipe {
+    using View = cv::UMat;                        // GPU-accelerated image
+    using Info = std::map<std::string, std::string>;  // Metadata map
+}
 ```
 
 ### Head
 
-Decodes RAW data from sink into scene-linear RGB.
+Contains decoded RAW data:
+- **view**: Scene-linear RGB (`CV_32FC3`, [0,1+] range)
+- **info**: Metadata (camera, EXIF, dimensions, etc.)
 
-**Methods:**
-- `data()` - Access decoded image data and metadata
-- `body()` - Continue to body processing
+```cpp
+struct Head {
+    View view;
+    Info info;
+};
+```
 
-The Head automatically decodes when created.
+### HEAD Functions
 
-### Body
+```cpp
+// Decode RAW → scene-linear RGB
+// Decoder selection abstracted (sony_arw2, future decoders)
+bool pipe::open(pqtr::Sink& sink, const std::string& decoder, Head& head);
+```
 
-Manages a sequence of named Links. Each Link contains the 6 golden modules.
+### BODY Functions
 
-**Methods:**
-- `add(name)` - Create a new link with given name
-- `get(name)` - Retrieve existing link by name
-- `all()` - Get iterator over all links
-- `data()` - Current state of image data and metadata
-- `tail()` - Finalize processing
+Processing modules in `pipe::mods::*` (see [libs.md](./libs.md) for details):
+- `geometric()` - 6 dials
+- `exposure()` - 1 dial
+- `white_balance()` - 2 dials
+- `tone_map()` - 5 dials
+- `global_color()` - 3 dials
+- `selective_color()` - 24 dials
+- `detail()` - 4 dials
 
-### Link
+### TAIL Functions
 
-A named collection of the 6 golden modules. Extends Task interface.
+```cpp
+// Apply sRGB gamma (OETF)
+bool pipe::gamma(const View& linear, View& output);
 
-**Methods:**
-- `name()` - This link's identifier
-- `geometric()` - Access geometric transformations
-- `colorCorrection()` - Access color correction
-- `toneMapping()` - Access tone mapping
-- `globalColor()` - Access global color adjustments
-- `selectiveColour()` - Access selective color (hue mixer)
-- `detail()` - Access sharpening and denoising
-
-**Module Activation:**
-Modules become active when any dial is set (tracked via `Task.set()`).
-
-### Tail
-
-Finalizes processing and writes PNG output to sink.
-
-**Methods:**
-- `save()` - Write final PNG data to the sink
+// Save to PNG file
+bool pipe::save(const View& view, const std::string& path);
+```
 
 ---
 
@@ -175,48 +163,54 @@ The pipe automatically handles color space conversions:
 
 ```cpp
 #include <pipe.hpp>
+#include <mods/mods.h>
+#include <tool.hpp>
 
-// 1. Prepare sink with RAW data
-pqtr::Sink sink;
-// ... load RAW file into sink ...
+void processRaw(const std::string& rawPath, const std::string& outPath) {
+    // HEAD: Load and decode RAW
+    pqtr::Sink* sink = pqtr::Tool::read(rawPath);
+    pipe::Head head;
+    pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
+    delete sink;
 
-// 2. Open pipe
-pipe::Pipe pipe;
-auto head = pipe.open(sink);
+    // BODY: Apply processing modules
+    cv::UMat result = head.view;
 
-// 3. Decode RAW
-auto headData = head.data();  // Scene-linear RGB + metadata
+    // Exposure adjustment
+    cv::UMat exposed;
+    pipe::mods::exposure(result, exposed, 0.6f);  // +0.8 EV
+    result = exposed;
 
-// 4. Create body and links
-auto body = head.body();
-auto link1 = body.add("tune_optimize");
+    // Tone mapping
+    cv::UMat toned;
+    pipe::mods::tone_map(result, toned, 0.55f, 0.45f, 0.55f);
+    result = toned;
 
-// 5. Set dials on modules
-auto colorCorrection = link1.colorCorrection();
-colorCorrection.exposure().set(0.65);
-colorCorrection.whiteBalance().temperature(0.52);
+    // Global color
+    cv::UMat colored;
+    pipe::mods::global_color(result, colored, 0.6f, 0.55f, 0.5f);
+    result = colored;
 
-auto globalColor = link1.globalColor();
-globalColor.saturation().set(0.68);
-
-// 6. Finalize and save
-auto tail = body.tail();
-tail.save();  // PNG data now in sink
-
-// 7. Extract PNG from sink
-// ... read from sink and write to file ...
+    // TAIL: Apply gamma and save
+    cv::UMat output;
+    pipe::gamma(result, output);
+    pipe::save(output, outPath);
+}
 ```
 
 ### Command-Line Tool
 
-The `pipe` executable provides headless processing:
+The `labs` executable provides headless processing:
 
 ```bash
-# Process with default neutral dials
-./pipe input.ARW output.png
+# Process with default (neutral) dials
+./labs input.ARW
 
-# Process with configuration file (see data.md for format)
-./pipe input.ARW output.png --config processing.json
+# Process with display-referred tone mapping
+./labs input.ARW --default-display
+
+# Process with output directory
+./labs input.ARW --default-display /path/to/output
 ```
 
 **Note**: Configuration file format is documented in [data.md](./data.md).
@@ -228,22 +222,22 @@ The `pipe` executable provides headless processing:
 ### With Tune
 
 The `tune` tool uses pipe to optimize dial values:
-1. Tune creates Links and sets initial dial values
-2. Tune iteratively adjusts dials to minimize diff
-3. Optimized dial values can be saved to configuration
+1. Tune loads RAW via `pipe::open()`
+2. Tune iteratively adjusts dial values in `pipe::mods::*` calls
+3. Tune uses `diff` to measure loss against reference
+4. Optimized dial values saved to `.pipe.json` sidecar
 
 ### With Diff
 
 The `diff` tool compares pipe output against reference images:
 1. Pipe processes RAW with current dial settings
-2. Diff computes perceptual distance metrics
+2. Diff computes spectral loss (color/tone) and frequency loss (sharpness)
 3. Results inform tune optimization
 
 ### Data Persistence
 
-Link configurations (names, dial values) are persisted via the `labs` data format. See [data.md](./data.md) for:
+Dial values are persisted in `.pipe.json` sidecar files. See [data.md](./data.md) for:
 - JSON schema
-- Link persistence format
 - Dial value encoding
 - Example configurations
 
@@ -251,31 +245,25 @@ Link configurations (names, dial values) are persisted via the `labs` data forma
 
 ## Design Principles
 
-### Task-Based Composition
+### Functional Interface
 
-All processing units implement the Task interface:
-- Uniform `run(View) → View` execution model
-- Activation tracking via `set()` method
-- Composable and testable
+Simple function-based API:
+- `pipe::open()` - HEAD (decode)
+- `pipe::mods::*` - BODY (process)
+- `pipe::gamma()`, `pipe::save()` - TAIL (output)
 
-### Builder Pattern
+No complex class hierarchies or builder patterns.
 
-The pipeline flow enforces proper sequencing:
-- Can't access Body without Head (must decode first)
-- Can't access Tail without Body (must process first)
-- Each stage is single-use (builder pattern)
+### Decoder Abstraction
 
-### Sink-Based I/O
-
-RAW input and PNG output both use the sink:
-- User owns the sink (caller controls memory)
-- Pipe reads from sink (RAW data)
-- Pipe writes to sink (PNG data)
-- Enables streaming and flexible I/O
+RAW decoders are internal implementation details:
+- Consumer code uses `pipe::open()` with decoder name
+- Decoder selection via `pipe::decoder::*` constants
+- Future decoders added without API changes
 
 ### Module Immutability
 
-The 6 golden modules and their dial counts are **immutable** (defined by module docs). Architecture changes must not alter:
+The 6 golden modules and their dial counts are **immutable**:
 - Module count (always 6)
 - Dial counts (always 45 total)
 - Color spaces (defined per module)
@@ -289,5 +277,4 @@ Target performance (from [README.md](../README.md) success criteria):
 
 - **Pipe throughput**: 30+ fps @ 1080p
 - **GPU acceleration**: All View processing uses cv::UMat
-- **Link overhead**: Minimal (dials checked via `Task.set()`)
-- **Memory efficiency**: Sink reuse via `tidy()` method
+- **Memory efficiency**: Direct UMat operations, no intermediate copies

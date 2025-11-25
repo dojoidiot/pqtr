@@ -1,313 +1,63 @@
-// pipe.h
-// Part of the three-stage pipe: HEAD (load) → BODY (process) → TAIL (save)
+// pipe.hpp
+// Simplified HEAD/TAIL abstraction for RAW image processing
+// BODY processing: use pipe::mods::* from mods.h
 
 #pragma once
 
-#include <hold.hpp>
 #include <sink.hpp>
-#include <string>
-#include <map>
-#include <vector>
-#include <memory>
 #include <opencv2/core.hpp>
+#include <map>
+#include <string>
 
-// The pipe part implements the 6 golden modules for RAW image processing.
-// Designed for headless operation by diff and tune tools.
-// Module documentation is in the project docs.  
 namespace pipe
 {
-
-    // Metadata about the image (EXIF, camera info, etc.)
-    using Info = std::map<std::string, std::string>;
-    // GPU-accelerated image matrix
+    // Type aliases
     using View = cv::UMat;
-    // Link identifier
-    using Name = std::string;
+    using Info = std::map<std::string, std::string>;
 
-    // Combines image data with metadata
-    class Data
+    // HEAD: Decoded RAW data
+    // Contains scene-linear RGB and metadata
+    struct Head
     {
-    public:
-        virtual Info info() = 0;
-        virtual View view() = 0;
+        View view;  // CV_32FC3, scene-linear sRGB, [0,1+] range
+        Info info;  // Metadata (camera, EXIF, dimensions, etc.)
     };
 
-    class Body
+    // Available decoders
+    namespace decoder
     {
-        // Base interface for all processing units
-        virtual class Task
-        {
-        public:
-            // Process the view and return result
-            virtual View run(View view) = 0;
-            // Returns true if any dial was modified
-            virtual bool set() = 0;
-        };
+        constexpr const char* SONY_ARW2 = "sony_arw2";
+        // Future: CANON_CR3, NIKON_NEF, etc.
+    }
 
-        // A named collection of the 6 golden modules
-        class Link : Task
-        {
+    // HEAD: Decode RAW → scene-linear RGB
+    // Input:  sink    - RAW file data
+    //         decoder - Decoder name (use pipe::decoder::* constants)
+    // Output: head    - Decoded view and metadata
+    // Returns: true on success
+    bool open(pqtr::Sink& sink, const std::string& decoder, Head& head);
 
-            // ColourSpace of Tasks is idempotent and part of the interface contract.
-            enum ColourSpace
-            {
-                SPATIAL,          // Geometric operations (x,y)
-                SCENE_LINEAR_RGB, // Camera-native linear RGB
-                LINEAR_RGB,       // Working space (D65 white point)
-                LCH,              // Perceptual color space (CIELAB cylindrical)
-                SRGB              // Standard output (gamma-encoded)
-            };
+    // TAIL: Apply sRGB gamma (OETF)
+    // Input:  linear - Scene-linear RGB (CV_32FC3)
+    // Output: output - Gamma-encoded RGB (CV_32FC3, [0,1] range)
+    // Returns: true on success
+    bool gamma(const View& linear, View& output);
 
-            class Geometric
-            {
+    // TAIL: Save to PNG file
+    // Input:  view - Gamma-encoded RGB (CV_32FC3)
+    //         path - Output file path
+    // Returns: true on success
+    bool save(const View& view, const std::string& path);
 
-                class Crop : Task
-                {
-                    const ColourSpace space = ColourSpace::SPATIAL;
+    // BODY: Processing modules
+    // Use pipe::mods::* functions from mods.h:
+    //   - geometric()       (6 dials)
+    //   - exposure()        (1 dial)
+    //   - white_balance()   (2 dials)
+    //   - tone_map()        (5 dials)
+    //   - global_color()    (3 dials)
+    //   - selective_color() (24 dials)
+    //   - detail()          (4 dials)
+    // Total: 45 dials
 
-                    virtual float crop_top() = 0;
-                    virtual void crop_top(float crop_top) = 0;
-
-                    virtual float crop_right() = 0;
-                    virtual void crop_right(float crop_right) = 0;
-
-                    virtual float crop_bottom() = 0;
-                    virtual void crop_bottom(float crop_bottom) = 0;
-
-                    virtual float crop_left() = 0;
-                    virtual void crop_left(float crop_left) = 0;
-                };
-
-                class Zoom : Task
-                {
-                    const ColourSpace space = ColourSpace::SPATIAL;
-
-                    virtual float scale() = 0;
-                    virtual void scale(float scale) = 0;
-                };
-
-                class Rotation : Task
-                {
-                    const ColourSpace space = ColourSpace::SPATIAL;
-
-                    virtual void tiltAngle(float tiltAngle) = 0;
-                    virtual float tiltAngle() = 0;
-                };
-
-                virtual Crop crop() = 0;
-                virtual Zoom zoom() = 0;
-                virtual Rotation rotation() = 0;
-            };
-
-            class ColorCorrection
-            {
-                class WhiteBalance : Task
-                {
-                    const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                    virtual float temperature() = 0;
-                    virtual void temperature(float temperature) = 0;
-
-                    virtual float tint() = 0;
-                    virtual void tint(float tint) = 0;
-                };
-
-                class Exposure : Task
-                {
-                    const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                    virtual float get() = 0;
-                    virtual void set(float value) = 0;
-                };
-
-                virtual WhiteBalance whiteBalance() = 0;
-                virtual Exposure exposure() = 0;
-            };
-
-            class ToneMapping
-            {
-                class Contrast : Task
-                {
-                    const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                    virtual float get() = 0;
-                    virtual void set(float value) = 0;
-                };
-
-                class CurveAdjustment
-                {
-                    class Region : Task
-                    {
-                        const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                        virtual float get() = 0;
-                        virtual void set(float value) = 0;
-                    };
-
-                    virtual Region highlights() = 0;
-                    virtual Region shadows() = 0;
-                };
-
-                class ClippingPoint : Task
-                {
-
-                    class Shade
-                    {
-                        const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                        virtual float get() = 0;
-                        virtual void set(float value) = 0;
-                    };
-
-                    virtual Shade black() = 0;
-                    virtual Shade white() = 0;
-                };
-
-                virtual Contrast contrast() = 0;
-                virtual CurveAdjustment curveAdjustment() = 0;
-                virtual ClippingPoint clippingPoint() = 0;
-            };
-
-            class GlobalColor
-            {
-                class Vibrance : Task
-                {
-                    const ColourSpace space = ColourSpace::LCH;
-
-                    virtual float get() = 0;
-                    virtual void set(float value) = 0;
-                };
-
-                class Saturation : Task
-                {
-                    const ColourSpace space = ColourSpace::LCH;
-
-                    virtual float get() = 0;
-                    virtual void set(float value) = 0;
-                };
-
-                class ColourDensity : Task
-                {
-                    const ColourSpace space = ColourSpace::LCH;
-
-                    virtual float get() = 0;
-                    virtual void set(float value) = 0;
-                };
-
-                virtual Vibrance vibrance() = 0;
-                virtual Saturation saturation() = 0;
-                virtual ColourDensity colorDensity() = 0;
-            };
-
-            class SelectiveColour
-            {
-                class HslAdjust : Task
-                {
-                    const ColourSpace space = ColourSpace::LCH;
-
-                    virtual float hue() = 0;
-                    virtual void hue(float hue) = 0;
-
-                    virtual float saturation() = 0;
-                    virtual void saturation(float saturation) = 0;
-
-                    virtual float luminance() = 0;
-                    virtual void luminance(float luminance) = 0;
-                };
-                virtual HslAdjust red() = 0;
-                virtual HslAdjust orange() = 0;
-                virtual HslAdjust yellow() = 0;
-                virtual HslAdjust green() = 0;
-                virtual HslAdjust cyan() = 0;
-                virtual HslAdjust blue() = 0;
-                virtual HslAdjust purple() = 0;
-                virtual HslAdjust magenta() = 0;
-            };
-
-            class Detail
-            {
-                class Sharpen : Task
-                {
-                    const ColourSpace space = ColourSpace::LINEAR_RGB;
-
-                    virtual float amount() = 0;
-                    virtual void amount(float amount) = 0;
-
-                    virtual float radius() = 0;
-                    virtual void radius(float radius) = 0;
-                };
-                class Denoise
-                {
-                    class Channel : Task
-                    {
-                        const ColourSpace space = ColourSpace::LCH;
-
-                        virtual float get() = 0;
-                        virtual void set(float value) = 0;
-                    };
-
-                    virtual Channel luminance() = 0;
-                    virtual Channel chroma() = 0;
-                };
-                virtual Sharpen sharpen() = 0;
-                virtual Denoise denoise() = 0;
-            };
-
-            virtual Name name() = 0;
-            virtual Geometric geometric() = 0;
-            virtual ColorCorrection colorCorrection() = 0;
-            virtual ToneMapping toneMapping() = 0;
-            virtual GlobalColor globalColor() = 0;
-            virtual SelectiveColour selectiveColour() = 0;
-            virtual Detail detail() = 0;
-        };
-
-        // Current state of image data and metadata
-        virtual Data data() = 0;
-
-        // Create a new link with the given name
-        virtual Link add(Name name) = 0;
-
-        // Retrieve an existing link by name
-        virtual Link get(Name name) = 0;
-
-        // Iterator for traversing links
-        class List
-        {
-            virtual Link get() = 0;
-            virtual bool has() = 0;
-        };
-
-        // Get an iterator over all links
-        virtual List &all() = 0;
-
-        // Finalize processing and get tail
-        virtual Tail tail() = 0;
-    };
-
-    // Finalizes processing and writes PNG output to sink
-    class Tail
-    {
-        // Write final PNG data to the sink
-        virtual void save() = 0;
-    };
-
-    // Decodes RAW data from sink into scene-linear RGB
-    class Head
-    {
-        // Access decoded image data and metadata
-        virtual Data data() = 0;
-
-        // Continue to body processing (builder pattern)
-        virtual Body body() = 0;
-    };
-
-    // Entry point for the pipe processing system
-    class Pipe
-    {
-        // Open pipe with RAW data in sink
-        // Returns Head for decoding, then Body for processing, then Tail for output
-        // Takes ownership of sink via Hold
-        virtual pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) = 0;
-    };
 } // namespace pipe

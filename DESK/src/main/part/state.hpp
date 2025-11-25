@@ -76,6 +76,21 @@ struct State {
     bool needs_reprocess = false;
     std::string status_message;
     std::string error_message;
+
+    // Link Editor state
+    int selected_module = 0;   // 0-5: EXP, WB, TONE, COLOR, SEL, DTL
+    int selected_dial = 0;     // Index within module's dial list
+};
+
+// Module identifiers (6 golden modules - no geometric)
+enum ModuleId {
+    MOD_EXP = 0,
+    MOD_WB,
+    MOD_TONE,
+    MOD_COLOR,
+    MOD_SEL,
+    MOD_DTL,
+    MOD_COUNT
 };
 
 // Initialize default dial values for a module

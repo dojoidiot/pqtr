@@ -1,4 +1,5 @@
 // linkeditor.cpp - Link editor implementation
+// Two-level menu: Master (modules) → Detail (dials) + Dial Control area
 
 #include "linkeditor.hpp"
 #include "files.hpp"
@@ -6,21 +7,61 @@
 
 namespace desk {
 
-// Helper to render a dial slider
-static bool render_dial(const char* label, float* value, float min = 0.0f, float max = 1.0f) {
-    ImGui::PushItemWidth(-1);
-    bool changed = ImGui::SliderFloat(label, value, min, max, "%.2f");
-    ImGui::PopItemWidth();
-    return changed;
-}
+// Module names for master menu (6 golden modules - no geometric)
+static const char* MODULE_NAMES[] = {
+    "EXP", "WB", "TONE", "COLOR", "SEL", "DTL"
+};
 
+// Detail dial names per module
+static const char* DIAL_NAMES_EXP[] = {"value"};
+static const char* DIAL_NAMES_WB[] = {"temp", "tint"};
+static const char* DIAL_NAMES_TONE[] = {"contrast", "highlights", "shadows", "black", "white"};
+static const char* DIAL_NAMES_COLOR[] = {"vibrance", "saturation", "density"};
+static const char* DIAL_NAMES_SEL[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+static const char* DIAL_NAMES_DTL[] = {"sharp_amt", "sharp_rad", "denoise_lum", "denoise_chr"};
+
+static const char** DIAL_NAMES[] = {
+    DIAL_NAMES_EXP,
+    DIAL_NAMES_WB,
+    DIAL_NAMES_TONE,
+    DIAL_NAMES_COLOR,
+    DIAL_NAMES_SEL,
+    DIAL_NAMES_DTL
+};
+
+static const int DIAL_COUNTS[] = {1, 2, 5, 3, 8, 4};
+
+// Dial control width (square, full height)
+static const float DIAL_CONTROL_WIDTH = 120.0f;
+
+// Box styling
+static const ImVec4 BOX_NORMAL = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+static const ImVec4 BOX_HOVER = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
+static const ImVec4 BOX_SELECTED = ImVec4(0.3f, 0.5f, 0.7f, 1.0f);
+
+// Render a selectable box, returns true if clicked
+static bool render_box(const char* label, bool selected, float width = 0.0f) {
+    ImVec4 color = selected ? BOX_SELECTED : BOX_NORMAL;
+
+    ImGui::PushStyleColor(ImGuiCol_Button, color);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? BOX_SELECTED : BOX_HOVER);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, BOX_SELECTED);
+
+    bool clicked = false;
+    if (width > 0.0f) {
+        clicked = ImGui::Button(label, ImVec2(width, 0));
+    } else {
+        clicked = ImGui::Button(label);
+    }
+
+    ImGui::PopStyleColor(3);
+    return clicked;
+}
 
 bool render_link_editor(State& state) {
     bool changed = false;
 
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Link Editor");
-    ImGui::Separator();
-
+    // Check if we have a valid selection
     if (state.selected_project < 0 || state.selected_project >= (int)state.projects.size()) {
         ImGui::TextWrapped("Select a project to edit.");
         return false;
@@ -35,122 +76,89 @@ bool render_link_editor(State& state) {
 
     Link& link = proj.links[state.selected_link];
 
-    ImGui::Text("Link: %s", link.name.c_str());
+    // Get available space
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float menu_width = avail.x - DIAL_CONTROL_WIDTH - ImGui::GetStyle().ItemSpacing.x;
+
+    // === LEFT SIDE: Menus ===
+    ImGui::BeginChild("##menus", ImVec2(menu_width, avail.y), false);
+
+    // Link name header
+    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Link: %s", link.name.c_str());
     ImGui::Separator();
 
-    // Module 1: Geometric (6 dials)
-    if (ImGui::CollapsingHeader("Geometric", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent();
-
-        ImGui::Text("Crop");
-        if (render_dial("Top##crop", &link.geometric.dials["crop_top"])) changed = true;
-        if (render_dial("Right##crop", &link.geometric.dials["crop_right"])) changed = true;
-        if (render_dial("Bottom##crop", &link.geometric.dials["crop_bottom"])) changed = true;
-        if (render_dial("Left##crop", &link.geometric.dials["crop_left"])) changed = true;
-
-        ImGui::Spacing();
-        ImGui::Text("Transform");
-        if (render_dial("Scale##zoom", &link.geometric.dials["scale"])) changed = true;
-        if (render_dial("Tilt##rot", &link.geometric.dials["tilt_angle"])) changed = true;
-
-        ImGui::Unindent();
+    // Master menu (7 module boxes)
+    ImGui::Text("Module:");
+    for (int m = 0; m < MOD_COUNT; m++) {
+        if (m > 0) ImGui::SameLine();
+        if (render_box(MODULE_NAMES[m], state.selected_module == m)) {
+            state.selected_module = m;
+            state.selected_dial = 0;  // Reset dial selection
+        }
     }
 
-    // Module 2: Color Correction (3 dials)
-    if (ImGui::CollapsingHeader("Color Correction", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent();
+    ImGui::Spacing();
+    ImGui::Separator();
 
-        ImGui::Text("White Balance");
-        if (render_dial("Temperature", &link.color_correction.dials["temperature"])) changed = true;
-        if (render_dial("Tint", &link.color_correction.dials["tint"])) changed = true;
+    // Detail menu (dial boxes for selected module)
+    ImGui::Text("Dial:");
+    int dial_count = DIAL_COUNTS[state.selected_module];
+    const char** dial_names = DIAL_NAMES[state.selected_module];
 
-        ImGui::Spacing();
-        if (render_dial("Exposure", &link.color_correction.dials["exposure"])) changed = true;
-
-        ImGui::Unindent();
+    for (int d = 0; d < dial_count; d++) {
+        if (d > 0) ImGui::SameLine();
+        if (render_box(dial_names[d], state.selected_dial == d)) {
+            state.selected_dial = d;
+        }
     }
 
-    // Module 3: Tone Mapping (5 dials)
-    if (ImGui::CollapsingHeader("Tone Mapping", ImGuiTreeNodeFlags_DefaultOpen)) {
-        ImGui::Indent();
-
-        if (render_dial("Contrast", &link.tone_mapping.dials["contrast"])) changed = true;
-
+    // For Selective Color, show sub-dials (hue/sat/lum) when a color is selected
+    if (state.selected_module == MOD_SEL) {
         ImGui::Spacing();
-        ImGui::Text("Curve");
-        if (render_dial("Highlights", &link.tone_mapping.dials["highlights"])) changed = true;
-        if (render_dial("Shadows", &link.tone_mapping.dials["shadows"])) changed = true;
-
-        ImGui::Spacing();
-        ImGui::Text("Clipping");
-        if (render_dial("Black Point", &link.tone_mapping.dials["black"])) changed = true;
-        if (render_dial("White Point", &link.tone_mapping.dials["white"])) changed = true;
-
-        ImGui::Unindent();
-    }
-
-    // Module 4: Global Color (3 dials)
-    if (ImGui::CollapsingHeader("Global Color")) {
-        ImGui::Indent();
-
-        if (render_dial("Vibrance", &link.global_color.dials["vibrance"])) changed = true;
-        if (render_dial("Saturation", &link.global_color.dials["saturation"])) changed = true;
-        if (render_dial("Color Density", &link.global_color.dials["color_density"])) changed = true;
-
-        ImGui::Unindent();
-    }
-
-    // Module 5: Selective Color (24 dials - 8 colors x 3)
-    if (ImGui::CollapsingHeader("Selective Color")) {
-        ImGui::Indent();
-
-        const char* colors[] = {"Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Magenta"};
-        const char* color_keys[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
-
-        for (int c = 0; c < 8; c++) {
-            if (ImGui::TreeNode(colors[c])) {
-                std::string hue_key = std::string(color_keys[c]) + "_hue";
-                std::string sat_key = std::string(color_keys[c]) + "_saturation";
-                std::string lum_key = std::string(color_keys[c]) + "_luminance";
-
-                char label[32];
-                snprintf(label, sizeof(label), "Hue##%s", color_keys[c]);
-                if (render_dial(label, &link.selective_color.dials[hue_key])) changed = true;
-
-                snprintf(label, sizeof(label), "Saturation##%s", color_keys[c]);
-                if (render_dial(label, &link.selective_color.dials[sat_key])) changed = true;
-
-                snprintf(label, sizeof(label), "Luminance##%s", color_keys[c]);
-                if (render_dial(label, &link.selective_color.dials[lum_key])) changed = true;
-
-                ImGui::TreePop();
+        ImGui::Text("Adjust:");
+        static int sel_sub = 0;  // 0=hue, 1=sat, 2=lum
+        const char* sub_names[] = {"hue", "sat", "lum"};
+        for (int s = 0; s < 3; s++) {
+            if (s > 0) ImGui::SameLine();
+            if (render_box(sub_names[s], sel_sub == s)) {
+                sel_sub = s;
             }
         }
-
-        ImGui::Unindent();
     }
 
-    // Module 6: Detail (4 dials)
-    if (ImGui::CollapsingHeader("Detail")) {
-        ImGui::Indent();
+    ImGui::Spacing();
+    ImGui::Separator();
 
-        ImGui::Text("Sharpen");
-        if (render_dial("Amount##sharp", &link.detail.dials["sharpen_amount"])) changed = true;
-        if (render_dial("Radius##sharp", &link.detail.dials["sharpen_radius"])) changed = true;
+    // Future content area
+    ImGui::TextDisabled("(dial value display area)");
 
-        ImGui::Spacing();
-        ImGui::Text("Denoise");
-        if (render_dial("Luminance##denoise", &link.detail.dials["denoise_luminance"])) changed = true;
-        if (render_dial("Chroma##denoise", &link.detail.dials["denoise_chroma"])) changed = true;
+    ImGui::EndChild();
 
-        ImGui::Unindent();
-    }
+    // === RIGHT SIDE: Dial Control ===
+    ImGui::SameLine();
+    ImGui::BeginChild("##dial_control", ImVec2(DIAL_CONTROL_WIDTH, avail.y), true);
 
-    // Auto-save on change
-    if (changed) {
-        save_pipe_json(proj);
-        state.needs_reprocess = true;
-    }
+    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "DIAL");
+    ImGui::Separator();
+
+    // Placeholder for dial control widget
+    ImVec2 dial_avail = ImGui::GetContentRegionAvail();
+    float dial_size = dial_avail.x - 10.0f;
+
+    // Draw placeholder square
+    ImVec2 cursor = ImGui::GetCursorScreenPos();
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRect(cursor, ImVec2(cursor.x + dial_size, cursor.y + dial_size),
+                  IM_COL32(100, 100, 100, 255), 4.0f);
+
+    // Show current dial name in center
+    const char* current_dial = DIAL_NAMES[state.selected_module][state.selected_dial];
+    ImVec2 text_size = ImGui::CalcTextSize(current_dial);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (dial_size - text_size.x) * 0.5f);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() + dial_size * 0.5f - text_size.y * 0.5f);
+    ImGui::Text("%s", current_dial);
+
+    ImGui::EndChild();
 
     return changed;
 }

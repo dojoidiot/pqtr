@@ -147,9 +147,54 @@ The Work Area displays the output PNG of the currently selected project. The ima
 
 ### Link Editor
 
-When a Link is selected, the Link Editor displays:
-- 6 modules (Geometric, Color Correction, Tone Mapping, Global Color, Selective Color, Detail)
-- Dials for each module (45 total per Link)
+When a Link is selected, the Link Editor panel displays a two-level menu system with a dial control area.
+
+#### Layout
+
+```
+┌───────────────────────────────────────┬─────────────────┐
+│ [EXP] [WB] [TONE] [COLOR] [SEL] [DTL] │                 │
+├───────────────────────────────────────┤                 │
+│ [value]                               │   DIAL CONTROL  │
+├───────────────────────────────────────┤                 │
+│                                       │                 │
+│         (future content)              │                 │
+│                                       │                 │
+└───────────────────────────────────────┴─────────────────┘
+         ↑ Menus (left)                    ↑ Dial (right, full height)
+```
+
+#### Master Menu (6 golden modules)
+
+Horizontal row of selectable boxes. One active at a time. Geometric operations are not included.
+
+| Box | Module | Dials |
+|-----|--------|-------|
+| EXP | Exposure | 1 |
+| WB | White Balance | 2 |
+| TONE | Tone Map | 5 |
+| COLOR | Global Color | 3 |
+| SEL | Selective Color | 24 |
+| DTL | Detail | 4 |
+
+#### Detail Menu (dial names)
+
+Shows dial names for the selected module. Horizontal row of selectable boxes.
+
+| Module | Detail Boxes |
+|--------|--------------|
+| EXP | value |
+| WB | temp, tint |
+| TONE | contrast, highlights, shadows, black, white |
+| COLOR | vibrance, saturation, density |
+| SEL | red, orange, yellow, green, cyan, blue, purple, magenta |
+| DTL | sharp_amt, sharp_rad, denoise_lum, denoise_chr |
+
+**Note:** Selective Color uses color names as detail boxes. Each color has 3 sub-dials (hue, sat, lum) shown in the dial control area.
+
+#### Dial Control Area
+
+Square region on the right side of the panel. Shows the dial widget for the selected dial. Implementation TBD.
 
 ---
 

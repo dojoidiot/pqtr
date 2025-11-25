@@ -30,9 +30,8 @@ make -f Makefile.libs
 ```makefile
 LABS_DIR = ../LABS
 
-# Headers (current layout)
+# Headers
 INCLUDES = -I$(LABS_DIR)/inc \
-           -I$(LABS_DIR)/opt/raws/src/main/part \
            -I$(LABS_DIR)/src/main/part/pipe
 
 # Library
@@ -44,17 +43,13 @@ LIBS     = -llabs
 
 ## Public Headers
 
-### Current Layout
-
-Headers are currently in multiple locations:
-
 | Header | Location | Namespace | Purpose |
 |--------|----------|-----------|---------|
+| `pipe.hpp` | `inc/` | `pipe` | HEAD/TAIL abstraction (decode, gamma, save) |
+| `mods.h` | `src/main/part/pipe/mods/` | `pipe::mods` | BODY processing modules (45 dials) |
 | `hold.hpp` | `inc/` | `pqtr` | Owning smart pointer |
 | `sink.hpp` | `inc/` | `pqtr` | Chunked buffer for I/O |
 | `tool.hpp` | `inc/` | `pqtr` | File → Sink utilities |
-| `sony.h` | `opt/raws/src/main/part/` | `sony` | RAW decoder |
-| `mods/mods.h` | `src/main/part/pipe/` | `pipe::mods` | Processing modules |
 
 ### Planned
 
@@ -65,7 +60,11 @@ Headers are currently in multiple locations:
 | `edge.hpp` | `edge` | Frequency optimization (greedy, 4 detail dials) |
 | `diff.hpp` | `diff` | Loss metrics (spectral, frequency) |
 
-**Note:** The `inc/pipe.hpp` interface exists but implementation is incomplete. Use `sony.h` and `mods.h` directly for now.
+### Internal (not public)
+
+| Header | Purpose |
+|--------|---------|
+| `sony.h` | Sony ARW decoder (internal to pipe) |
 
 ---
 
@@ -79,39 +78,37 @@ Chunked buffer for data I/O.
 // Read file into sink
 pqtr::Sink* sink = pqtr::Tool::read("image.ARW");
 
-// Use with decoder
-sony::Decoder::prepare(*sink, ...);
+// Use with pipe
+pipe::Head head;
+pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
 
 delete sink;  // Caller owns
 ```
 
-### sony::Decoder
+### pipe (HEAD/TAIL)
 
-Static interface for RAW decoding.
+Abstraction for RAW decoding and output transforms.
 
 ```cpp
-#include <sony.h>
+#include <pipe.hpp>
 
 // Load RAW file
 pqtr::Sink* sink = pqtr::Tool::read("image.ARW");
 
-// Decode
-cv::UMat bayer;
-sony::Info info;
-sony::RawMetadata metadata;
-sony::Decoder::prepare(*sink, bayer, info, metadata);
+// HEAD: Decode to scene-linear RGB
+pipe::Head head;
+pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
+// head.view = CV_32FC3 scene-linear sRGB
+// head.info = metadata map
 
-// Process to linear RGB (for external processing)
-cv::UMat linear;
-sony::Decoder::process_linear(bayer, metadata, linear);
+delete sink;
 
-// Or process to final output (includes gamma)
+// ... apply BODY processing via pipe::mods::* ...
+
+// TAIL: Apply gamma and save
 cv::UMat output;
-sony::Decoder::process(bayer, metadata, output);
-
-// Apply gamma separately if using process_linear
-cv::UMat gamma;
-sony::Decoder::apply_gamma(linear, gamma);
+pipe::gamma(head.view, output);
+pipe::save(output, "output.png");
 ```
 
 ### pipe::mods
@@ -184,7 +181,6 @@ Sony decoder compiled directly into `labs.so` from `opt/raws/`.
 LABS_DIR = ../LABS
 
 INCLUDES += -I$(LABS_DIR)/inc \
-            -I$(LABS_DIR)/opt/raws/src/main/part \
             -I$(LABS_DIR)/src/main/part/pipe
 
 LDFLAGS  += -L$(LABS_DIR)/lib -Wl,-rpath,$(LABS_DIR)/lib
@@ -194,36 +190,26 @@ LIBS     += -llabs
 ```cpp
 // DESK usage
 #include <tool.hpp>
-#include <sony.h>
+#include <pipe.hpp>
 #include <mods/mods.h>
-#include <opencv2/imgcodecs.hpp>
 
 void processRaw(const std::string& rawPath) {
     // Load RAW
     pqtr::Sink* sink = pqtr::Tool::read(rawPath);
 
-    // Decode
-    cv::UMat bayer;
-    sony::Info info;
-    sony::RawMetadata metadata;
-    sony::Decoder::prepare(*sink, bayer, info, metadata);
+    // HEAD: Decode to scene-linear RGB
+    pipe::Head head;
+    pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
     delete sink;
 
-    // Process to linear RGB
-    cv::UMat linear;
-    sony::Decoder::process_linear(bayer, metadata, linear);
-
-    // Apply processing modules
+    // BODY: Apply processing modules
     cv::UMat processed;
-    pipe::mods::tone_map(linear, processed);
+    pipe::mods::tone_map(head.view, processed);
 
-    // Apply gamma and save
+    // TAIL: Apply gamma and save
     cv::UMat output;
-    sony::Decoder::apply_gamma(processed, output);
-
-    cv::UMat output8;
-    output.convertTo(output8, CV_8UC3, 255.0);
-    cv::imwrite("output.png", output8);
+    pipe::gamma(processed, output);
+    pipe::save(output, "output.png");
 }
 ```
 

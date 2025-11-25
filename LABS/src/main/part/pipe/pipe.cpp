@@ -1,236 +1,97 @@
-// pipe_impl.hpp
-// PIMPL implementation for pipe.hpp interface
-
-#pragma once
+// pipe.cpp
+// Implementation of pipe.hpp HEAD/TAIL functions
+// Abstracts decoder selection and output transforms
 
 #include <pipe.hpp>
-#include <sink.hpp>
-#include <link.hpp>
-#include <hold.hpp>
-#include <opencv2/core.hpp>
-#include <map>
-#include <string>
-#include <vector>
-#include <memory>
+#include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
+#include <sstream>
+
+// Internal decoder (not exposed in public API)
+#include "sony.h"
 
 namespace pipe
 {
-    namespace impl
+
+// HEAD: Decode RAW → scene-linear RGB
+bool open(pqtr::Sink& sink, const std::string& decoderName, Head& head)
+{
+    // Dispatch to appropriate decoder based on name
+    if (decoderName == decoder::SONY_ARW2 || decoderName == "sony")
     {
-        // Forward declarations
-        class PipeImpl;
-        class HeadImpl;
-        class BodyImpl;
-        class TailImpl;
-        class LinkImpl;
-        class DataImpl;
+        // Use Sony ARW2 decoder
+        cv::UMat bayer;
+        sony::Info sonyInfo;
+        sony::RawMetadata metadata;
 
-        // Implementation of Data
-        class DataImpl : public Data
+        // Decode RAW header and extract Bayer data
+        if (!sony::Decoder::prepare(sink, bayer, sonyInfo, metadata))
         {
-        public:
-            DataImpl(Info info, View view) : info_(info), view_(view) {}
+            return false;
+        }
 
-            Info info() override { return info_; }
-            View view() override { return view_; }
-
-        private:
-            Info info_;
-            View view_;
-        };
-
-        // Implementation of Task (base for all processing units)
-        class TaskImpl : public Body::Task
+        // Process to scene-linear RGB
+        if (!sony::Decoder::process_linear(bayer, metadata, head.view))
         {
-        public:
-            View run(View view) override
-            {
-                // Default: passthrough
-                return view;
-            }
+            return false;
+        }
 
-            bool set() override
-            {
-                return set_;
-            }
+        // Convert sony::Info to pipe::Info
+        head.info = sonyInfo;
 
-        protected:
-            bool set_ = false;
-        };
+        // Add structured metadata
+        head.info["decoder"] = decoderName;
+        head.info["width"] = std::to_string(metadata.crop_width);
+        head.info["height"] = std::to_string(metadata.crop_height);
+        head.info["camera_make"] = metadata.camera_make;
+        head.info["camera_model"] = metadata.camera_model;
+        head.info["lens_model"] = metadata.lens_model;
 
-        // Implementation of Link
-        class LinkImpl : public Body::Link
-        {
-        public:
-            explicit LinkImpl(Name name) : name_(name) {}
+        std::ostringstream oss;
+        oss << metadata.iso;
+        head.info["iso"] = oss.str();
 
-            Name name() override { return name_; }
+        oss.str("");
+        oss << metadata.shutter_speed;
+        head.info["shutter_speed"] = oss.str();
 
-            // Module accessors (TODO: implement actual modules)
-            Geometric geometric() override;
-            ColorCorrection colorCorrection() override;
-            ToneMapping toneMapping() override;
-            GlobalColor globalColor() override;
-            SelectiveColour selectiveColour() override;
-            Detail detail() override;
+        oss.str("");
+        oss << metadata.aperture;
+        head.info["aperture"] = oss.str();
 
-            View run(View view) override
-            {
-                // Run all modules in sequence
-                // TODO: implement module chain
-                return view;
-            }
+        oss.str("");
+        oss << metadata.focal_length;
+        head.info["focal_length"] = oss.str();
 
-            bool set() override
-            {
-                // Check if any module has been modified
-                // TODO: check all modules
-                return false;
-            }
+        head.info["orientation"] = std::to_string(metadata.orientation);
 
-        private:
-            Name name_;
-            // TODO: add module instances
-        };
+        return true;
+    }
 
-        // Implementation of Body
-        class BodyImpl : public Body
-        {
-        public:
-            explicit BodyImpl(pqtr::Hold<pqtr::Sink> sink, View view, Info info)
-                : sink_(std::move(sink)), currentView_(view), info_(info) {}
+    // Unknown decoder
+    return false;
+}
 
-            Data data() override
-            {
-                return DataImpl(info_, currentView_);
-            }
+// TAIL: Apply sRGB gamma (OETF)
+bool gamma(const View& linear, View& output)
+{
+    // Use Sony decoder's gamma function (it's the standard sRGB OETF)
+    return sony::Decoder::apply_gamma(linear, output);
+}
 
-            Link add(Name name) override
-            {
-                auto link = std::make_shared<LinkImpl>(name);
-                links_.push_back(link);
-                return *link;
-            }
+// TAIL: Save to PNG file
+bool save(const View& view, const std::string& path)
+{
+    // Convert to 8-bit for PNG
+    cv::UMat output8bit;
+    view.convertTo(output8bit, CV_8UC3, 255.0);
 
-            Link get(Name name) override
-            {
-                for (auto& link : links_)
-                {
-                    if (link->name() == name)
-                    {
-                        return *link;
-                    }
-                }
-                throw std::runtime_error("Link not found: " + name);
-            }
+    // Clamp values (in case of any overflow)
+    cv::Mat cpuMat;
+    output8bit.copyTo(cpuMat);
 
-            class ListImpl : public List
-            {
-            public:
-                explicit ListImpl(const std::vector<std::shared_ptr<LinkImpl>>& links)
-                    : links_(links), index_(0) {}
+    // Save PNG
+    return cv::imwrite(path, cpuMat);
+}
 
-                Link get() override
-                {
-                    if (has())
-                    {
-                        return *links_[index_++];
-                    }
-                    throw std::runtime_error("No more links");
-                }
-
-                bool has() override
-                {
-                    return index_ < links_.size();
-                }
-
-            private:
-                const std::vector<std::shared_ptr<LinkImpl>>& links_;
-                size_t index_;
-            };
-
-            List& all() override
-            {
-                list_ = std::make_unique<ListImpl>(links_);
-                return *list_;
-            }
-
-            Tail tail() override;
-
-        private:
-            pqtr::Hold<pqtr::Sink> sink_;
-            View currentView_;
-            Info info_;
-            std::vector<std::shared_ptr<LinkImpl>> links_;
-            std::unique_ptr<ListImpl> list_;
-        };
-
-        // Implementation of Tail
-        class TailImpl : public Tail
-        {
-        public:
-            explicit TailImpl(View view, pqtr::Hold<pqtr::Sink> outputSink)
-                : view_(view), outputSink_(std::move(outputSink)) {}
-
-            void save() override
-            {
-                // Convert linear RGB to sRGB and save as PNG
-                // TODO: Implement output transform and PNG encoding
-            }
-
-        private:
-            View view_;
-            pqtr::Hold<pqtr::Sink> outputSink_;
-        };
-
-        // Implementation of Head
-        class HeadImpl : public Head
-        {
-        public:
-            explicit HeadImpl(pqtr::Hold<pqtr::Sink> sink)
-                : sink_(std::move(sink))
-            {
-                decode();
-            }
-
-            Data data() override
-            {
-                return DataImpl(info_, view_);
-            }
-
-            Body body() override
-            {
-                // Transfer ownership of sink to body
-                return BodyImpl(std::move(sink_), view_, info_);
-            }
-
-        private:
-            void decode()
-            {
-                // Decode RAW data from sink
-                // TODO: Implement RAW decoding (integrate opt/raws decoder)
-                // For now, create a placeholder
-                info_["decoder"] = "sony_arw2";
-                info_["status"] = "not_implemented";
-
-                // Create empty view as placeholder
-                view_ = cv::UMat(1, 1, CV_32FC3);
-            }
-
-            pqtr::Hold<pqtr::Sink> sink_;
-            View view_;
-            Info info_;
-        };
-
-        // Implementation of Pipe
-        class PipeImpl : public Pipe
-        {
-        public:
-            pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) override
-            {
-                return pqtr::Hold<Head>(new HeadImpl(std::move(sink)));
-            }
-        };
-
-    } // namespace impl
 } // namespace pipe
