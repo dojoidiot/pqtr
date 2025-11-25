@@ -19,7 +19,9 @@
 
 // Layout constants
 static const float LEFT_PANEL_WIDTH = 250.0f;   // Projects panel
-static const float RIGHT_PANEL_WIDTH = 300.0f;  // Link editor
+static const float RIGHT_PANEL_WIDTH = 300.0f;  // Future panel (empty)
+static const float BOTTOM_PANEL_HEIGHT = 150.0f; // Module menus + dial
+static const float DIAL_WIDTH = 150.0f;          // Dial control width
 
 static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
@@ -127,6 +129,8 @@ int main(int argc, char** argv) {
         // Calculate layout dimensions
         float content_height = display_h - menu_bar_height;
         float center_width = display_w - LEFT_PANEL_WIDTH - RIGHT_PANEL_WIDTH;
+        float image_height = content_height - BOTTOM_PANEL_HEIGHT;
+        float menu_width = center_width - DIAL_WIDTH;
 
         // === LEFT PANEL: Projects ===
         ImGui::SetNextWindowPos(ImVec2(0, menu_bar_height));
@@ -141,9 +145,9 @@ int main(int argc, char** argv) {
 
         ImGui::End();
 
-        // === CENTER: Work Area (Image) ===
+        // === CENTER TOP: Work Area (Image) ===
         ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH, menu_bar_height));
-        ImGui::SetNextWindowSize(ImVec2(center_width, content_height));
+        ImGui::SetNextWindowSize(ImVec2(center_width, image_height));
         ImGui::Begin("##WorkArea", nullptr,
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize |
@@ -154,16 +158,42 @@ int main(int argc, char** argv) {
 
         ImGui::End();
 
-        // === RIGHT PANEL: Link Editor ===
-        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH + center_width, menu_bar_height));
-        ImGui::SetNextWindowSize(ImVec2(RIGHT_PANEL_WIDTH, content_height));
-        ImGui::Begin("##LinkEditor", nullptr,
+        // === CENTER BOTTOM LEFT: Module Menus ===
+        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH, menu_bar_height + image_height));
+        ImGui::SetNextWindowSize(ImVec2(menu_width, BOTTOM_PANEL_HEIGHT));
+        ImGui::Begin("##ModuleMenus", nullptr,
             ImGuiWindowFlags_NoMove |
             ImGuiWindowFlags_NoResize |
             ImGuiWindowFlags_NoCollapse |
             ImGuiWindowFlags_NoTitleBar);
 
-        desk::render_link_editor(state);
+        desk::render_module_menus(state);
+
+        ImGui::End();
+
+        // === CENTER BOTTOM RIGHT: Dial Control ===
+        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH + menu_width, menu_bar_height + image_height));
+        ImGui::SetNextWindowSize(ImVec2(DIAL_WIDTH, BOTTOM_PANEL_HEIGHT));
+        ImGui::Begin("##DialControl", nullptr,
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoTitleBar);
+
+        desk::render_dial_control(state);
+
+        ImGui::End();
+
+        // === RIGHT PANEL: Future (empty) ===
+        ImGui::SetNextWindowPos(ImVec2(LEFT_PANEL_WIDTH + center_width, menu_bar_height));
+        ImGui::SetNextWindowSize(ImVec2(RIGHT_PANEL_WIDTH, content_height));
+        ImGui::Begin("##RightPanel", nullptr,
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoCollapse |
+            ImGuiWindowFlags_NoTitleBar);
+
+        ImGui::TextDisabled("(future)");
 
         ImGui::End();
 

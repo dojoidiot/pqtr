@@ -381,20 +381,23 @@ bool render_project(State& state, const Project& project) {
     state.status_message = "Rendering: " + project.name;
 
     // Load RAW into sink
-    pqtr::Sink* sink = pqtr::Tool::read(project.raw_path.string());
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
+    if (!sink) {
+        state.error_message = "Failed to read: " + project.name;
+        return false;
+    }
 
-    // Decode through pipe head
-    pipe::Head head;
-    if (!pipe::open(*sink, project.decoder, head)) {
-        delete sink;
+    // Create pipe and decode (HEAD stage)
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
         state.error_message = "Failed to decode: " + project.name;
         return false;
     }
-    delete sink;
 
-    // TAIL: Save PNG (gamma applied internally)
-    if (!pipe::save(head.view, project.png_path.string())) {
-        state.error_message = "Failed save: " + project.name;
+    // Body-free: skip to tail and save (no links = passthrough)
+    if (!head->body().tail().save(project.png_path.string())) {
+        state.error_message = "Failed to save: " + project.name;
         return false;
     }
 

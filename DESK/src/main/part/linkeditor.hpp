@@ -1,5 +1,5 @@
 // linkeditor.hpp - Link editor component
-// Right panel for editing 6 modules with 45 dials
+// Module menus (bottom left) + dial control (bottom right)
 
 #pragma once
 
@@ -7,8 +7,12 @@
 
 namespace desk {
 
-// Render the link editor panel
-// Returns true if any dial value changed
-bool render_link_editor(State& state);
+// Render module/dial selection menus (bottom left panel)
+// Returns true if selection changed
+bool render_module_menus(State& state);
+
+// Render dial control area (bottom right panel)
+// Returns true if dial value changed
+bool render_dial_control(State& state);
 
 } // namespace desk

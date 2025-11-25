@@ -23,7 +23,7 @@ The monolithic shared library containing all LABS functionality.
 
 **Build:**
 ```bash
-make -f Makefile.libs
+make -f Makefile.labs
 ```
 
 **Consumer linking:**
@@ -215,7 +215,7 @@ void processRaw(const std::string& rawPath) {
 
 ```bash
 # From LABS directory
-make -f Makefile.libs
+make -f Makefile.labs
 ```
 
 Output: `lib/labs.so` (~96KB)

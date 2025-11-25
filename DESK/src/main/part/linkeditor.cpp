@@ -1,5 +1,5 @@
 // linkeditor.cpp - Link editor implementation
-// Two-level menu: Master (modules) → Detail (dials) + Dial Control area
+// Module menus (bottom left) + dial control (bottom right)
 
 #include "linkeditor.hpp"
 #include "files.hpp"
@@ -31,9 +31,6 @@ static const char** DIAL_NAMES[] = {
 
 static const int DIAL_COUNTS[] = {1, 2, 5, 3, 8, 4};
 
-// Dial control width (square, full height)
-static const float DIAL_CONTROL_WIDTH = 120.0f;
-
 // Box styling
 static const ImVec4 BOX_NORMAL = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
 static const ImVec4 BOX_HOVER = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
@@ -58,47 +55,40 @@ static bool render_box(const char* label, bool selected, float width = 0.0f) {
     return clicked;
 }
 
-bool render_link_editor(State& state) {
+bool render_module_menus(State& state) {
     bool changed = false;
 
     // Check if we have a valid selection
     if (state.selected_project < 0 || state.selected_project >= (int)state.projects.size()) {
-        ImGui::TextWrapped("Select a project to edit.");
+        ImGui::TextDisabled("Select a project");
         return false;
     }
 
     Project& proj = state.projects[state.selected_project];
 
     if (state.selected_link < 0 || state.selected_link >= (int)proj.links.size()) {
-        ImGui::TextWrapped("Select a Link to edit its modules and dials.");
+        ImGui::TextDisabled("Select a Link");
         return false;
     }
 
     Link& link = proj.links[state.selected_link];
 
-    // Get available space
-    ImVec2 avail = ImGui::GetContentRegionAvail();
-    float menu_width = avail.x - DIAL_CONTROL_WIDTH - ImGui::GetStyle().ItemSpacing.x;
-
-    // === LEFT SIDE: Menus ===
-    ImGui::BeginChild("##menus", ImVec2(menu_width, avail.y), false);
-
     // Link name header
     ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Link: %s", link.name.c_str());
     ImGui::Separator();
 
-    // Master menu (7 module boxes)
+    // Master menu (6 module boxes)
     ImGui::Text("Module:");
     for (int m = 0; m < MOD_COUNT; m++) {
         if (m > 0) ImGui::SameLine();
         if (render_box(MODULE_NAMES[m], state.selected_module == m)) {
             state.selected_module = m;
             state.selected_dial = 0;  // Reset dial selection
+            changed = true;
         }
     }
 
     ImGui::Spacing();
-    ImGui::Separator();
 
     // Detail menu (dial boxes for selected module)
     ImGui::Text("Dial:");
@@ -109,10 +99,11 @@ bool render_link_editor(State& state) {
         if (d > 0) ImGui::SameLine();
         if (render_box(dial_names[d], state.selected_dial == d)) {
             state.selected_dial = d;
+            changed = true;
         }
     }
 
-    // For Selective Color, show sub-dials (hue/sat/lum) when a color is selected
+    // For Selective Color, show sub-dials (hue/sat/lum)
     if (state.selected_module == MOD_SEL) {
         ImGui::Spacing();
         ImGui::Text("Adjust:");
@@ -122,28 +113,20 @@ bool render_link_editor(State& state) {
             if (s > 0) ImGui::SameLine();
             if (render_box(sub_names[s], sel_sub == s)) {
                 sel_sub = s;
+                changed = true;
             }
         }
     }
 
-    ImGui::Spacing();
-    ImGui::Separator();
+    return changed;
+}
 
-    // Future content area
-    ImGui::TextDisabled("(dial value display area)");
+bool render_dial_control(State& state) {
+    bool changed = false;
 
-    ImGui::EndChild();
-
-    // === RIGHT SIDE: Dial Control ===
-    ImGui::SameLine();
-    ImGui::BeginChild("##dial_control", ImVec2(DIAL_CONTROL_WIDTH, avail.y), true);
-
-    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "DIAL");
-    ImGui::Separator();
-
-    // Placeholder for dial control widget
-    ImVec2 dial_avail = ImGui::GetContentRegionAvail();
-    float dial_size = dial_avail.x - 10.0f;
+    // Get available space (full panel height)
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float dial_size = (avail.x < avail.y) ? avail.x - 10.0f : avail.y - 10.0f;
 
     // Draw placeholder square
     ImVec2 cursor = ImGui::GetCursorScreenPos();
@@ -157,8 +140,6 @@ bool render_link_editor(State& state) {
     ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (dial_size - text_size.x) * 0.5f);
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + dial_size * 0.5f - text_size.y * 0.5f);
     ImGui::Text("%s", current_dial);
-
-    ImGui::EndChild();
 
     return changed;
 }
