@@ -2,7 +2,7 @@
 # Builds lib/labs.a static library
 #
 # Exposes:
-#   - sony::Decoder (RAW decoding)
+#   - sony::Decoder (via RAWS library)
 #   - pipe::mods::* (processing modules)
 #   - pqtr::Sink, pqtr::Tool, pqtr::Hold (infrastructure, header-only)
 
@@ -21,15 +21,17 @@ OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 # Include paths
 INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
-           -I./opt/raws/src/main/part \
+           -I./inc/RAWS \
            -I./src/main/part/pipe
 
 # Directories
 SRC_DIR = src/main
-OPT_RAWS_DIR = opt/raws/src/main
 TMP_DIR = tmp/libs
 OBJ_DIR = $(TMP_DIR)/obj
 LIB_DIR = lib
+
+# RAWS library (via wire.sh symlink)
+RAWS_A = $(LIB_DIR)/RAWS.a
 
 # Pipe sources (HEAD/TAIL)
 PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp
@@ -44,17 +46,6 @@ MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/geometric.cpp \
             $(SRC_DIR)/part/pipe/mods/detail.cpp
 
-# Raws sources (Sony decoder)
-RAWS_SRCS = $(OPT_RAWS_DIR)/part/sony.cpp \
-            $(OPT_RAWS_DIR)/part/sony/prepare.cpp \
-            $(OPT_RAWS_DIR)/part/sony/process.cpp \
-            $(OPT_RAWS_DIR)/part/sony/demosaic.cpp \
-            $(OPT_RAWS_DIR)/part/sony/blc_bayer.cpp \
-            $(OPT_RAWS_DIR)/part/sony/wb_bayer.cpp \
-            $(OPT_RAWS_DIR)/part/sony/color_matrix.cpp \
-            $(OPT_RAWS_DIR)/part/sony/crop.cpp \
-            $(OPT_RAWS_DIR)/part/sony/gamma_oetf.cpp
-
 # Object files
 PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o
 
@@ -67,17 +58,7 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/geometric.o \
             $(OBJ_DIR)/mods/detail.o
 
-RAWS_OBJS = $(OBJ_DIR)/raws/sony.o \
-            $(OBJ_DIR)/raws/sony/prepare.o \
-            $(OBJ_DIR)/raws/sony/process.o \
-            $(OBJ_DIR)/raws/sony/demosaic.o \
-            $(OBJ_DIR)/raws/sony/blc_bayer.o \
-            $(OBJ_DIR)/raws/sony/wb_bayer.o \
-            $(OBJ_DIR)/raws/sony/color_matrix.o \
-            $(OBJ_DIR)/raws/sony/crop.o \
-            $(OBJ_DIR)/raws/sony/gamma_oetf.o
-
-ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS) $(RAWS_OBJS)
+ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS)
 
 # Target static library
 LABS_A = $(LIB_DIR)/labs.a
@@ -86,9 +67,13 @@ LABS_A = $(LIB_DIR)/labs.a
 
 all: $(LABS_A)
 
-$(LABS_A): $(ALL_OBJS) | $(LIB_DIR)
-	ar rcs $@ $^
-	@echo "Built: $@"
+# Combine LABS objects with RAWS library into labs.a
+$(LABS_A): $(ALL_OBJS) $(RAWS_A) | $(LIB_DIR)
+	@rm -rf $(TMP_DIR)/merge && mkdir -p $(TMP_DIR)/merge
+	cd $(TMP_DIR)/merge && ar x ../../../$(RAWS_A)
+	ar rcs $@ $(ALL_OBJS) $(TMP_DIR)/merge/*.o
+	@rm -rf $(TMP_DIR)/merge
+	@echo "Built: $@ (includes RAWS)"
 
 # Pipe objects
 $(OBJ_DIR)/pipe/pipe.o: $(SRC_DIR)/part/pipe/pipe.cpp | $(OBJ_DIR)/pipe
@@ -96,13 +81,6 @@ $(OBJ_DIR)/pipe/pipe.o: $(SRC_DIR)/part/pipe/pipe.cpp | $(OBJ_DIR)/pipe
 
 # Module objects
 $(OBJ_DIR)/mods/%.o: $(SRC_DIR)/part/pipe/mods/%.cpp | $(OBJ_DIR)/mods
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-# Raws objects
-$(OBJ_DIR)/raws/sony.o: $(OPT_RAWS_DIR)/part/sony.cpp | $(OBJ_DIR)/raws
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-$(OBJ_DIR)/raws/sony/%.o: $(OPT_RAWS_DIR)/part/sony/%.cpp | $(OBJ_DIR)/raws/sony
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Directory creation
@@ -115,16 +93,11 @@ $(OBJ_DIR)/pipe:
 $(OBJ_DIR)/mods:
 	mkdir -p $(OBJ_DIR)/mods
 
-$(OBJ_DIR)/raws:
-	mkdir -p $(OBJ_DIR)/raws
-
-$(OBJ_DIR)/raws/sony:
-	mkdir -p $(OBJ_DIR)/raws/sony
-
 clean:
 	rm -rf $(TMP_DIR) $(LABS_A)
 
 info:
 	@echo "Target: $(LABS_A)"
 	@echo "Objects: $(ALL_OBJS)"
+	@echo "RAWS: $(RAWS_A)"
 	@echo "OpenCV: $(OPENCV_LIB)"

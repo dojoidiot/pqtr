@@ -1,39 +1,87 @@
-# `PQTR:DESK`
+# PQTR:DESK
 
-Project management interface for `LABS`. Provides a graphical environment for managing RAW image processing projects using the LABS pipe system.
+[back](../README.md)
+
+Desktop application for power users. Create and tune image processing styles using the full LABS pipeline.
+
+## Role in PQTR
+
+DESK is for professionals and enthusiasts who want full control over RAW processing. Styles created in DESK can be shared with PLAY users.
+
+```
+[LABS] ──► [DESK] ──► Styles (.pipe.json)
+             │              │
+             │              └──► PLAY users apply these
+             └── Power user workflow
+```
+
+- **Consumes**: `labs.a` (via symlink)
+- **Produces**: `desk` executable, `.pipe.json` style files
+- **Audience**: Photographers, colorists, power users
 
 ## Features
 
-- **Project Management**: Organize RAW files with sidecar-based structure (no subdirectories)
+- **Project Management**: Organize RAW files with sidecar-based structure
 - **Pipe Editor**: Visual editor for HEAD → BODY → TAIL pipeline
 - **Link Editor**: 6 modules with 45 dials per Link
 - **Live Preview**: Output PNG updates on dial changes
+- **Style Export**: Save styles for use in PLAY
 
 ## Architecture
 
 | Component | Description |
 |-----------|-------------|
 | Sidecar Files | `<name>.desk.json` (project), `<name>.pipe.json` (pipe config) |
-| UI Framework | ImGui-based interface |
-| Input | Sony ARW (more formats planned) |
-| Output | PNG |
+| UI Framework | ImGui + GLFW + OpenGL |
+| Input | Any format supported by RAWS (Sony ARW, etc.) |
+| Output | PNG (lossless) |
 
-## Build
+## Project Structure
+
+```
+DESK/
+├── bin/
+│   └── desk              # Built executable
+├── lib/
+│   ├── LABS.a            # [symlink] → LABS/lib/labs.a
+│   ├── imgui/            # ImGui library
+│   ├── glfw/             # GLFW library
+│   └── ImGuiFileDialog/  # File dialog
+├── src/
+│   └── main/
+│       ├── desk.cpp      # Main entry point
+│       └── part/         # UI components
+├── var/                  # Default project folder (test images)
+└── Makefile.desk
+```
+
+## Building
 
 ```bash
-cd DESK
+# From DESK directory
 make -f Makefile.desk
+
+# Or from repository root
+make desk
 ```
 
-Run with default project folder (`var/`):
+## Running
+
 ```bash
+# Default project folder (var/)
 ./bin/desk
-```
 
-Run with custom project folder:
-```bash
+# Custom project folder
 ./bin/desk /path/to/photos
 ```
+
+## Workflow
+
+1. Open a folder containing RAW files
+2. Select an image to edit
+3. Adjust pipeline settings (HEAD decoder, BODY modules, TAIL output)
+4. Save style as `.pipe.json`
+5. Share style with PLAY users or apply to batch processing
 
 ## Documentation
 

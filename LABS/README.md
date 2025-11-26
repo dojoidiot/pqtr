@@ -1,39 +1,41 @@
-# `PQTR:LABS`
+# PQTR:LABS
 
-`PQTR:LABS` is the core digital film processing system.
+[back](../README.md)
+
+The "settled science" of RAW image processing. LABS is a stable utility library that powers all PQTR applications.
+
+## Role in PQTR
+
+LABS sits between raw decoding and end-user applications:
+
+```
+[RAWS] ──► [LABS] ──► DESK / FAST / PLAY
+            │
+            └── pipe::Pipe API
+                HEAD → BODY → TAIL
+```
+
+- **Consumes**: `raws.a` (RAW decoder, via symlink)
+- **Produces**: `labs.a` (complete processing library)
+- **Used by**: DESK, FAST, PLAY
+
+LABS knows nothing about camera-specific decoding—it calls `raws::decode()` and receives scene-linear RGB. When new cameras are added to RAWS, LABS works unchanged.
 
 ## Project Structure
 
 ```
-labs/
+LABS/
 ├── bin/          # Compiled binaries (pipe, tune, diff)
-├── inc/          # Public headers for parts (<part>.hpp, labs.hpp)
-├── lib/          # Compiled libraries for parts
+├── inc/          # Public headers (pipe.hpp, sink.hpp, hold.hpp, tool.hpp)
+│   └── RAWS/     # [symlink] → RAWS/inc (raws.hpp API)
+├── lib/          # Compiled libraries
+│   ├── labs.a    # Main library (includes RAWS)
+│   ├── RAWS.a    # [symlink] → RAWS/lib/raws.a
+│   └── opencv/   # OpenCV dependency
 ├── src/
-│   ├── main/     # Source code for programs that go to /bin
-│   ├── main/part # Source code for part libraries that go to /lib
-│   └── test/     # Test code for programs that go to /bin
-│   └── test/part # Test code for part libraries that go to /lib
-├── opt/          # Self-contained optional tools
-│   └── raws/     # RAW decoder development and testing environment
-└── doc/          # Project documentation
-    ├── mods/     # Detailed golden module documentation
-    │   ├── color_correction.md
-    │   ├── detail_output.md
-    │   ├── geometric.md
-    │   ├── global_color.md
-    │   ├── selective_color.md
-    │   └── tone_mapping.md
-    ├── data.md   # Data file format standards (.json sidecars)
-    ├── diff.md   # Diff tool specification (loss metrics)
-    ├── edge.md   # Edge optimizer (frequency loss, sharpness)
-    ├── geos.md   # GeoS optimizer (spectral loss, color/tone)
-    ├── idea.md   # Future enhancement ideas
-    ├── labs.md   # Labs system integration and overview
-    ├── libs.md   # Library interface (labs.so, public headers)
-    ├── pipe.md   # Pipe tool specification
-    ├── test.md   # Test strategy and verification
-    └── tune.md   # Tune tool (orchestrates GeoS + Edge)
+│   ├── main/     # Source code for binaries
+│   └── main/part # Source code for library components
+└── doc/          # Documentation
 ```
 
 ## Pipeline Philosophy
@@ -62,11 +64,14 @@ These are command-line executables located in `bin/` that use the parts to perfo
 *   [**`tune`**](./doc/tune.md): A headless tool that automatically optimizes 39 creative dials to match a reference style. Two-stage process: SPSA for color/tone (35 dials), greedy for sharpness (4 dials). User handles geometry (6 dials).
 *   [**`diff`**](./doc/diff.md): A headless tool that computes spectral loss (color/tone) and frequency loss (sharpness) between images.
 
-## Development Tools
+## RAW Decoding
 
-These tools, located in `opt/`, are used for development and are not part of the core runtime.
+RAW decoding is handled by [RAWS](../RAWS/README.md), a separate project that produces `raws.a`. LABS links this library and calls `raws::decode()` to obtain scene-linear RGB from any supported camera format.
 
-*   [**`raws`**](./opt/raws/README.md): A standalone development and testing environment for creating new RAW decoders. Once validated, the raws library is statically linked into `labs.so` and becomes available as a selectable decoder in the pipeline's HEAD.
+This separation means:
+- Camera support R&D happens in RAWS, not LABS
+- Adding Sony/Canon/Nikon support doesn't change LABS code
+- LABS remains stable while RAWS evolves
 
 ## Out of Scope
 

@@ -1,0 +1,95 @@
+# RAWS Library Makefile
+# Builds lib/raws.a static library
+#
+# Exposes:
+#   - raws::decode() (auto-detecting RAW decoder)
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# OpenCV paths (RAWS depends on LABS for OpenCV)
+OPENCV_ROOT = ../LABS/lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) \
+           -I./inc \
+           -I./src/main/part \
+           -I../LABS/inc
+
+# Directories
+OBJ_DIR = tmp/raws/obj
+LIB_DIR = lib
+
+# Source files - public API
+API_SRCS = src/main/raws.cpp
+
+# Source files - Sony decoder (internal)
+SONY_DIR = src/main/part
+SONY_SRCS = $(SONY_DIR)/sony.cpp \
+            $(SONY_DIR)/sony/prepare.cpp \
+            $(SONY_DIR)/sony/process.cpp \
+            $(SONY_DIR)/sony/blc.cpp \
+            $(SONY_DIR)/sony/blc_bayer.cpp \
+            $(SONY_DIR)/sony/wb_gain.cpp \
+            $(SONY_DIR)/sony/wb_bayer.cpp \
+            $(SONY_DIR)/sony/demosaic.cpp \
+            $(SONY_DIR)/sony/color_matrix.cpp \
+            $(SONY_DIR)/sony/undistort.cpp \
+            $(SONY_DIR)/sony/crop.cpp \
+            $(SONY_DIR)/sony/gamma_oetf.cpp
+
+# Object files
+OBJS = $(OBJ_DIR)/raws.o \
+       $(OBJ_DIR)/sony.o \
+       $(OBJ_DIR)/sony/prepare.o \
+       $(OBJ_DIR)/sony/process.o \
+       $(OBJ_DIR)/sony/blc.o \
+       $(OBJ_DIR)/sony/blc_bayer.o \
+       $(OBJ_DIR)/sony/wb_gain.o \
+       $(OBJ_DIR)/sony/wb_bayer.o \
+       $(OBJ_DIR)/sony/demosaic.o \
+       $(OBJ_DIR)/sony/color_matrix.o \
+       $(OBJ_DIR)/sony/undistort.o \
+       $(OBJ_DIR)/sony/crop.o \
+       $(OBJ_DIR)/sony/gamma_oetf.o
+
+# Target
+RAWS_A = $(LIB_DIR)/raws.a
+
+.PHONY: all clean
+
+all: $(RAWS_A)
+
+$(RAWS_A): $(OBJS) | $(LIB_DIR)
+	ar rcs $@ $^
+	@echo "Built: $@"
+
+# Public API
+$(OBJ_DIR)/raws.o: src/main/raws.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Sony decoder
+$(OBJ_DIR)/sony.o: $(SONY_DIR)/sony.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Sony submodules
+$(OBJ_DIR)/sony/%.o: $(SONY_DIR)/sony/%.cpp | $(OBJ_DIR)/sony
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Directories
+$(LIB_DIR):
+	mkdir -p $(LIB_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/sony:
+	mkdir -p $(OBJ_DIR)/sony
+
+clean:
+	rm -rf tmp/raws $(RAWS_A)

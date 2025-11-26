@@ -14,8 +14,8 @@
 #include <vector>
 #include <stdexcept>
 
-// Internal decoder (not exposed in public API)
-#include "sony.h"
+// RAW decoder (from RAWS library)
+#include "raws.hpp"
 
 // Internal mods (not exposed in public API)
 #include "mods/mods.h"
@@ -490,6 +490,32 @@ public:
 class TailImpl : public Tail
 {
     DataImpl& m_data;
+
+    // sRGB gamma OETF (linear → display)
+    static bool applyGamma(const cv::UMat& linear, cv::UMat& gamma)
+    {
+        cv::UMat clamped;
+        cv::max(linear, 0.0f, clamped);
+
+        cv::UMat lowMask, highMask;
+        cv::compare(clamped, 0.0031308f, lowMask, cv::CMP_LE);
+        cv::compare(clamped, 0.0031308f, highMask, cv::CMP_GT);
+
+        cv::UMat lowPart, highPart;
+        cv::multiply(clamped, 12.92f, lowPart);
+
+        cv::UMat temp;
+        cv::pow(clamped, 1.0f / 2.4f, temp);
+        cv::multiply(temp, 1.055f, temp);
+        cv::subtract(temp, 0.055f, highPart);
+
+        gamma.create(linear.size(), linear.type());
+        lowPart.copyTo(gamma, lowMask);
+        highPart.copyTo(gamma, highMask);
+
+        return true;
+    }
+
 public:
     TailImpl(DataImpl& data) : m_data(data) {}
 
@@ -498,7 +524,7 @@ public:
         View linear = m_data.view();
 
         cv::UMat gamma;
-        if (!sony::Decoder::apply_gamma(linear, gamma))
+        if (!applyGamma(linear, gamma))
             return false;
 
         cv::UMat out8;
@@ -593,47 +619,14 @@ class PipeImpl : public Pipe
 public:
     pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) override
     {
-        cv::UMat bayer;
-        sony::Info sonyInfo;
-        sony::RawMetadata meta;
-
-        if (!sony::Decoder::prepare(*sink, bayer, sonyInfo, meta))
+        // Decode RAW file using RAWS library
+        raws::Result raw = raws::decode(*sink);
+        if (!raw.success)
             return pqtr::Hold<Head>(nullptr);
-
-        View sceneLinear;
-        if (!sony::Decoder::process_linear(bayer, meta, sceneLinear))
-            return pqtr::Hold<Head>(nullptr);
-
-        // Data info: scene-linear metadata
-        Info dataInfo = sonyInfo;
-        dataInfo["decoder"] = "sony_arw2";
-        dataInfo["width"] = std::to_string(meta.crop_width);
-        dataInfo["height"] = std::to_string(meta.crop_height);
-        dataInfo["camera_make"] = meta.camera_make;
-        dataInfo["camera_model"] = meta.camera_model;
-        dataInfo["lens_model"] = meta.lens_model;
-
-        std::ostringstream oss;
-        oss << meta.iso; dataInfo["iso"] = oss.str();
-        oss.str(""); oss << meta.shutter_speed; dataInfo["shutter_speed"] = oss.str();
-        oss.str(""); oss << meta.aperture; dataInfo["aperture"] = oss.str();
-        oss.str(""); oss << meta.focal_length; dataInfo["focal_length"] = oss.str();
-        dataInfo["orientation"] = std::to_string(meta.orientation);
-
-        // View info: preview-specific metadata (what produced the camera look)
-        Info viewInfo;
-        viewInfo["width"] = std::to_string(meta.preview_width);
-        viewInfo["height"] = std::to_string(meta.preview_height);
-        viewInfo["format"] = "srgb_8bit";
-        viewInfo["creative_style"] = meta.creative_style;
-        viewInfo["dro"] = meta.dro;
-        viewInfo["contrast"] = std::to_string(meta.contrast);
-        viewInfo["saturation"] = std::to_string(meta.saturation);
-        viewInfo["sharpness"] = std::to_string(meta.sharpness);
 
         return pqtr::Hold<Head>(new HeadImpl(
-            std::move(dataInfo), std::move(sceneLinear),
-            std::move(viewInfo), std::move(meta.preview)));
+            std::move(raw.dataInfo), std::move(raw.data),
+            std::move(raw.previewInfo), std::move(raw.preview)));
     }
 };
 

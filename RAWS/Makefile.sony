@@ -7,8 +7,8 @@
 CXX = g++
 CXXFLAGS = -std=c++11 -Wall -O2
 
-# OpenCV paths (relative to opt/raws/)
-OPENCV_ROOT ?= ../../lib/opencv
+# OpenCV paths (relative to RAWS/)
+OPENCV_ROOT ?= ../LABS/lib/opencv
 OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/core/include \
                  -I$(OPENCV_ROOT)/modules/imgproc/include \
@@ -21,7 +21,7 @@ BUILD_DIR = $(TMP_DIR)/sony
 OBJ_DIR = $(BUILD_DIR)/obj
 
 # Include and library flags
-INCLUDES = $(OPENCV_INCLUDE) -Isrc/main/part -Isrc/main/part/sony -Isrc/main -I../../inc
+INCLUDES = $(OPENCV_INCLUDE) -Isrc/main/part -Isrc/main/part/sony -Isrc/main -I../LABS/inc
 LDFLAGS = -L$(OPENCV_LIB)
 LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 

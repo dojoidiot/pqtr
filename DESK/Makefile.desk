@@ -97,7 +97,7 @@ glfw:
 		cd $(GLFW_BUILD) && cmake .. -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF && make -j$$(nproc); \
 	fi
 
-$(DESK_BIN): $(IMGUI_OBJS) $(FILEDIALOG_OBJ) $(PART_OBJS) $(DESK_OBJ) | $(BIN_DIR)
+$(DESK_BIN): $(IMGUI_OBJS) $(FILEDIALOG_OBJ) $(PART_OBJS) $(DESK_OBJ) $(LABS_LIB)/labs.a | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
 # ImGui core
