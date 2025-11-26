@@ -45,11 +45,13 @@ static const char* DIAL_KEYS_TONE[] = {"contrast", "highlights", "shadows", "bla
 static const char* DIAL_KEYS_COLOR[] = {"vibrance", "saturation", "color_density"};
 static const char* DIAL_KEYS_DTL[] = {"sharpen_amount", "sharpen_radius", "denoise_luminance", "denoise_chroma"};
 
-// Slider styling
-static const ImU32 SLIDER_LINE_INACTIVE = IM_COL32(60, 60, 60, 255);
-static const ImU32 SLIDER_LINE_ACTIVE = IM_COL32(80, 130, 180, 255);
-static const ImU32 SLIDER_BALL_INACTIVE = IM_COL32(100, 100, 100, 255);
-static const ImU32 SLIDER_BALL_ACTIVE = IM_COL32(200, 200, 200, 255);
+// Slider styling - three states: default (grey), set (white), active (blue)
+static const ImU32 SLIDER_LINE_DEFAULT = IM_COL32(60, 60, 60, 255);     // Grey - at neutral
+static const ImU32 SLIDER_LINE_SET = IM_COL32(120, 120, 120, 255);      // White-ish - modified
+static const ImU32 SLIDER_LINE_ACTIVE = IM_COL32(80, 130, 180, 255);    // Blue - selected
+static const ImU32 SLIDER_BALL_DEFAULT = IM_COL32(80, 80, 80, 255);     // Grey
+static const ImU32 SLIDER_BALL_SET = IM_COL32(200, 200, 200, 255);      // White
+static const ImU32 SLIDER_BALL_ACTIVE = IM_COL32(100, 180, 255, 255);   // Blue
 
 // Total visible dials (21 = 3+5+3+3+4+3 for selective)
 // For selective color we show 3 dials for the selected color
@@ -62,6 +64,40 @@ static constexpr int MAX_DIALS = 21;
 static int expanding = 0;      // 0=collapsed, 1=subject, 2=module, 3=detail
 static int detail_sel = 0;     // Sub-dial selection for selective color
 static int dragging_slider = -1;
+
+// ============================================================
+// Helper: Get default/neutral value for a dial
+// ============================================================
+
+static float get_dial_default(int subject, int dial_index, int detail = 0) {
+    switch (subject) {
+        case MOD_COLOR_CORRECTION:
+            return 0.5f;  // All center-neutral
+        case MOD_TONE_MAPPING:
+            if (dial_index == 3) return 0.15f;  // black
+            if (dial_index == 4) return 0.85f;  // white
+            return 0.5f;  // contrast, highlights, shadows
+        case MOD_GLOBAL_COLOR:
+            return 0.5f;  // All center-neutral
+        case MOD_SELECTIVE_COLOR:
+            return 0.5f;  // All center-neutral
+        case MOD_DETAIL:
+            if (dial_index == 0) return 0.0f;  // sharpen_amount
+            if (dial_index == 1) return 0.4f;  // sharpen_radius
+            if (dial_index == 2) return 0.0f;  // denoise_luminance
+            if (dial_index == 3) return 0.0f;  // denoise_chroma
+            return 0.5f;
+    }
+    return 0.5f;
+}
+
+// ============================================================
+// Helper: Check if dial is set (different from default)
+// ============================================================
+
+static bool is_dial_set(float value, float default_value) {
+    return std::abs(value - default_value) > 0.001f;
+}
 
 // ============================================================
 // Helper: Get dial value from Link
@@ -153,7 +189,10 @@ static void set_dial_value(Link& link, int subject, int dial_index, float value,
 static constexpr int SLIDER_CHANGED = 1;
 static constexpr int SLIDER_RELEASED = 2;
 
-static int custom_vslider(int id, float width, float height, float* value, bool active) {
+// Slider result flags
+static constexpr int SLIDER_CLICKED = 4;  // Slider was clicked (for selection)
+
+static int custom_vslider(int id, float width, float height, float* value, bool active, bool is_set) {
     ImGui::PushID(id);
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -167,17 +206,23 @@ static int custom_vslider(int id, float width, float height, float* value, bool 
     float ball_y = track_bottom - (*value) * track_height;
 
     ImGui::InvisibleButton("##slider", ImVec2(width, height));
-    bool hovered = ImGui::IsItemHovered();
     bool held = ImGui::IsItemActive();
+    bool clicked = ImGui::IsItemClicked();
 
     int result = 0;
 
-    // Start drag on ball click
-    if (hovered && ImGui::IsMouseClicked(0)) {
+    // Any click on slider reports clicked (for selection)
+    if (clicked) {
+        result |= SLIDER_CLICKED;
+        dragging_slider = id;
+
+        // Jump to click position
         ImVec2 mouse = ImGui::GetMousePos();
-        float dist = fabsf(mouse.y - ball_y);
-        if (dist <= ball_radius + 4.0f) {
-            dragging_slider = id;
+        float new_value = (track_bottom - mouse.y) / track_height;
+        new_value = new_value < 0.0f ? 0.0f : (new_value > 1.0f ? 1.0f : new_value);
+        if (new_value != *value) {
+            *value = new_value;
+            result |= SLIDER_CHANGED;
         }
     }
 
@@ -198,12 +243,23 @@ static int custom_vslider(int id, float width, float height, float* value, bool 
         result |= SLIDER_RELEASED;
     }
 
+    // Choose colors based on state: active (blue) > set (white) > default (grey)
+    ImU32 line_col, ball_col;
+    if (active) {
+        line_col = SLIDER_LINE_ACTIVE;
+        ball_col = SLIDER_BALL_ACTIVE;
+    } else if (is_set) {
+        line_col = SLIDER_LINE_SET;
+        ball_col = SLIDER_BALL_SET;
+    } else {
+        line_col = SLIDER_LINE_DEFAULT;
+        ball_col = SLIDER_BALL_DEFAULT;
+    }
+
     // Draw track
-    ImU32 line_col = active ? SLIDER_LINE_ACTIVE : SLIDER_LINE_INACTIVE;
     draw->AddLine(ImVec2(center_x, track_top), ImVec2(center_x, track_bottom), line_col, 2.0f);
 
     // Draw ball
-    ImU32 ball_col = active ? SLIDER_BALL_ACTIVE : SLIDER_BALL_INACTIVE;
     ball_y = track_bottom - (*value) * track_height;
     draw->AddCircleFilled(ImVec2(center_x, ball_y), ball_radius, ball_col);
 
@@ -355,29 +411,31 @@ bool render_module_menus(State& state) {
     for (int d = 0; d < dial_count; d++) {
         bool is_active = (d == state.selection.dial);
 
-        // Get current value from link
+        // Get current value and default for this dial
         float value = get_dial_value(link, state.selection.module, d, detail_sel);
+        float default_value = get_dial_default(state.selection.module, d, detail_sel);
+        bool dial_is_set = is_dial_set(value, default_value);
 
         ImGui::PushID(400 + d);
 
-        int slider_result = custom_vslider(d, slider_width, slider_height, &value, is_active);
+        int slider_result = custom_vslider(d, slider_width, slider_height, &value, is_active, dial_is_set);
+
+        // Click to select this dial (make it hot)
+        if (slider_result & SLIDER_CLICKED) {
+            state.selection.dial = d;
+        }
 
         if (slider_result & SLIDER_CHANGED) {
             // Value changed during drag - update link data and trigger live re-render
             set_dial_value(link, state.selection.module, d, value, detail_sel);
             state.needs_reprocess = true;
+            state.is_working = true;
             changed = true;
         }
 
         if (slider_result & SLIDER_RELEASED) {
             // Drag ended - save the final value to disk
             save_pipe_json(proj);
-        }
-
-        // Click to select this dial
-        if (!is_active && ImGui::IsItemClicked() && dragging_slider == -1) {
-            state.selection.dial = d;
-            changed = true;
         }
 
         // Label under slider

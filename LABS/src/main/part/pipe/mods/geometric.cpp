@@ -61,8 +61,9 @@ namespace mods
         float crop_bottom = crop_bottom_dial * 0.5f;
         float crop_left = crop_left_dial * 0.5f;
 
-        // Zoom: 0.0-1.0 → 1x to 4x
-        float zoom = 1.0f + zoom_dial * 3.0f;
+        // Zoom: 0.0-1.0 → 0.25x to 4x (center-neutral: 0.5 = 1x)
+        // Using exponential mapping: zoom = 4^(dial - 0.5) = 2^(2*(dial-0.5))
+        float zoom = std::pow(4.0f, zoom_dial - 0.5f);
 
         // Rotation: 0.0-1.0 → -45° to +45°
         float tilt_angle = (tilt_angle_dial - 0.5f) * 90.0f;
@@ -113,26 +114,54 @@ namespace mods
             }
 
             // Step 2: Apply zoom (scale from center)
+            // zoom > 1.0: Crop center and scale up (zoom in)
+            // zoom < 1.0: Scale down and letterbox (zoom out)
             if (needs_zoom)
             {
-                // Calculate crop region for zoom (center crop)
-                int new_w = static_cast<int>(width / zoom);
-                int new_h = static_cast<int>(height / zoom);
-                int x = (width - new_w) / 2;
-                int y = (height - new_h) / 2;
+                if (zoom > 1.0f)
+                {
+                    // Zoom in: crop center region, scale up to fill
+                    int new_w = static_cast<int>(width / zoom);
+                    int new_h = static_cast<int>(height / zoom);
+                    int x = (width - new_w) / 2;
+                    int y = (height - new_h) / 2;
 
-                // Ensure valid region
-                new_w = std::max(1, new_w);
-                new_h = std::max(1, new_h);
+                    // Ensure valid region
+                    new_w = std::max(1, new_w);
+                    new_h = std::max(1, new_h);
 
-                cv::Rect zoom_rect(x, y, new_w, new_h);
-                cv::UMat zoomed_crop;
-                current(zoom_rect).copyTo(zoomed_crop);
+                    cv::Rect zoom_rect(x, y, new_w, new_h);
+                    cv::UMat zoomed_crop;
+                    current(zoom_rect).copyTo(zoomed_crop);
 
-                // Scale back to original size
-                cv::UMat zoomed;
-                cv::resize(zoomed_crop, zoomed, cv::Size(width, height), 0, 0, cv::INTER_LINEAR);
-                current = zoomed;
+                    // Scale back to original size
+                    cv::resize(zoomed_crop, current, cv::Size(width, height), 0, 0, cv::INTER_LINEAR);
+                }
+                else
+                {
+                    // Zoom out: scale down, letterbox with black
+                    int new_w = static_cast<int>(width * zoom);
+                    int new_h = static_cast<int>(height * zoom);
+
+                    // Ensure minimum size
+                    new_w = std::max(1, new_w);
+                    new_h = std::max(1, new_h);
+
+                    // Scale down the image
+                    cv::UMat scaled;
+                    cv::resize(current, scaled, cv::Size(new_w, new_h), 0, 0, cv::INTER_AREA);
+
+                    // Create black canvas at original size
+                    cv::UMat canvas(height, width, current.type(), cv::Scalar(0, 0, 0));
+
+                    // Center the scaled image on canvas
+                    int x = (width - new_w) / 2;
+                    int y = (height - new_h) / 2;
+                    cv::Rect roi(x, y, new_w, new_h);
+                    scaled.copyTo(canvas(roi));
+
+                    current = canvas;
+                }
             }
 
             // Step 3: Apply rotation

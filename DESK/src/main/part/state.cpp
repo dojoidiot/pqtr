@@ -67,12 +67,12 @@ void init_selective_color(Module& m) {
 
 void init_detail(Module& m) {
     m.name = "detail";
-    // Sharpen (2 dials)
-    m.dials["sharpen_amount"] = 0.5f;
-    m.dials["sharpen_radius"] = 0.5f;
-    // Denoise (2 dials)
-    m.dials["denoise_luminance"] = 0.5f;
-    m.dials["denoise_chroma"] = 0.5f;
+    // Sharpen (2 dials) - default to no sharpening
+    m.dials["sharpen_amount"] = 0.0f;  // 0.0 = no sharpening
+    m.dials["sharpen_radius"] = 0.4f;  // 1.5px when sharpening enabled
+    // Denoise (2 dials) - default to no denoising
+    m.dials["denoise_luminance"] = 0.0f;  // 0.0 = no denoise
+    m.dials["denoise_chroma"] = 0.0f;     // 0.0 = no denoise
 }
 
 } // namespace desk

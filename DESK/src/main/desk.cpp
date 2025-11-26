@@ -45,27 +45,47 @@ void render_menu_bar(desk::State& state, int display_w) {
         ImGuiWindowFlags_NoTitleBar |
         ImGuiWindowFlags_NoScrollbar);
 
-    // Project buttons (always enabled)
-    if (ImGui::Button("New Project")) {
+    // Workspace selector (dropdown of RAW files) - FIRST
+    bool folder_set = state.project_folder_set;
+
+    ImGui::Text("RAW:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(180);
+
+    ImGui::BeginDisabled(!folder_set || state.projects.empty());
+    const char* preview = state.has_project() ? state.current_project().name.c_str() : "Select...";
+    if (ImGui::BeginCombo("##workspace", preview, ImGuiComboFlags_None)) {
+        for (int i = 0; i < static_cast<int>(state.projects.size()); i++) {
+            bool selected = (state.selection.project == i);
+            if (ImGui::Selectable(state.projects[i].name.c_str(), selected)) {
+                if (state.selection.project != i) {
+                    state.selection.project = i;
+                    state.selection.link = -1;
+                    state.is_working = true;  // Show loading immediately
+                }
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+
+    // Import RAW button
+    if (ImGui::Button("Import RAW")) {
         desk::open_raw_file_dialog(state);
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Open Folder")) {
-        desk::open_folder_dialog();
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Add a RAW file to workspace");
     }
 
     ImGui::SameLine();
     ImGui::TextDisabled("|");
     ImGui::SameLine();
 
-    // Panel toggle buttons (disabled until project folder is set)
-    bool folder_set = state.project_folder_set;
-    ImGui::BeginDisabled(!folder_set);
-
-    if (ImGui::Button(state.panels.workspace ? "Workspace [x]" : "Workspace [ ]")) {
-        state.panels.workspace = !state.panels.workspace;
-    }
-    ImGui::SameLine();
+    // Panel toggle buttons
+    ImGui::BeginDisabled(!folder_set || !state.has_project());
 
     if (ImGui::Button(state.panels.pipe ? "Pipe [x]" : "Pipe [ ]")) {
         state.panels.pipe = !state.panels.pipe;
@@ -175,61 +195,104 @@ void render_image_background(desk::State& state, int display_w, int display_h) {
 // Floating Panels Rendering
 // ============================================================
 
+// Panel position state for resize handling
+struct PanelLayout {
+    int prev_w = 0;
+    int prev_h = 0;
+    bool initialized = false;
+    // Track last known positions for resize adjustment
+    ImVec2 pipe_pos{-1, -1};
+    ImVec2 info_pos{-1, -1};
+    ImVec2 editor_pos{-1, -1};
+    ImVec2 embedded_pos{-1, -1};
+};
+
+static PanelLayout g_layout;
+
+// Margin from window edges
+constexpr float PANEL_MARGIN = 10.0f;
+
+// Clamp a position to keep panel within window bounds
+static ImVec2 clamp_panel_pos(ImVec2 pos, ImVec2 size, int display_w, int display_h, float content_y) {
+    float max_x = display_w - size.x - PANEL_MARGIN;
+    float max_y = display_h - size.y - PANEL_MARGIN;
+    float min_x = PANEL_MARGIN;
+    float min_y = content_y + PANEL_MARGIN;
+
+    pos.x = std::max(min_x, std::min(pos.x, max_x));
+    pos.y = std::max(min_y, std::min(pos.y, max_y));
+    return pos;
+}
+
 bool render_floating_panels(desk::State& state, int display_w, int display_h) {
     bool selection_changed = false;
     float content_y = desk::MENU_BAR_HEIGHT;
 
-    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, desk::PANEL_ALPHA);
-
-    // Workspace Panel (RAW file list)
-    if (state.panels.workspace) {
-        ImGui::SetNextWindowPos(ImVec2(10, content_y + 10), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(
-            ImVec2(desk::WORKSPACE_PANEL_WIDTH, desk::WORKSPACE_PANEL_HEIGHT),
-            ImGuiCond_FirstUseEver);
-
-        ImGui::Begin("Workspace", &state.panels.workspace, ImGuiWindowFlags_NoCollapse);
-        selection_changed |= desk::render_workspace_panel(state);
-        ImGui::End();
+    // Initialize layout tracking
+    if (!g_layout.initialized) {
+        g_layout.prev_w = display_w;
+        g_layout.prev_h = display_h;
+        g_layout.initialized = true;
     }
 
-    // Pipe Panel (Links/Modules/Dials tree)
+    // Detect window resize
+    bool resized = (display_w != g_layout.prev_w || display_h != g_layout.prev_h);
+    int old_w = g_layout.prev_w;
+    int old_h = g_layout.prev_h;
+    g_layout.prev_w = display_w;
+    g_layout.prev_h = display_h;
+
+    ImGui::PushStyleVar(ImGuiStyleVar_Alpha, desk::PANEL_ALPHA);
+
+    // Pipe Panel (Links/Modules/Dials tree) - TOP LEFT
     if (state.panels.pipe) {
-        // Build title with RAW filename
         std::string pipe_title = "Pipe";
         if (state.has_project()) {
             pipe_title = "Pipe: " + state.current_project().name;
         }
 
-        ImGui::SetNextWindowPos(
-            ImVec2(10, content_y + desk::WORKSPACE_PANEL_HEIGHT + 20),
-            ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(
-            ImVec2(desk::PIPE_PANEL_WIDTH, desk::PIPE_PANEL_HEIGHT),
-            ImGuiCond_FirstUseEver);
+        ImVec2 size(desk::PIPE_PANEL_WIDTH, desk::PIPE_PANEL_HEIGHT);
+        ImVec2 pos(PANEL_MARGIN, content_y + PANEL_MARGIN);
+
+        if (resized && g_layout.pipe_pos.x >= 0) {
+            pos = clamp_panel_pos(g_layout.pipe_pos, size, display_w, display_h, content_y);
+            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        }
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
 
         ImGui::Begin(pipe_title.c_str(), &state.panels.pipe, ImGuiWindowFlags_NoCollapse);
+        g_layout.pipe_pos = ImGui::GetWindowPos();
         selection_changed |= desk::render_pipe_panel(state);
         ImGui::End();
     }
 
-    // Info Panel
+    // Info Panel - BOTTOM LEFT (anchored to bottom)
     if (state.panels.info) {
-        ImGui::SetNextWindowPos(
-            ImVec2(display_w - desk::INFO_PANEL_WIDTH - 10, content_y + 10),
-            ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(
-            ImVec2(desk::INFO_PANEL_WIDTH, desk::INFO_PANEL_HEIGHT),
-            ImGuiCond_FirstUseEver);
+        ImVec2 size(desk::INFO_PANEL_WIDTH, desk::INFO_PANEL_HEIGHT);
+        ImVec2 pos(PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
+
+        if (resized && g_layout.info_pos.x >= 0) {
+            // Adjust Y to maintain distance from bottom
+            float dist_from_bottom = old_h - g_layout.info_pos.y - size.y;
+            pos.x = g_layout.info_pos.x;
+            pos.y = display_h - size.y - dist_from_bottom;
+            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
+            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        }
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
 
         ImGui::Begin("RAW Info", &state.panels.info, ImGuiWindowFlags_NoCollapse);
+        g_layout.info_pos = ImGui::GetWindowPos();
         desk::render_info_panel(state);
         ImGui::End();
     }
 
-    // Link Editor Panel
+    // Link Editor Panel - BOTTOM RIGHT (anchored to bottom-right)
     if (state.panels.link_editor) {
-        // Build title with RAW and Link name
         std::string editor_title = "Link Editor";
         if (state.has_project() && state.selection.link >= 0) {
             const auto& proj = state.current_project();
@@ -238,34 +301,52 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             }
         }
 
-        float editor_x = (display_w - desk::LINK_EDITOR_WIDTH) / 2.0f;
-        float editor_y = display_h - desk::LINK_EDITOR_HEIGHT - 20;
-        ImGui::SetNextWindowPos(ImVec2(editor_x, editor_y), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(
-            ImVec2(desk::LINK_EDITOR_WIDTH, desk::LINK_EDITOR_HEIGHT),
-            ImGuiCond_FirstUseEver);
+        ImVec2 size(desk::LINK_EDITOR_WIDTH, desk::LINK_EDITOR_HEIGHT);
+        ImVec2 pos(display_w - size.x - PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
+
+        if (resized && g_layout.editor_pos.x >= 0) {
+            // Maintain distance from right and bottom edges
+            float dist_from_right = old_w - g_layout.editor_pos.x - size.x;
+            float dist_from_bottom = old_h - g_layout.editor_pos.y - size.y;
+            pos.x = display_w - size.x - dist_from_right;
+            pos.y = display_h - size.y - dist_from_bottom;
+            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
+            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        }
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
 
         ImGui::Begin(editor_title.c_str(), &state.panels.link_editor, ImGuiWindowFlags_NoCollapse);
+        g_layout.editor_pos = ImGui::GetWindowPos();
         selection_changed |= desk::render_module_menus(state);
         ImGui::End();
     }
 
-    // Embedded Preview Panel
+    // Embedded Preview Panel - TOP RIGHT (anchored to right)
     if (state.panels.embedded && state.has_embedded && state.embedded_texture.loaded) {
-        ImGui::SetNextWindowPos(
-            ImVec2(display_w - desk::EMBEDDED_PANEL_WIDTH - 10,
-                   display_h - desk::EMBEDDED_PANEL_HEIGHT - 20),
-            ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(
-            ImVec2(desk::EMBEDDED_PANEL_WIDTH, desk::EMBEDDED_PANEL_HEIGHT),
-            ImGuiCond_FirstUseEver);
-
         std::string emb_title = "Embedded Preview";
         if (state.has_project()) {
             emb_title = "Embedded: " + state.current_project().name;
         }
 
+        ImVec2 size(desk::EMBEDDED_PANEL_WIDTH, desk::EMBEDDED_PANEL_HEIGHT);
+        ImVec2 pos(display_w - size.x - PANEL_MARGIN, content_y + PANEL_MARGIN);
+
+        if (resized && g_layout.embedded_pos.x >= 0) {
+            // Maintain distance from right edge
+            float dist_from_right = old_w - g_layout.embedded_pos.x - size.x;
+            pos.x = display_w - size.x - dist_from_right;
+            pos.y = g_layout.embedded_pos.y;
+            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
+            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        } else {
+            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        }
+        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+
         ImGui::Begin(emb_title.c_str(), &state.panels.embedded, ImGuiWindowFlags_NoCollapse);
+        g_layout.embedded_pos = ImGui::GetWindowPos();
 
         // Display embedded image scaled to fit
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -332,9 +413,6 @@ void process_file_dialogs(desk::State& state) {
             state.project_folder = ImGuiFileDialog::Instance()->GetCurrentPath();
             state.project_folder_set = true;
             desk::scan_projects(state);
-            if (!state.projects.empty()) {
-                state.panels.workspace = true;
-            }
         }
         ImGuiFileDialog::Instance()->Close();
     }
@@ -347,7 +425,6 @@ void process_file_dialogs(desk::State& state) {
             std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
             desk::create_project(state, path);
             desk::scan_projects(state);  // Refresh project list
-            state.panels.workspace = true;
         }
         ImGuiFileDialog::Instance()->Close();
     }
@@ -368,10 +445,12 @@ void handle_selection_change(desk::State& state, int& prev_project, bool selecti
     }
 
     // Handle reprocess request (e.g., slider changed) - render to texture
+    // This is deferred so "Loading..." can display first
     if (state.needs_reprocess && state.has_project()) {
         const auto& proj = state.current_project();
         desk::render_to_texture(state, proj, state.working_size);
         state.needs_reprocess = false;
+        state.is_working = false;
     }
 
     if (!project_changed) {
@@ -389,12 +468,25 @@ void handle_selection_change(desk::State& state, int& prev_project, bool selecti
         // Load embedded preview (if available)
         desk::load_embedded_preview(state, proj);
 
-        // Render to texture at working size (no PNG involved)
-        desk::render_to_texture(state, proj, state.working_size);
+        // Show all panels when project is selected
+        state.panels.pipe = true;
+        state.panels.info = true;
+        state.panels.link_editor = true;
+        state.panels.embedded = state.has_embedded;
+
+        // Defer render to next frame so "Loading..." can display
+        state.is_working = true;
+        state.needs_reprocess = true;
     } else {
         desk::unload_texture(state);
         desk::unload_embedded_texture(state);
         state.raw_info.clear();
+
+        // Hide panels when no project
+        state.panels.pipe = false;
+        state.panels.info = false;
+        state.panels.link_editor = false;
+        state.panels.embedded = false;
     }
 }
 

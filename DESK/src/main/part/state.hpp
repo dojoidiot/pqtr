@@ -68,11 +68,10 @@ struct Project {
 // ============================================================
 
 struct PanelVisibility {
-    bool workspace = false;    // RAW file list
-    bool pipe = false;         // Pipe tree (Links/Modules/Dials)
-    bool info = false;         // RAW metadata
-    bool link_editor = false;  // Slider equalizer
-    bool embedded = false;     // Embedded camera preview
+    bool pipe = false;         // Pipe tree (Links/Modules/Dials) - top left
+    bool info = false;         // RAW metadata - bottom left
+    bool link_editor = false;  // Slider equalizer - bottom right
+    bool embedded = false;     // Embedded camera preview - top right
 };
 
 // ============================================================

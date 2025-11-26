@@ -505,7 +505,6 @@ bool render_to_texture(State& state, const Project& project, int size) {
     cv::Mat cpu;
     display.copyTo(cpu);
 
-
     if (!upload_texture(state, cpu)) {
         state.error_message = "Failed to upload texture: " + project.name;
         state.is_working = false;

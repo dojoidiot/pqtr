@@ -102,9 +102,18 @@ namespace mods
         tint = std::max(0.0f, std::min(1.0f, tint));
 
         // Convert temperature dial to Kelvin
-        // 0.0 → 2000K, 0.5 → 6500K, 1.0 → 12000K
-        // Use exponential mapping for perceptual linearity
-        float kelvin = 2000.0f * std::pow(6.0f, temperature);
+        // 0.0 → 2000K, 0.5 → 6500K (daylight neutral), 1.0 → 12000K
+        // Piecewise exponential for center-neutral mapping
+        float kelvin;
+        if (temperature < 0.5f) {
+            // 0.0-0.5 → 2000K-6500K
+            float t = temperature * 2.0f;
+            kelvin = 2000.0f * std::pow(6500.0f / 2000.0f, t);
+        } else {
+            // 0.5-1.0 → 6500K-12000K
+            float t = (temperature - 0.5f) * 2.0f;
+            kelvin = 6500.0f * std::pow(12000.0f / 6500.0f, t);
+        }
 
         // Get RGB values for this color temperature
         float tr, tg, tb;

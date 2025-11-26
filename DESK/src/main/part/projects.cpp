@@ -4,6 +4,7 @@
 #include "files.hpp"
 #include "imgui.h"
 #include <cstring>
+#include <cmath>
 
 namespace desk {
 
@@ -113,16 +114,28 @@ static const DialDef DETAIL_DIALS[] = {
     {"Denoise C", "denoise_chroma"},
 };
 
-// Check if dial differs from default (0.5 for most, special cases handled)
+// Check if dial differs from default
 static bool dial_is_set(const char* key, float value) {
-    // Special defaults
-    if (strcmp(key, "black") == 0) return value != 0.15f;
-    if (strcmp(key, "white") == 0) return value != 0.85f;
+    // Tolerance for float comparison
+    const float eps = 0.001f;
+
+    // Tone mapping special defaults
+    if (strcmp(key, "black") == 0) return std::abs(value - 0.15f) > eps;
+    if (strcmp(key, "white") == 0) return std::abs(value - 0.85f) > eps;
+
+    // Geometric crop defaults (0.0)
     if (strcmp(key, "crop_top") == 0 || strcmp(key, "crop_right") == 0 ||
         strcmp(key, "crop_bottom") == 0 || strcmp(key, "crop_left") == 0)
-        return value != 0.0f;
-    // Default is 0.5
-    return value != 0.5f;
+        return std::abs(value) > eps;
+
+    // Detail defaults (0.0 for amount/denoise, 0.4 for radius)
+    if (strcmp(key, "sharpen_amount") == 0) return std::abs(value) > eps;
+    if (strcmp(key, "sharpen_radius") == 0) return std::abs(value - 0.4f) > eps;
+    if (strcmp(key, "denoise_luminance") == 0) return std::abs(value) > eps;
+    if (strcmp(key, "denoise_chroma") == 0) return std::abs(value) > eps;
+
+    // Default is 0.5 (center-neutral)
+    return std::abs(value - 0.5f) > eps;
 }
 
 // Render dials for a module, returns true if any dial was clicked

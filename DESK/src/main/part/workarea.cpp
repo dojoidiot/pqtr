@@ -19,6 +19,18 @@ void render_work_area(State& state) {
 
     const Project& proj = state.current_project();
 
+    // Show loading message while processing
+    if (state.is_working) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        ImVec2 text_size = ImGui::CalcTextSize("Loading...");
+        ImGui::SetCursorPos(ImVec2(
+            (avail.x - text_size.x) * 0.5f,
+            (avail.y - text_size.y) * 0.5f
+        ));
+        ImGui::TextDisabled("Loading...");
+        return;
+    }
+
     if (!state.texture.loaded) {
         if (!state.error_message.empty()) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", state.error_message.c_str());
