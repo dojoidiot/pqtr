@@ -82,11 +82,11 @@
         },
         "detail": {
           "sharpen": {
-            "amount": 0.0416667,
+            "amount": 0,
             "radius": 0.4
           },
           "denoise": {
-            "luminance": 0.5,
+            "luminance": 0,
             "chroma": 0
           }
         }

@@ -1,232 +1,70 @@
-# DESK
+# DESK Application Specification
 
 [back](../README.md)
 
-DESK is a graphical project management interface for LABS RAW image processing.
+## Purpose
 
----
-
-## Directory Structure
-
-```
-DESK/
-├── bin/
-│   └── desk                    # Executable
-├── doc/
-│   ├── desk.md                 # This document
-│   ├── docs.md                 # Documentation standards
-│   └── idea.md                 # Future enhancement ideas
-├── inc/
-│   └── desk.hpp                # Public API (unused - DESK is standalone)
-├── lib/
-│   ├── glfw/                   # GLFW library (windowing)
-│   ├── imgui/                  # Dear ImGui (UI)
-│   ├── ImGuiFileDialog/        # File dialog extension
-│   └── LABS.a -> ../LABS/lib/labs.a
-├── src/
-│   └── main/
-│       ├── desk.cpp            # Entry point + main loop
-│       └── part/
-│           ├── state.hpp/cpp   # Application state
-│           ├── theme.hpp/cpp   # UI styling
-│           ├── files.hpp/cpp   # File I/O + LABS integration
-│           ├── projects.hpp/cpp # Pipe panel
-│           ├── workarea.hpp/cpp # Image display
-│           └── linkeditor.hpp/cpp # Dial editor
-├── tmp/                        # Build artifacts
-├── var/                        # Default project folder
-└── Makefile.desk               # Build system
-```
-
----
-
-## Build
-
-```bash
-cd DESK
-make -f Makefile.desk
-```
-
-**Dependencies:**
-- LABS library (`../LABS/lib/labs.a`)
-- OpenCV (from `../LABS/lib/opencv/build`)
-- OpenGL, X11, Xrandr, Xi, Xcursor, Xinerama
-
-**Output:** `bin/desk`
-
-**Run:** `./bin/desk [project_folder]`
+DESK is a project management interface for LABS. It provides a graphical environment for managing RAW image processing projects using the LABS pipe system.
 
 ---
 
 ## Architecture
 
-### Stack
+DESK operates on a single root folder selected by the user. Structure is defined by sidecar files, not subdirectories.
 
-| Layer | Technology |
-|-------|------------|
-| Window | GLFW 3.3 |
-| Graphics | OpenGL 3.3 Core |
-| UI | Dear ImGui |
-| RAW Processing | LABS pipe |
-| Image | OpenCV UMat (GPU) |
+### Components
 
-### Application State
+| Component | Description |
+|-----------|-------------|
+| **Root Folder** | User-selected directory containing RAW files and sidecars |
+| **Sidecar Files** | JSON files that define project and pipe state |
+| **Pipe Integration** | Uses LABS pipe (HEAD → BODY → TAIL) for processing |
+| **UI** | ImGui-based interface (skeleton in LABS) |
 
-All state is centralized in `desk::State` (`state.hpp:110`).
+### Constraints
 
-```cpp
-struct State {
-    // Folders
-    std::filesystem::path project_folder;    // Where projects live
-    std::filesystem::path raw_source_folder; // Where RAWs are imported from
-    bool project_folder_set;
+- **Never modify LABS**: DESK consumes LABS as-is. See [idea.md](./idea.md) for future enhancement ideas.
+- **No file destruction**: DESK never deletes user files. Projects are hidden, not removed.
+- **Single selection**: No multi-select for projects or Links.
+- **Auto-save**: Sidecar files update automatically on change.
 
-    // Data
-    std::vector<Project> projects;
-    Selection selection;
-    PanelVisibility panels;
+---
 
-    // Textures
-    Texture texture;           // Main preview
-    Texture embedded_texture;  // Camera JPEG
-    bool has_embedded;
+## File Structure
 
-    // Metadata
-    Info raw_info;
+DESK uses sidecar files alongside RAW images. No subdirectory structure is imposed.
 
-    // Render
-    int working_size;          // 512, 1024, 2048, 4096, 0 (full)
+### Sidecar Files
 
-    // Status
-    bool needs_refresh;
-    bool needs_reprocess;
-    bool needs_export;
-    bool is_working;
-    std::string status_message;
-    std::string error_message;
-};
+For each RAW file `<name>.ARW`:
+
+| File | Purpose |
+|------|---------|
+| `<name>.desk.json` | DESK project settings |
+| `<name>.pipe.json` | Pipe configuration (see [LABS/doc/data.md](../../LABS/doc/data.md)) |
+| `<name>.png` | Exported image (created on Export, not during preview) |
+
+### Example
+
 ```
-
-### Project Structure
-
-Each RAW file has three sidecar files:
-
-```cpp
-struct Project {
-    std::string name;                // Stem of filename
-    std::filesystem::path raw_path;  // DSC00144.ARW
-    std::filesystem::path desk_path; // DSC00144.desk.json
-    std::filesystem::path pipe_path; // DSC00144.pipe.json
-    std::filesystem::path png_path;  // DSC00144.png (export)
-
-    bool hidden;
-    bool expanded;
-    std::string decoder;             // "sony_arw2"
-    std::vector<Link> links;
-};
-```
-
-### Link Structure
-
-A Link contains 6 modules with 45 total dials:
-
-```cpp
-struct Link {
-    std::string name;
-    bool editing_name;
-
-    Module geometric;        // 6 dials (hidden from UI)
-    Module color_correction; // 3 dials
-    Module tone_mapping;     // 5 dials
-    Module global_color;     // 3 dials
-    Module selective_color;  // 24 dials
-    Module detail;           // 4 dials
-};
-
-struct Module {
-    std::string name;
-    std::map<std::string, Dial> dials;  // Dial = float (0.0-1.0)
-};
+/user/photos/                    # Root folder (user selected)
+  DSC01234.ARW                   # RAW image
+  DSC01234.desk.json             # DESK project file
+  DSC01234.pipe.json             # Pipe configuration
+  DSC01234.png                   # Output PNG
+  DSC05678.ARW                   # Another RAW
+  DSC05678.desk.json
+  DSC05678.pipe.json
+  DSC05678.png
 ```
 
 ---
 
-## Modules and Dials
-
-### Dial Values
-
-All dials are normalized floats in range `[0.0, 1.0]`. Default is `0.5` (neutral) except where noted.
-
-### Geometric (6 dials)
-
-| Dial | Key | Default | Range |
-|------|-----|---------|-------|
-| Crop Top | `crop_top` | 0.0 | 0.0-1.0 |
-| Crop Right | `crop_right` | 0.0 | 0.0-1.0 |
-| Crop Bottom | `crop_bottom` | 0.0 | 0.0-1.0 |
-| Crop Left | `crop_left` | 0.0 | 0.0-1.0 |
-| Scale | `scale` | 0.5 | 0.0-1.0 |
-| Tilt Angle | `tilt_angle` | 0.5 | 0.0-1.0 |
-
-**Note:** Geometric is hidden from the Link Editor UI.
-
-### Color Correction (3 dials)
-
-| Dial | Key | Default |
-|------|-----|---------|
-| Exposure | `exposure` | 0.5 |
-| Temperature | `temperature` | 0.5 |
-| Tint | `tint` | 0.5 |
-
-### Tone Mapping (5 dials)
-
-| Dial | Key | Default |
-|------|-----|---------|
-| Contrast | `contrast` | 0.5 |
-| Highlights | `highlights` | 0.5 |
-| Shadows | `shadows` | 0.5 |
-| Black | `black` | 0.15 |
-| White | `white` | 0.85 |
-
-### Global Color (3 dials)
-
-| Dial | Key | Default |
-|------|-----|---------|
-| Vibrance | `vibrance` | 0.5 |
-| Saturation | `saturation` | 0.5 |
-| Color Density | `color_density` | 0.5 |
-
-### Selective Color (24 dials)
-
-8 colors × 3 HSL adjustments. All default to `0.5`.
-
-| Color | Hue Key | Saturation Key | Luminance Key |
-|-------|---------|----------------|---------------|
-| Red | `red_hue` | `red_saturation` | `red_luminance` |
-| Orange | `orange_hue` | `orange_saturation` | `orange_luminance` |
-| Yellow | `yellow_hue` | `yellow_saturation` | `yellow_luminance` |
-| Green | `green_hue` | `green_saturation` | `green_luminance` |
-| Cyan | `cyan_hue` | `cyan_saturation` | `cyan_luminance` |
-| Blue | `blue_hue` | `blue_saturation` | `blue_luminance` |
-| Purple | `purple_hue` | `purple_saturation` | `purple_luminance` |
-| Magenta | `magenta_hue` | `magenta_saturation` | `magenta_luminance` |
-
-### Detail (4 dials)
-
-| Dial | Key | Default |
-|------|-----|---------|
-| Sharpen Amount | `sharpen_amount` | 0.0 |
-| Sharpen Radius | `sharpen_radius` | 0.4 |
-| Denoise Luminance | `denoise_luminance` | 0.0 |
-| Denoise Chroma | `denoise_chroma` | 0.0 |
-
----
-
-## File Formats
+## Project Format
 
 ### desk.json
 
-DESK project settings.
+The `.desk.json` file stores DESK-specific project settings.
 
 ```json
 {
@@ -235,35 +73,22 @@ DESK project settings.
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `version` | string | Schema version |
-| `hidden` | bool | If true, project not shown in UI |
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `version` | string | "1.0" | Schema version |
+| `hidden` | bool | false | Project visibility in DESK |
+
+When `hidden` is `true`, the project does not appear in the Projects panel. The files remain on disk.
 
 ### pipe.json
 
-LABS pipe configuration. See `save_pipe_json()` in `files.cpp:244`.
+The `.pipe.json` file follows the LABS pipe JSON schema defined in [LABS/doc/data.md](../../LABS/doc/data.md).
 
 ```json
 {
   "version": "1.0",
   "decoder": "sony_arw2",
-  "links": [
-    {
-      "name": "Link 1",
-      "modules": {
-        "geometric": { ... },
-        "color_correction": { ... },
-        "tone_mapping": { ... },
-        "global_color": { ... },
-        "selective_color": { ... },
-        "detail": { ... }
-      }
-    }
-  ],
-  "tail": {
-    "output": "DSC00144.png"
-  }
+  "links": []
 }
 ```
 
@@ -271,271 +96,350 @@ LABS pipe configuration. See `save_pipe_json()` in `files.cpp:244`.
 
 ## User Interface
 
-### Window Structure
+### Window
 
-```
-┌──────────────────────────────────────────────────────────┐
-│ RAW: [Dropdown▼] Import RAW | Pipe Info Editor Embedded | Preview: [1024▼] Export │
-├──────────────────────────────────────────────────────────┤
-│ ┌─────────────┐                          ┌─────────────┐ │
-│ │ Pipe Panel  │                          │  Embedded   │ │
-│ │ (top-left)  │                          │ (top-right) │ │
-│ └─────────────┘                          └─────────────┘ │
-│                                                          │
-│                     [Processed Image]                    │
-│                                                          │
-│ ┌─────────────┐                          ┌─────────────┐ │
-│ │  RAW Info   │                          │ Link Editor │ │
-│ │(bottom-left)│                          │(bottom-right)│ │
-│ └─────────────┘                          └─────────────┘ │
-└──────────────────────────────────────────────────────────┘
-```
+The application opens maximized. All panel sizes and positions are relative to window size and update automatically on resize.
 
-### Menu Bar (`desk.cpp:35`)
+### Layout
+
+| Area | Description |
+|------|-------------|
+| **Menu Bar** | RAW selector, panel toggles, preview size, export |
+| **Work Area** | Central area displaying rendered image |
+| **Pipe Panel** | Top-left: Links and dial tree |
+| **Info Panel** | Bottom-left: RAW metadata |
+| **Link Editor** | Bottom-right: Dial equalizer |
+| **Embedded Preview** | Top-right: Camera JPEG preview |
+
+### Panel Sizes
+
+Panels scale with window size (percentage-based):
+
+| Panel | Width | Height |
+|-------|-------|--------|
+| Pipe | 15% | 45% |
+| Info | 15% | 35% |
+| Link Editor | 40% | 35% |
+| Embedded | 20% | 35% |
+
+Minimum sizes prevent panels from becoming unusable on small windows.
+
+### File Menu
+
+The File menu allows the user to select a root folder. All RAW files and sidecars in the root folder are discovered and displayed.
+
+### Projects Panel
+
+The Projects panel displays all non-hidden RAW projects.
 
 | Element | Description |
 |---------|-------------|
-| RAW Dropdown | Select active project |
-| Import RAW | Opens file dialog for ARW files |
-| Pipe/Info/Editor/Embedded | Toggle panel visibility |
-| Preview | Size selector (512/1024/2048/4096/Full) |
-| Export | Render full resolution PNG |
+| **Title** | "Projects" header |
+| **+ Button** | Add new RAW file (Sony ARW only) |
+| **Project List** | Tree view of RAW projects |
 
-### Panels
+### Project Tree
 
-| Panel | Position | Size | Content |
-|-------|----------|------|---------|
-| Pipe | top-left | 300×400 | Links tree view |
-| RAW Info | bottom-left | 280×250 | EXIF metadata table |
-| Link Editor | bottom-right | 800×180 | Module/dial equalizer |
-| Embedded | top-right | 400×300 | Camera JPEG preview |
-
-Panel constants defined in `theme.hpp:16-28`.
-
-### Link Editor (`linkeditor.cpp`)
-
-Three-level breadcrumb menu:
+Each RAW file appears as a tree root node.
 
 ```
-Module: [Color Correction] > [Exposure] = 0.50
+▸ DSC01234          [+] [-]
+  └─ Link: tune_optimize  [✎]
+  └─ Link: final_adjust   [✎]
+▸ DSC05678          [+] [-]
 ```
 
-For Selective Color, adds fourth level:
+| Element | Description |
+|---------|-------------|
+| **RAW Name** | File name without extension (tree root) |
+| **+ Button** | Add new Link to pipe BODY |
+| **- Button** | Hide project (sets `hidden: true` in desk.json) |
+| **Link Entries** | Named Links in the pipe BODY |
+| **✎ Icon** | Edit Link name inline |
+
+### Work Area
+
+The Work Area displays the processed image at the selected preview size. Rendering is done directly from the pipe to an OpenGL texture—no PNG file is written for preview. The image updates when:
+- A new project is selected
+- Dial values change
+- Links are added or removed
+- Preview size changes
+
+Preview sizes: 512, 1024, 2048, 4096, or Full resolution.
+
+### Link Editor
+
+When a Link is selected, the Link Editor panel displays all 45 dials as a horizontal graphic equalizer.
+
+#### Layout
 
 ```
-Module: [Selective Colour] > [Red] > [Hue] = 0.50
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ Color Correction: Exp = 0.65                                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+│ │ │ │ │ │ ● │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+│ ● ● ● ● ● │ ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ● ●
+│ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+│ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │ │
+│ <-- 45 vertical sliders: Geo(6) CC(3) Tone(5) Global(3) Selective(24) Dtl(4)
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Slider States:**
+The status line shows the currently hot dial (module, label, value) or "Click a dial to select" when nothing is hot.
 
-| Color | State | Condition |
-|-------|-------|-----------|
-| Grey | Default | Value equals default |
-| White | Set | Value modified from default |
-| Blue | Active | Currently selected slider |
+#### Dial Order (left to right)
 
----
+| Module | Dials | Labels |
+|--------|-------|--------|
+| Geometric | 6 | CrT, CrR, CrB, CrL, Scl, Tlt |
+| Color Correction | 3 | Exp, Tmp, Tnt |
+| Tone Mapping | 5 | Con, Hi, Sha, Blk, Wht |
+| Global Color | 3 | Vib, Sat, Den |
+| Selective Color | 24 | RH, RS, RL, OH, OS, OL, YH, YS, YL, GH, GS, GL, CH, CS, CL, BH, BS, BL, PH, PS, PL, MH, MS, ML |
+| Detail | 4 | ShA, ShR, DnL, DnC |
 
-## LABS Integration
+#### Dial States
 
-### Rendering Pipeline (`files.cpp:472`)
+Dials have three visual states:
 
-**Preview render:**
+| State | Color | Meaning |
+|-------|-------|---------|
+| **Grey** | Light grey | Default value |
+| **White** | Bright white | In pipe (value differs from default) |
+| **Hot (Blue)** | Blue highlight | Currently selected for editing |
 
-```cpp
-pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(raw_path));
-pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
-pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+#### Hot State Rules
 
-// Scale BEFORE processing for speed
-pipe::Body& body = head->body(working_size);
+A dial becomes "hot" (blue, actively selected) only through explicit user action:
 
-// Add links with dial values
-for (const auto& link : project.links) {
-    pipe::Body::Link& pipe_link = body.add(link.name);
-    apply_link_dials(link, pipe_link);
+1. **Click on slider** in the graphic equalizer
+2. **Click on dial leaf** in the Pipe tree (e.g., "Exposure: 0.65")
+
+Hot state is cleared when:
+- User switches to a different Link
+- User clicks empty space
+
+#### Dial Value Storage
+
+Dials are stored sparsely in `pipe.json`. Only non-default values appear in the file:
+
+```json
+{
+  "links": [{
+    "name": "tune",
+    "color_correction": {
+      "exposure": 0.65
+    }
+  }]
 }
-
-// Get display-ready BGR image
-pipe::View display = body.view();
-
-// Upload to OpenGL texture
-cv::Mat cpu;
-display.copyTo(cpu);
-upload_texture(state, cpu);
 ```
 
-**Export render:**
+Default values: 0.5 for most dials, 0.15 for black, 0.85 for white.
 
-```cpp
-// Same setup, but no working_size scaling
-pipe::Body& body = head->body();  // Full resolution
+#### Modules
 
-// ... add links ...
+| Module | Dials | Defaults |
+|--------|-------|----------|
+| Geometric | Crop Top/Right/Bottom/Left, Scale, Tilt | Crop: 0, Scale/Tilt: 0.5 |
+| Color Correction | Exposure, Temperature, Tint | 0.5 |
+| Tone Mapping | Contrast, Highlights, Shadows, Black, White | 0.5, 0.5, 0.5, 0.15, 0.85 |
+| Global Color | Vibrance, Saturation, Density | 0.5 |
+| Selective Colour | 8 colors × 3 (H/S/L) = 24 dials | 0.5 |
+| Detail | Sharp Amt, Sharp Rad, Denoise L, Denoise C | 0, 0.4, 0, 0 |
 
-// Save to PNG file
-body.tail().save(png_path, 0);  // 0 = full resolution
-```
-
-### Dial Application (`files.cpp:377`)
-
-`apply_link_dials()` maps DESK dial values to LABS pipe API:
-
-```cpp
-dst.colorCorrection().exposure().set(exposure_value);
-dst.colorCorrection().whiteBalance().temperature(temp_value);
-dst.toneMapping().contrast().set(contrast_value);
-dst.globalColor().vibrance().set(vibrance_value);
-dst.selectiveColour().red().hue(red_hue_value);
-dst.detail().sharpen().amount(sharpen_value);
-// ... etc
-```
+**Total: 45 dials per Link (6 + 3 + 5 + 3 + 24 + 4)**
 
 ---
 
-## Data Flow
+## Operations
 
-### Project Selection
+### Link Operations
 
-```
-User selects project
-    ↓
-load_raw_info() → state.raw_info
-load_embedded_preview() → state.embedded_texture
-state.is_working = true, state.needs_reprocess = true
-    ↓
-[Next frame]
-render_to_texture() → state.texture
-state.is_working = false
-```
+| Action | Result |
+|--------|--------|
+| Press **+** on project | Adds Link named "New Link" to pipe BODY |
+| Press **-** on Link | Removes Link from pipe BODY |
+| Press **✎** on Link | Enables inline name editing |
+| Select Link | Opens Link Editor, displays modules/dials |
 
-### Dial Change
+### Project Operations
 
-```
-User adjusts slider
-    ↓
-set_dial_value() → Link dials updated
-state.needs_reprocess = true
-state.is_working = true
-    ↓
-render_to_texture() at working_size
-    ↓
-[On drag release]
-save_pipe_json() → disk
-```
-
-### Export
-
-```
-User clicks Export
-    ↓
-state.needs_export = true
-    ↓
-export_project()
-    ↓
-Full resolution render through LABS
-    ↓
-body.tail().save() → PNG file
-```
+| Action | Result |
+|--------|--------|
+| Press **+** in Projects panel | Opens file dialog (Sony ARW filter) |
+| Press **-** on project | Hides project (sets `hidden: true`) |
+| Select project | Displays output PNG in Work Area |
 
 ---
 
-## Source Files
+## Workflow
 
-### desk.cpp (606 lines)
+### Adding a Project
 
-Main entry point and render loop.
+1. User presses **+** in Projects panel
+2. File dialog opens (Sony ARW filter)
+3. RAW file is copied to root folder
+4. Sidecar files are created:
+   - `<name>.desk.json` with `hidden: false`
+   - `<name>.pipe.json` with empty links array
+5. Project appears in tree
 
-| Function | Line | Purpose |
-|----------|------|---------|
-| `glfw_error_callback` | 27 | Error handler |
-| `render_menu_bar` | 35 | Top toolbar |
-| `render_image_background` | 171 | Work area container |
-| `render_floating_panels` | 227 | Panel layout and resize |
-| `process_file_dialogs` | 405 | ImGuiFileDialog handling |
-| `handle_selection_change` | 437 | Project/link change logic |
-| `main` | 499 | App initialization |
+### Hiding a Project
 
-### state.hpp/cpp
+1. User presses **-** next to project name
+2. `desk.json` is updated: `hidden: true`
+3. Project disappears from tree
+4. Files remain on disk
 
-State structures and module initialization.
+### Adding a Link
 
-| Type | Purpose |
-|------|---------|
-| `Dial` | `float` alias |
-| `Info` | `map<string,string>` metadata |
-| `Module` | Named dial collection |
-| `Link` | 6 modules container |
-| `Project` | RAW + sidecars |
-| `PanelVisibility` | 4 panel flags |
-| `Texture` | OpenGL texture handle |
-| `Selection` | Current project/link/module/dial |
-| `State` | Full application state |
+1. User expands project tree
+2. User presses **+** next to project name
+3. New Link "New Link" is added to pipe BODY
+4. Pipe runs HEAD → BODY → TAIL
+5. Output PNG updates in Work Area
 
-### files.cpp (738 lines)
+### Renaming a Link
 
-File I/O and LABS integration.
+1. User presses **✎** next to Link name
+2. Name becomes editable inline
+3. User types new name, presses Enter
+4. `pipe.json` is updated automatically
 
-| Function | Line | Purpose |
-|----------|------|---------|
-| `scan_projects` | 79 | Find ARW files in folder |
-| `load_desk_json` | 131 | Parse desk.json |
-| `save_desk_json` | 139 | Write desk.json |
-| `load_pipe_json` | 148 | Parse pipe.json |
-| `save_pipe_json` | 244 | Write pipe.json |
-| `create_project` | 341 | Copy RAW + create sidecars |
-| `apply_link_dials` | 377 | Map dials to LABS API |
-| `upload_texture` | 435 | cv::Mat → OpenGL |
-| `render_to_texture` | 472 | Preview render |
-| `export_project` | 519 | Full-res export |
-| `load_texture` | 563 | PNG → OpenGL |
-| `load_embedded_preview` | 613 | RAW JPEG → OpenGL |
-| `load_raw_info` | 685 | EXIF metadata |
+### Editing a Link
 
-### projects.cpp (412 lines)
+1. User selects Link in tree
+2. Link Editor opens showing 6 modules
+3. User adjusts dials
+4. Pipe re-runs on dial change
+5. Work Area updates (rendered to texture at preview size)
+6. `pipe.json` is updated automatically
 
-Pipe panel rendering.
+### Exporting
 
-| Function | Purpose |
-|----------|---------|
-| `render_workspace_panel` | Project list (legacy) |
-| `render_pipe_panel` | Links tree with modules |
-| `render_info_panel` | Metadata table |
-
-### workarea.cpp (89 lines)
-
-Image display with aspect ratio preservation and centering.
-
-### linkeditor.cpp (459 lines)
-
-Equalizer-style dial editor.
-
-| Function | Purpose |
-|----------|---------|
-| `get_dial_default` | Default value per dial |
-| `get_dial_value` | Read from Link |
-| `set_dial_value` | Write to Link |
-| `custom_vslider` | Vertical slider widget |
-| `render_module_menus` | Main editor UI |
-
-### theme.cpp (77 lines)
-
-Modern Dark theme colors for ImGui.
+1. User clicks **Export** button
+2. Pipe runs at full resolution
+3. PNG saved to `<name>.png`
 
 ---
 
-## Constraints
+## Pipe Integration
 
-- **Read-only LABS**: DESK consumes LABS as-is
-- **No file deletion**: Projects are hidden, not removed
-- **Single selection**: One project, one link at a time
-- **Auto-save**: Sidecar files update on every change
-- **Sony ARW only**: File dialog filters for `.ARW` files
+DESK uses the LABS pipe system defined in `LABS/inc/pipe.hpp`.
+
+### Pipeline Stages
+
+| Stage | DESK Trigger |
+|-------|--------------|
+| **HEAD** | RAW decode on project select |
+| **BODY** | Link processing on dial change |
+| **TAIL** | `view()` for preview display, `save()` on Export |
+
+### Rendering Flow
+
+**Preview (in-memory)**:
+1. `pipe::make()` → `open(sink)` → `head->body()`
+2. Add links with dial values
+3. `body.tail().view(working_size)` → 8-bit BGR
+4. Upload to OpenGL texture → display
+
+**Export (to file)**:
+1. Same pipeline setup
+2. `body.tail().save(path, 0)` → full-resolution PNG
+
+### Link Structure
+
+A Link contains 6 modules (see [LABS/doc/pipe.md](../../LABS/doc/pipe.md)):
+
+- Geometric (6 dials)
+- Color Correction (3 dials)
+- Tone Mapping (5 dials)
+- Global Color (3 dials)
+- Selective Color (24 dials)
+- Detail (4 dials)
+
+**Total: 45 dials per Link**
+
+### Error Handling
+
+If RAW decode fails, DESK displays an error indication in the UI. The project remains in the tree but shows an error state.
 
 ---
 
 ## Supported Formats
 
-**Input:** Sony ARW (`.ARW`)
+### Input (RAW)
 
-**Output:** PNG (`.png`)
+| Format | Extension | Status |
+|--------|-----------|--------|
+| Sony ARW | `.ARW` | Supported |
+| Others | — | Future |
+
+The file import dialog filters for Sony ARW files only.
+
+### Output
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| PNG | `.png` | Lossless output from pipe TAIL |
+
+---
+
+## Build
+
+### Dependencies
+
+DESK statically links OpenCV (core, imgproc, imgcodecs) and LABS. System libraries are dynamically linked.
+
+```
+bin/desk (14MB statically linked binary)
+├── LABS/lib/labs.a           # LABS pipe library
+├── OpenCV static libs        # libopencv_core.a, imgproc.a, imgcodecs.a
+├── GLFW                      # Window/input
+├── ImGui                     # UI
+└── System libs               # X11, OpenGL, PNG, JPEG, zlib
+```
+
+### Building OpenCV for Static Linking
+
+OpenCV is built with minimal codecs (PNG/JPEG only) and no IPP:
+
+```bash
+cd LABS/lib/opencv/build
+cmake .. \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DBUILD_LIST=core,imgproc,imgcodecs \
+  -DWITH_TIFF=OFF -DWITH_WEBP=OFF -DWITH_OPENJPEG=OFF \
+  -DWITH_JASPER=OFF -DWITH_OPENEXR=OFF -DWITH_AVIF=OFF \
+  -DWITH_IPP=OFF -DWITH_ITT=OFF \
+  -DWITH_JPEG=ON -DWITH_PNG=ON \
+  -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF
+make -j$(nproc)
+```
+
+### Building DESK
+
+```bash
+cd DESK
+make -f Makefile.desk
+```
+
+The binary `bin/desk` runs standalone without `LD_LIBRARY_PATH`.
+
+---
+
+## Future Considerations
+
+- Undo support for dial changes and Link operations (not yet implemented)
+- Additional RAW format support
+
+See [idea.md](./idea.md) for enhancement ideas that require LABS changes.
+
+---
+
+## Documentation
+
+DESK documentation follows [LABS/doc/docs.md](../../LABS/doc/docs.md) standards.
+
+Additional DESK-specific rules are in [DESK/doc/docs.md](./docs.md).

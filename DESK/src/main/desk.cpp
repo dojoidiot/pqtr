@@ -195,52 +195,23 @@ void render_image_background(desk::State& state, int display_w, int display_h) {
 // Floating Panels Rendering
 // ============================================================
 
-// Panel position state for resize handling
-struct PanelLayout {
-    int prev_w = 0;
-    int prev_h = 0;
-    bool initialized = false;
-    // Track last known positions for resize adjustment
-    ImVec2 pipe_pos{-1, -1};
-    ImVec2 info_pos{-1, -1};
-    ImVec2 editor_pos{-1, -1};
-    ImVec2 embedded_pos{-1, -1};
-};
-
-static PanelLayout g_layout;
-
 // Margin from window edges
 constexpr float PANEL_MARGIN = 10.0f;
 
-// Clamp a position to keep panel within window bounds
-static ImVec2 clamp_panel_pos(ImVec2 pos, ImVec2 size, int display_w, int display_h, float content_y) {
-    float max_x = display_w - size.x - PANEL_MARGIN;
-    float max_y = display_h - size.y - PANEL_MARGIN;
-    float min_x = PANEL_MARGIN;
-    float min_y = content_y + PANEL_MARGIN;
-
-    pos.x = std::max(min_x, std::min(pos.x, max_x));
-    pos.y = std::max(min_y, std::min(pos.y, max_y));
-    return pos;
-}
+// Panel sizes as fraction of window
+constexpr float PIPE_WIDTH_FRAC = 0.15f;     // 15% of width
+constexpr float PIPE_HEIGHT_FRAC = 0.45f;    // 45% of height
+constexpr float INFO_WIDTH_FRAC = 0.15f;     // 15% of width
+constexpr float INFO_HEIGHT_FRAC = 0.35f;    // 35% of height
+constexpr float EDITOR_WIDTH_FRAC = 0.40f;   // 40% of width
+constexpr float EDITOR_HEIGHT_FRAC = 0.35f;  // 35% of height
+constexpr float EMBEDDED_WIDTH_FRAC = 0.20f; // 20% of width
+constexpr float EMBEDDED_HEIGHT_FRAC = 0.35f;// 35% of height
 
 bool render_floating_panels(desk::State& state, int display_w, int display_h) {
     bool selection_changed = false;
     float content_y = desk::MENU_BAR_HEIGHT;
-
-    // Initialize layout tracking
-    if (!g_layout.initialized) {
-        g_layout.prev_w = display_w;
-        g_layout.prev_h = display_h;
-        g_layout.initialized = true;
-    }
-
-    // Detect window resize
-    bool resized = (display_w != g_layout.prev_w || display_h != g_layout.prev_h);
-    int old_w = g_layout.prev_w;
-    int old_h = g_layout.prev_h;
-    g_layout.prev_w = display_w;
-    g_layout.prev_h = display_h;
+    float content_h = display_h - content_y;
 
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, desk::PANEL_ALPHA);
 
@@ -251,47 +222,40 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             pipe_title = "Pipe: " + state.current_project().name;
         }
 
-        ImVec2 size(desk::PIPE_PANEL_WIDTH, desk::PIPE_PANEL_HEIGHT);
+        // Size relative to window
+        ImVec2 size(display_w * PIPE_WIDTH_FRAC, content_h * PIPE_HEIGHT_FRAC);
+        if (size.x < 180) size.x = 180;
+        if (size.y < 200) size.y = 200;
+
         ImVec2 pos(PANEL_MARGIN, content_y + PANEL_MARGIN);
 
-        if (resized && g_layout.pipe_pos.x >= 0) {
-            pos = clamp_panel_pos(g_layout.pipe_pos, size, display_w, display_h, content_y);
-            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-        } else {
-            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
-        }
-        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin(pipe_title.c_str(), &state.panels.pipe, ImGuiWindowFlags_NoCollapse);
-        g_layout.pipe_pos = ImGui::GetWindowPos();
+        ImGui::Begin(pipe_title.c_str(), &state.panels.pipe,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         selection_changed |= desk::render_pipe_panel(state);
         ImGui::End();
     }
 
-    // Info Panel - BOTTOM LEFT (anchored to bottom)
+    // Info Panel - BOTTOM LEFT
     if (state.panels.info) {
-        ImVec2 size(desk::INFO_PANEL_WIDTH, desk::INFO_PANEL_HEIGHT);
+        ImVec2 size(display_w * INFO_WIDTH_FRAC, content_h * INFO_HEIGHT_FRAC);
+        if (size.x < 180) size.x = 180;
+        if (size.y < 150) size.y = 150;
+
         ImVec2 pos(PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
 
-        if (resized && g_layout.info_pos.x >= 0) {
-            // Adjust Y to maintain distance from bottom
-            float dist_from_bottom = old_h - g_layout.info_pos.y - size.y;
-            pos.x = g_layout.info_pos.x;
-            pos.y = display_h - size.y - dist_from_bottom;
-            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
-            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-        } else {
-            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
-        }
-        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin("RAW Info", &state.panels.info, ImGuiWindowFlags_NoCollapse);
-        g_layout.info_pos = ImGui::GetWindowPos();
+        ImGui::Begin("RAW Info", &state.panels.info,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         desk::render_info_panel(state);
         ImGui::End();
     }
 
-    // Link Editor Panel - BOTTOM RIGHT (anchored to bottom-right)
+    // Link Editor Panel - BOTTOM RIGHT
     if (state.panels.link_editor) {
         std::string editor_title = "Link Editor";
         if (state.has_project() && state.selection.link >= 0) {
@@ -301,52 +265,39 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             }
         }
 
-        ImVec2 size(desk::LINK_EDITOR_WIDTH, desk::LINK_EDITOR_HEIGHT);
+        ImVec2 size(display_w * EDITOR_WIDTH_FRAC, content_h * EDITOR_HEIGHT_FRAC);
+        if (size.x < 400) size.x = 400;
+        if (size.y < 200) size.y = 200;
+
         ImVec2 pos(display_w - size.x - PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
 
-        if (resized && g_layout.editor_pos.x >= 0) {
-            // Maintain distance from right and bottom edges
-            float dist_from_right = old_w - g_layout.editor_pos.x - size.x;
-            float dist_from_bottom = old_h - g_layout.editor_pos.y - size.y;
-            pos.x = display_w - size.x - dist_from_right;
-            pos.y = display_h - size.y - dist_from_bottom;
-            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
-            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-        } else {
-            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
-        }
-        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin(editor_title.c_str(), &state.panels.link_editor, ImGuiWindowFlags_NoCollapse);
-        g_layout.editor_pos = ImGui::GetWindowPos();
+        ImGui::Begin(editor_title.c_str(), &state.panels.link_editor,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
         selection_changed |= desk::render_module_menus(state);
         ImGui::End();
     }
 
-    // Embedded Preview Panel - TOP RIGHT (anchored to right)
+    // Embedded Preview Panel - TOP RIGHT
     if (state.panels.embedded && state.has_embedded && state.embedded_texture.loaded) {
         std::string emb_title = "Embedded Preview";
         if (state.has_project()) {
             emb_title = "Embedded: " + state.current_project().name;
         }
 
-        ImVec2 size(desk::EMBEDDED_PANEL_WIDTH, desk::EMBEDDED_PANEL_HEIGHT);
+        ImVec2 size(display_w * EMBEDDED_WIDTH_FRAC, content_h * EMBEDDED_HEIGHT_FRAC);
+        if (size.x < 200) size.x = 200;
+        if (size.y < 150) size.y = 150;
+
         ImVec2 pos(display_w - size.x - PANEL_MARGIN, content_y + PANEL_MARGIN);
 
-        if (resized && g_layout.embedded_pos.x >= 0) {
-            // Maintain distance from right edge
-            float dist_from_right = old_w - g_layout.embedded_pos.x - size.x;
-            pos.x = display_w - size.x - dist_from_right;
-            pos.y = g_layout.embedded_pos.y;
-            pos = clamp_panel_pos(pos, size, display_w, display_h, content_y);
-            ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
-        } else {
-            ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
-        }
-        ImGui::SetNextWindowSize(size, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin(emb_title.c_str(), &state.panels.embedded, ImGuiWindowFlags_NoCollapse);
-        g_layout.embedded_pos = ImGui::GetWindowPos();
+        ImGui::Begin(emb_title.c_str(), &state.panels.embedded,
+                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
 
         // Display embedded image scaled to fit
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -434,8 +385,9 @@ void process_file_dialogs(desk::State& state) {
 // Project Selection Change Handler
 // ============================================================
 
-void handle_selection_change(desk::State& state, int& prev_project, bool selection_changed) {
-    bool project_changed = (selection_changed || state.selection.project != prev_project);
+void handle_selection_change(desk::State& state, int& prev_project, bool /*selection_changed*/) {
+    // Only reload metadata when the PROJECT actually changes, not on any selection change
+    bool project_changed = (state.selection.project != prev_project);
 
     // Handle full-size export request (saves PNG)
     if (state.needs_export && state.has_project()) {
@@ -444,8 +396,7 @@ void handle_selection_change(desk::State& state, int& prev_project, bool selecti
         state.needs_export = false;
     }
 
-    // Handle reprocess request (e.g., slider changed) - render to texture
-    // This is deferred so "Loading..." can display first
+    // Handle reprocess request (e.g., slider released) - render to texture
     if (state.needs_reprocess && state.has_project()) {
         const auto& proj = state.current_project();
         desk::render_to_texture(state, proj, state.working_size);
@@ -579,6 +530,14 @@ int main(int argc, char** argv) {
         // Process dialogs and handle selection changes
         process_file_dialogs(state);
         handle_selection_change(state, prev_project, selection_changed);
+
+        // Handle Ctrl+Z for undo
+        if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
+            if (state.can_undo()) {
+                desk::UndoEntry entry = state.pop_undo();
+                desk::apply_undo(state, entry);
+            }
+        }
 
         // Render frame
         ImGui::Render();

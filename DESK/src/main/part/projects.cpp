@@ -4,7 +4,6 @@
 #include "files.hpp"
 #include "imgui.h"
 #include <cstring>
-#include <cmath>
 
 namespace desk {
 
@@ -87,6 +86,15 @@ struct DialDef {
     const char* key;
 };
 
+static const DialDef GEOMETRIC_DIALS[] = {
+    {"Crop Top", "crop_top"},
+    {"Crop Right", "crop_right"},
+    {"Crop Bottom", "crop_bottom"},
+    {"Crop Left", "crop_left"},
+    {"Scale", "scale"},
+    {"Tilt", "tilt_angle"},
+};
+
 static const DialDef COLOR_CORRECTION_DIALS[] = {
     {"Exposure", "exposure"},
     {"Temperature", "temperature"},
@@ -114,28 +122,22 @@ static const DialDef DETAIL_DIALS[] = {
     {"Denoise C", "denoise_chroma"},
 };
 
-// Check if dial differs from default
+// Check if dial differs from default (0.5 for most, special cases handled)
 static bool dial_is_set(const char* key, float value) {
-    // Tolerance for float comparison
-    const float eps = 0.001f;
-
-    // Tone mapping special defaults
-    if (strcmp(key, "black") == 0) return std::abs(value - 0.15f) > eps;
-    if (strcmp(key, "white") == 0) return std::abs(value - 0.85f) > eps;
-
-    // Geometric crop defaults (0.0)
+    // Geometric: crop defaults to 0, scale/tilt to 0.5
     if (strcmp(key, "crop_top") == 0 || strcmp(key, "crop_right") == 0 ||
         strcmp(key, "crop_bottom") == 0 || strcmp(key, "crop_left") == 0)
-        return std::abs(value) > eps;
-
-    // Detail defaults (0.0 for amount/denoise, 0.4 for radius)
-    if (strcmp(key, "sharpen_amount") == 0) return std::abs(value) > eps;
-    if (strcmp(key, "sharpen_radius") == 0) return std::abs(value - 0.4f) > eps;
-    if (strcmp(key, "denoise_luminance") == 0) return std::abs(value) > eps;
-    if (strcmp(key, "denoise_chroma") == 0) return std::abs(value) > eps;
-
-    // Default is 0.5 (center-neutral)
-    return std::abs(value - 0.5f) > eps;
+        return value != 0.0f;
+    // Tone mapping: black/white special defaults
+    if (strcmp(key, "black") == 0) return value != 0.15f;
+    if (strcmp(key, "white") == 0) return value != 0.85f;
+    // Detail: most default to 0, sharpen_radius to 0.4
+    if (strcmp(key, "sharpen_amount") == 0 || strcmp(key, "denoise_luminance") == 0 ||
+        strcmp(key, "denoise_chroma") == 0)
+        return value != 0.0f;
+    if (strcmp(key, "sharpen_radius") == 0) return value != 0.4f;
+    // Default is 0.5
+    return value != 0.5f;
 }
 
 // Render dials for a module, returns true if any dial was clicked
@@ -157,10 +159,9 @@ static bool render_module_dials(const Module& mod, const DialDef* dials, int cou
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf |
                                        ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
-            // Highlight if this dial is selected in editor
+            // Highlight if this dial is hot
             if (state.selection.link == link_idx &&
-                state.selection.module == mod_idx &&
-                state.selection.dial == d) {
+                state.selection.is_hot(mod_idx, d)) {
                 flags |= ImGuiTreeNodeFlags_Selected;
             }
 
@@ -168,10 +169,10 @@ static bool render_module_dials(const Module& mod, const DialDef* dials, int cou
             snprintf(label, sizeof(label), "%s: %.2f", dials[d].name, value);
             ImGui::TreeNodeEx(label, flags);
 
+            // Clicking tree leaf makes dial hot
             if (ImGui::IsItemClicked()) {
                 state.selection.link = link_idx;
-                state.selection.module = mod_idx;
-                state.selection.dial = d;
+                state.selection.set_hot(mod_idx, d);  // Make hot
                 state.panels.link_editor = true;
                 changed = true;
             }
@@ -210,21 +211,51 @@ static bool render_selective_color(const Module& mod, State& state, int link_idx
         if (ImGui::TreeNode(color_names[c])) {
             if (has_hue) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (state.selection.link == link_idx &&
+                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 0)) {
+                    flags |= ImGuiTreeNodeFlags_Selected;
+                }
                 char label[32];
                 snprintf(label, sizeof(label), "Hue: %.2f", hue_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (ImGui::IsItemClicked()) {
+                    state.selection.link = link_idx;
+                    state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 0);
+                    state.panels.link_editor = true;
+                    changed = true;
+                }
             }
             if (has_sat) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (state.selection.link == link_idx &&
+                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 1)) {
+                    flags |= ImGuiTreeNodeFlags_Selected;
+                }
                 char label[32];
                 snprintf(label, sizeof(label), "Sat: %.2f", sat_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (ImGui::IsItemClicked()) {
+                    state.selection.link = link_idx;
+                    state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 1);
+                    state.panels.link_editor = true;
+                    changed = true;
+                }
             }
             if (has_lum) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                if (state.selection.link == link_idx &&
+                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 2)) {
+                    flags |= ImGuiTreeNodeFlags_Selected;
+                }
                 char label[32];
                 snprintf(label, sizeof(label), "Lum: %.2f", lum_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (ImGui::IsItemClicked()) {
+                    state.selection.link = link_idx;
+                    state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 2);
+                    state.panels.link_editor = true;
+                    changed = true;
+                }
             }
             ImGui::TreePop();
         }
@@ -284,11 +315,14 @@ bool render_pipe_panel(State& state) {
 
         bool link_open = ImGui::TreeNodeEx(link.name.c_str(), link_flags);
 
-        // Select link on click
+        // Select link on click - clear hot on link switch
         if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
-            state.selection.link = l;
+            if (state.selection.link != l) {
+                state.selection.link = l;
+                state.selection.clear_hot();  // Hot clears on link switch
+                selection_changed = true;
+            }
             state.panels.link_editor = true;
-            selection_changed = true;
         }
 
         // Context menu
@@ -328,9 +362,34 @@ bool render_pipe_panel(State& state) {
         }
 
         if (link_open) {
+            // Geometric
+            if (module_has_settings(link.geometric)) {
+                bool geo_open = ImGui::TreeNode("Geometric");
+                // Click on module name navigates (shows dials) but doesn't make hot
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_GEOMETRIC;
+                    state.selection.dial = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (geo_open) {
+                    render_module_dials(link.geometric, GEOMETRIC_DIALS, 6, state, l, MOD_GEOMETRIC);
+                    ImGui::TreePop();
+                }
+            }
+
             // Color Correction
             if (module_has_settings(link.color_correction)) {
-                if (ImGui::TreeNode("Color Correction")) {
+                bool cc_open = ImGui::TreeNode("Color Correction");
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_COLOR_CORRECTION;
+                    state.selection.dial = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (cc_open) {
                     render_module_dials(link.color_correction, COLOR_CORRECTION_DIALS, 3, state, l, MOD_COLOR_CORRECTION);
                     ImGui::TreePop();
                 }
@@ -338,7 +397,15 @@ bool render_pipe_panel(State& state) {
 
             // Tone Mapping
             if (module_has_settings(link.tone_mapping)) {
-                if (ImGui::TreeNode("Tone Mapping")) {
+                bool tone_open = ImGui::TreeNode("Tone Mapping");
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_TONE_MAPPING;
+                    state.selection.dial = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (tone_open) {
                     render_module_dials(link.tone_mapping, TONE_MAPPING_DIALS, 5, state, l, MOD_TONE_MAPPING);
                     ImGui::TreePop();
                 }
@@ -346,7 +413,15 @@ bool render_pipe_panel(State& state) {
 
             // Global Color
             if (module_has_settings(link.global_color)) {
-                if (ImGui::TreeNode("Global Color")) {
+                bool gc_open = ImGui::TreeNode("Global Color");
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_GLOBAL_COLOR;
+                    state.selection.dial = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (gc_open) {
                     render_module_dials(link.global_color, GLOBAL_COLOR_DIALS, 3, state, l, MOD_GLOBAL_COLOR);
                     ImGui::TreePop();
                 }
@@ -354,7 +429,16 @@ bool render_pipe_panel(State& state) {
 
             // Selective Color
             if (module_has_settings(link.selective_color)) {
-                if (ImGui::TreeNode("Selective Color")) {
+                bool sc_open = ImGui::TreeNode("Selective Color");
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_SELECTIVE_COLOR;
+                    state.selection.dial = 0;
+                    state.selection.detail = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (sc_open) {
                     render_selective_color(link.selective_color, state, l);
                     ImGui::TreePop();
                 }
@@ -362,7 +446,15 @@ bool render_pipe_panel(State& state) {
 
             // Detail
             if (module_has_settings(link.detail)) {
-                if (ImGui::TreeNode("Detail")) {
+                bool dtl_open = ImGui::TreeNode("Detail");
+                if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+                    state.selection.link = l;
+                    state.selection.module = MOD_DETAIL;
+                    state.selection.dial = 0;
+                    state.panels.link_editor = true;
+                    selection_changed = true;
+                }
+                if (dtl_open) {
                     render_module_dials(link.detail, DETAIL_DIALS, 4, state, l, MOD_DETAIL);
                     ImGui::TreePop();
                 }

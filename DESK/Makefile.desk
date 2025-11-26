@@ -33,9 +33,12 @@ INCLUDES = -I$(IMGUI_DIR) \
 # OpenCV library path (for linking)
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
-# Library flags - use $ORIGIN to find opencv relative to binary location
-LDFLAGS = -L$(GLFW_BUILD)/src -L$(OPENCV_LIB)
-LIBS = -lglfw3 $(LABS_LIB)/labs.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama -Wl,-rpath,'$$ORIGIN/../../LABS/lib/opencv/build/lib'
+# Library flags - static OpenCV linking
+LDFLAGS = -L$(GLFW_BUILD)/src
+OPENCV_STATIC = $(OPENCV_LIB)/libopencv_imgcodecs.a \
+                $(OPENCV_LIB)/libopencv_imgproc.a \
+                $(OPENCV_LIB)/libopencv_core.a
+LIBS = -lglfw3 $(LABS_LIB)/labs.a $(OPENCV_STATIC) -lpng -ljpeg -lz -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama
 
 # Directories
 SRC_DIR = src/main

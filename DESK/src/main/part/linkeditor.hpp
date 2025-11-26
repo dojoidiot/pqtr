@@ -11,4 +11,7 @@ namespace desk {
 // Returns true if any dial value changed
 bool render_module_menus(State& state);
 
+// Apply an undo entry - restores the old value
+void apply_undo(State& state, const UndoEntry& entry);
+
 } // namespace desk
