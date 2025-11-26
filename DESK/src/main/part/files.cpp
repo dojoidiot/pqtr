@@ -10,6 +10,7 @@
 // LABS pipe
 #include <pipe.hpp>
 #include <tool.hpp>
+#include <opencv2/imgproc.hpp>
 
 // stb_image for PNG loading
 #define STB_IMAGE_IMPLEMENTATION
@@ -372,12 +373,111 @@ bool create_project(State& state, const fs::path& raw_file) {
     return true;
 }
 
-bool render_project(State& state, const Project& project) {
-    state.status_message = "Rendering: " + project.name;
+// Helper to apply Link dials to pipe::Body::Link
+static void apply_link_dials(const Link& src, pipe::Body::Link& dst) {
+    // Color Correction
+    auto get_dial = [](const Module& m, const char* key, float def) {
+        auto it = m.dials.find(key);
+        return (it != m.dials.end()) ? it->second : def;
+    };
+
+    dst.colorCorrection().exposure().set(get_dial(src.color_correction, "exposure", 0.5f));
+    dst.colorCorrection().whiteBalance().temperature(get_dial(src.color_correction, "temperature", 0.5f));
+    dst.colorCorrection().whiteBalance().tint(get_dial(src.color_correction, "tint", 0.5f));
+
+    // Tone Mapping
+    dst.toneMapping().contrast().set(get_dial(src.tone_mapping, "contrast", 0.5f));
+    dst.toneMapping().curveAdjustment().highlights().set(get_dial(src.tone_mapping, "highlights", 0.5f));
+    dst.toneMapping().curveAdjustment().shadows().set(get_dial(src.tone_mapping, "shadows", 0.5f));
+    dst.toneMapping().clippingPoint().black().set(get_dial(src.tone_mapping, "black", 0.15f));
+    dst.toneMapping().clippingPoint().white().set(get_dial(src.tone_mapping, "white", 0.85f));
+
+    // Global Color
+    dst.globalColor().vibrance().set(get_dial(src.global_color, "vibrance", 0.5f));
+    dst.globalColor().saturation().set(get_dial(src.global_color, "saturation", 0.5f));
+    dst.globalColor().colourDensity().set(get_dial(src.global_color, "color_density", 0.5f));
+
+    // Selective Color
+    auto set_hsl = [&src, &get_dial](pipe::Body::Link::SelectiveColour::HslAdjust& hsl, const char* color) {
+        std::string hue_key = std::string(color) + "_hue";
+        std::string sat_key = std::string(color) + "_saturation";
+        std::string lum_key = std::string(color) + "_luminance";
+        hsl.hue(get_dial(src.selective_color, hue_key.c_str(), 0.5f));
+        hsl.saturation(get_dial(src.selective_color, sat_key.c_str(), 0.5f));
+        hsl.luminance(get_dial(src.selective_color, lum_key.c_str(), 0.5f));
+    };
+
+    set_hsl(dst.selectiveColour().red(), "red");
+    set_hsl(dst.selectiveColour().orange(), "orange");
+    set_hsl(dst.selectiveColour().yellow(), "yellow");
+    set_hsl(dst.selectiveColour().green(), "green");
+    set_hsl(dst.selectiveColour().cyan(), "cyan");
+    set_hsl(dst.selectiveColour().blue(), "blue");
+    set_hsl(dst.selectiveColour().purple(), "purple");
+    set_hsl(dst.selectiveColour().magenta(), "magenta");
+
+    // Detail
+    dst.detail().sharpen().amount(get_dial(src.detail, "sharpen_amount", 0.5f));
+    dst.detail().sharpen().radius(get_dial(src.detail, "sharpen_radius", 0.5f));
+    dst.detail().denoise().luminance().set(get_dial(src.detail, "denoise_luminance", 0.5f));
+    dst.detail().denoise().chroma().set(get_dial(src.detail, "denoise_chroma", 0.5f));
+
+    // Geometric (if needed)
+    dst.geometric().crop().crop_top(get_dial(src.geometric, "crop_top", 0.0f));
+    dst.geometric().crop().crop_right(get_dial(src.geometric, "crop_right", 0.0f));
+    dst.geometric().crop().crop_bottom(get_dial(src.geometric, "crop_bottom", 0.0f));
+    dst.geometric().crop().crop_left(get_dial(src.geometric, "crop_left", 0.0f));
+    dst.geometric().zoom().scale(get_dial(src.geometric, "scale", 0.0f));
+    dst.geometric().rotation().tiltAngle(get_dial(src.geometric, "tilt_angle", 0.5f));
+}
+
+// Helper to create and upload OpenGL texture from cv::Mat
+static bool upload_texture(State& state, const cv::Mat& bgr) {
+    unload_texture(state);
+
+    if (bgr.empty()) {
+        return false;
+    }
+
+    // Convert BGR to RGBA for OpenGL
+    cv::Mat rgba;
+    cv::cvtColor(bgr, rgba, cv::COLOR_BGR2RGBA);
+
+    // Ensure continuous data for OpenGL
+    if (!rgba.isContinuous()) {
+        rgba = rgba.clone();
+    }
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Set pixel unpack alignment (OpenGL default is 4, but our rows may not be aligned)
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba.cols, rgba.rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);  // Restore default
+
+    state.texture.id = texture;
+    state.texture.width = rgba.cols;
+    state.texture.height = rgba.rows;
+    state.texture.loaded = true;
+
+    return true;
+}
+
+bool render_to_texture(State& state, const Project& project, int size) {
+    std::string size_str = (size == 0) ? "full" : std::to_string(size) + "px";
+    state.status_message = "Rendering (" + size_str + "): " + project.name;
+    state.is_working = true;
 
     pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
     if (!sink) {
         state.error_message = "Failed to read: " + project.name;
+        state.is_working = false;
         return false;
     }
 
@@ -385,15 +485,75 @@ bool render_project(State& state, const Project& project) {
     pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
     if (!head) {
         state.error_message = "Failed to decode: " + project.name;
+        state.is_working = false;
         return false;
     }
 
-    if (!head->body().tail().save(project.png_path.string())) {
-        state.error_message = "Failed to save: " + project.name;
+    // Get body at working size (scales data BEFORE processing for speed)
+    pipe::Body& body = head->body(size);
+
+    // Add links and apply dial values
+    for (const auto& link : project.links) {
+        pipe::Body::Link& pipe_link = body.add(link.name);
+        apply_link_dials(link, pipe_link);
+    }
+
+    // Get display-ready view from body (runs pipe at working size, gamma encodes)
+    pipe::View display = body.view();
+
+    // Copy to CPU and upload to OpenGL
+    cv::Mat cpu;
+    display.copyTo(cpu);
+
+
+    if (!upload_texture(state, cpu)) {
+        state.error_message = "Failed to upload texture: " + project.name;
+        state.is_working = false;
         return false;
     }
 
-    state.status_message = "Rendered: " + project.name;
+    state.status_message = "Rendered (" + size_str + "): " + project.name;
+    state.is_working = false;
+    return true;
+}
+
+bool export_project(State& state, const Project& project) {
+    state.status_message = "Exporting: " + project.name;
+    state.is_working = true;
+
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
+    if (!sink) {
+        state.error_message = "Failed to read: " + project.name;
+        state.is_working = false;
+        return false;
+    }
+
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
+        state.error_message = "Failed to decode: " + project.name;
+        state.is_working = false;
+        return false;
+    }
+
+    // Get body
+    pipe::Body& body = head->body();
+
+    // Add links and apply dial values
+    for (const auto& link : project.links) {
+        pipe::Body::Link& pipe_link = body.add(link.name);
+        apply_link_dials(link, pipe_link);
+    }
+
+    // Save full resolution PNG
+    if (!body.tail().save(project.png_path.string(), 0)) {
+        state.error_message = "Failed to export: " + project.name;
+        state.is_working = false;
+        return false;
+    }
+
+    state.status_message = "Exported: " + project.name;
+    state.is_working = false;
     return true;
 }
 
@@ -440,6 +600,83 @@ void unload_texture(State& state) {
         glDeleteTextures(1, &tex);
     }
     state.texture.reset();
+}
+
+void unload_embedded_texture(State& state) {
+    if (state.embedded_texture.loaded && state.embedded_texture.id != 0) {
+        GLuint tex = state.embedded_texture.id;
+        glDeleteTextures(1, &tex);
+    }
+    state.embedded_texture.reset();
+    state.has_embedded = false;
+}
+
+bool load_embedded_preview(State& state, const Project& project) {
+    unload_embedded_texture(state);
+    state.has_embedded = false;
+
+    if (!fs::exists(project.raw_path)) {
+        return false;
+    }
+
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
+    if (!sink) {
+        return false;
+    }
+
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
+        return false;
+    }
+
+    // Get embedded preview view
+    pipe::View view = head->view().view();
+    if (view.empty()) {
+        return false;
+    }
+
+    // Convert UMat to Mat for OpenGL upload
+    cv::Mat cpu;
+    view.copyTo(cpu);
+
+    if (cpu.empty()) {
+        return false;
+    }
+
+    // Convert to RGBA for OpenGL
+    cv::Mat rgba;
+    if (cpu.channels() == 3) {
+        cv::cvtColor(cpu, rgba, cv::COLOR_BGR2RGBA);
+    } else if (cpu.channels() == 4) {
+        rgba = cpu;
+    } else {
+        return false;
+    }
+
+    // Convert to 8-bit if needed
+    if (rgba.depth() != CV_8U) {
+        cv::Mat temp;
+        rgba.convertTo(temp, CV_8UC4, 255.0);
+        rgba = temp;
+    }
+
+    GLuint texture;
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba.cols, rgba.rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
+
+    state.embedded_texture.id = texture;
+    state.embedded_texture.width = rgba.cols;
+    state.embedded_texture.height = rgba.rows;
+    state.embedded_texture.loaded = true;
+    state.has_embedded = true;
+
+    return true;
 }
 
 // ============================================================

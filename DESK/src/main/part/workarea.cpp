@@ -31,21 +31,28 @@ void render_work_area(State& state) {
     // Get available space
     ImVec2 avail = ImGui::GetContentRegionAvail();
 
-    // Calculate image size maintaining aspect ratio
-    float img_aspect = static_cast<float>(state.texture.width) /
-                       static_cast<float>(state.texture.height);
-    float avail_aspect = avail.x / avail.y;
-
-    float display_w, display_h;
-    if (img_aspect > avail_aspect) {
-        // Image is wider than available space
-        display_w = avail.x;
-        display_h = avail.x / img_aspect;
-    } else {
-        // Image is taller than available space
-        display_h = avail.y;
-        display_w = avail.y * img_aspect;
+    // Sanity check - ensure we have valid space
+    if (avail.x <= 0 || avail.y <= 0) {
+        return;
     }
+
+    // Calculate image size maintaining aspect ratio, fitting within available space
+    float img_w = static_cast<float>(state.texture.width);
+    float img_h = static_cast<float>(state.texture.height);
+
+    if (img_w <= 0 || img_h <= 0) {
+        return;
+    }
+
+    float scale_x = avail.x / img_w;
+    float scale_y = avail.y / img_h;
+    float scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+    // Never upscale beyond 1:1
+    if (scale > 1.0f) scale = 1.0f;
+
+    float display_w = img_w * scale;
+    float display_h = img_h * scale;
 
     // Center the image
     float offset_x = (avail.x - display_w) * 0.5f;
@@ -55,7 +62,7 @@ void render_work_area(State& state) {
     ImGui::SetCursorPos(ImVec2(cursor.x + offset_x, cursor.y + offset_y));
 
     // Display the image
-    ImGui::Image(static_cast<ImTextureID>(state.texture.id), ImVec2(display_w, display_h));
+    ImGui::Image((ImTextureID)(intptr_t)state.texture.id, ImVec2(display_w, display_h));
 
     // Show image info on hover
     if (ImGui::IsItemHovered()) {

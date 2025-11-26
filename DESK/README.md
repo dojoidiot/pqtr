@@ -24,8 +24,9 @@ DESK is for professionals and enthusiasts who want full control over RAW process
 - **Project Management**: Organize RAW files with sidecar-based structure
 - **Pipe Editor**: Visual editor for HEAD → BODY → TAIL pipeline
 - **Link Editor**: 6 modules with 45 dials per Link
-- **Live Preview**: Output PNG updates on dial changes
-- **Style Export**: Save styles for use in PLAY
+- **Live Preview**: In-memory rendering at selectable preview sizes (512–4096px or full)
+- **Export**: Full-resolution PNG output on demand
+- **Style Export**: Save styles as `.pipe.json` for use in PLAY
 
 ## Architecture
 

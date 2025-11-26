@@ -68,9 +68,11 @@ struct Project {
 // ============================================================
 
 struct PanelVisibility {
-    bool projects = false;
-    bool info = false;
-    bool link_editor = false;
+    bool workspace = false;    // RAW file list
+    bool pipe = false;         // Pipe tree (Links/Modules/Dials)
+    bool info = false;         // RAW metadata
+    bool link_editor = false;  // Slider equalizer
+    bool embedded = false;     // Embedded camera preview
 };
 
 // ============================================================
@@ -123,15 +125,24 @@ struct State {
     // Panel visibility
     PanelVisibility panels;
 
-    // Image texture
-    Texture texture;
+    // Image textures
+    Texture texture;           // Main rendered image
+    Texture embedded_texture;  // Embedded camera preview
+    bool has_embedded = false; // True if RAW has embedded preview
 
     // RAW metadata
     Info raw_info;
 
+    // Render settings
+    int working_size = 1024;       // Max dimension for preview renders (0 = full)
+    static constexpr int WORKING_SIZES[] = {512, 1024, 2048, 4096, 0};
+    static constexpr int WORKING_SIZE_COUNT = 5;
+
     // Status
     bool needs_refresh = false;
     bool needs_reprocess = false;
+    bool needs_export = false;     // Full-size export requested
+    bool is_working = false;       // True while rendering
     std::string status_message;
     std::string error_message;
 

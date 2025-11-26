@@ -13,12 +13,16 @@ void apply_theme();
 constexpr float PANEL_ALPHA = 0.85f;
 
 // Panel dimensions (initial sizes, user can resize)
-constexpr float PROJECTS_PANEL_WIDTH = 280.0f;
-constexpr float PROJECTS_PANEL_HEIGHT = 400.0f;
+constexpr float WORKSPACE_PANEL_WIDTH = 220.0f;
+constexpr float WORKSPACE_PANEL_HEIGHT = 300.0f;
+constexpr float PIPE_PANEL_WIDTH = 300.0f;
+constexpr float PIPE_PANEL_HEIGHT = 400.0f;
 constexpr float INFO_PANEL_WIDTH = 280.0f;
 constexpr float INFO_PANEL_HEIGHT = 250.0f;
-constexpr float LINK_EDITOR_WIDTH = 500.0f;
-constexpr float LINK_EDITOR_HEIGHT = 220.0f;
+constexpr float LINK_EDITOR_WIDTH = 800.0f;
+constexpr float LINK_EDITOR_HEIGHT = 180.0f;
+constexpr float EMBEDDED_PANEL_WIDTH = 400.0f;
+constexpr float EMBEDDED_PANEL_HEIGHT = 300.0f;
 
 // Menu bar height
 constexpr float MENU_BAR_HEIGHT = 30.0f;

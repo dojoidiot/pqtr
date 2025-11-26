@@ -62,8 +62,13 @@ void render_menu_bar(desk::State& state, int display_w) {
     bool folder_set = state.project_folder_set;
     ImGui::BeginDisabled(!folder_set);
 
-    if (ImGui::Button(state.panels.projects ? "Projects [x]" : "Projects [ ]")) {
-        state.panels.projects = !state.panels.projects;
+    if (ImGui::Button(state.panels.workspace ? "Workspace [x]" : "Workspace [ ]")) {
+        state.panels.workspace = !state.panels.workspace;
+    }
+    ImGui::SameLine();
+
+    if (ImGui::Button(state.panels.pipe ? "Pipe [x]" : "Pipe [ ]")) {
+        state.panels.pipe = !state.panels.pipe;
     }
     ImGui::SameLine();
 
@@ -76,7 +81,57 @@ void render_menu_bar(desk::State& state, int display_w) {
         state.panels.link_editor = !state.panels.link_editor;
     }
 
+    // Embedded preview button (only enabled if RAW has embedded)
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.has_embedded);
+    if (ImGui::Button(state.panels.embedded ? "Embedded [x]" : "Embedded [ ]")) {
+        state.panels.embedded = !state.panels.embedded;
+    }
     ImGui::EndDisabled();
+
+    ImGui::EndDisabled();  // End folder_set disable
+
+    // Separator
+    ImGui::SameLine();
+    ImGui::TextDisabled("|");
+    ImGui::SameLine();
+
+    // Working size selector
+    ImGui::Text("Preview:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(70);
+
+    // Find current index
+    int size_idx = 1;  // Default to 1024
+    for (int i = 0; i < desk::State::WORKING_SIZE_COUNT; i++) {
+        if (desk::State::WORKING_SIZES[i] == state.working_size) {
+            size_idx = i;
+            break;
+        }
+    }
+
+    const char* size_labels[] = {"512", "1024", "2048", "4096", "Full"};
+    if (ImGui::BeginCombo("##worksize", size_labels[size_idx], ImGuiComboFlags_NoArrowButton)) {
+        for (int i = 0; i < desk::State::WORKING_SIZE_COUNT; i++) {
+            bool selected = (i == size_idx);
+            if (ImGui::Selectable(size_labels[i], selected)) {
+                state.working_size = desk::State::WORKING_SIZES[i];
+            }
+            if (selected) ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    // Export button (full resolution render)
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.has_project() || state.is_working);
+    if (ImGui::Button("Export")) {
+        state.needs_export = true;
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered() && !state.is_working) {
+        ImGui::SetTooltip("Render at full resolution");
+    }
 
     // Status message on right side
     if (!state.status_message.empty()) {
@@ -126,22 +181,42 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
 
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, desk::PANEL_ALPHA);
 
-    // Projects Panel
-    if (state.panels.projects) {
+    // Workspace Panel (RAW file list)
+    if (state.panels.workspace) {
         ImGui::SetNextWindowPos(ImVec2(10, content_y + 10), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(
-            ImVec2(desk::PROJECTS_PANEL_WIDTH, desk::PROJECTS_PANEL_HEIGHT),
+            ImVec2(desk::WORKSPACE_PANEL_WIDTH, desk::WORKSPACE_PANEL_HEIGHT),
             ImGuiCond_FirstUseEver);
 
-        ImGui::Begin("Projects", &state.panels.projects, ImGuiWindowFlags_NoCollapse);
-        selection_changed = desk::render_projects_panel(state);
+        ImGui::Begin("Workspace", &state.panels.workspace, ImGuiWindowFlags_NoCollapse);
+        selection_changed |= desk::render_workspace_panel(state);
+        ImGui::End();
+    }
+
+    // Pipe Panel (Links/Modules/Dials tree)
+    if (state.panels.pipe) {
+        // Build title with RAW filename
+        std::string pipe_title = "Pipe";
+        if (state.has_project()) {
+            pipe_title = "Pipe: " + state.current_project().name;
+        }
+
+        ImGui::SetNextWindowPos(
+            ImVec2(10, content_y + desk::WORKSPACE_PANEL_HEIGHT + 20),
+            ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(
+            ImVec2(desk::PIPE_PANEL_WIDTH, desk::PIPE_PANEL_HEIGHT),
+            ImGuiCond_FirstUseEver);
+
+        ImGui::Begin(pipe_title.c_str(), &state.panels.pipe, ImGuiWindowFlags_NoCollapse);
+        selection_changed |= desk::render_pipe_panel(state);
         ImGui::End();
     }
 
     // Info Panel
     if (state.panels.info) {
         ImGui::SetNextWindowPos(
-            ImVec2(10, content_y + desk::PROJECTS_PANEL_HEIGHT + 20),
+            ImVec2(display_w - desk::INFO_PANEL_WIDTH - 10, content_y + 10),
             ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(
             ImVec2(desk::INFO_PANEL_WIDTH, desk::INFO_PANEL_HEIGHT),
@@ -154,6 +229,15 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
 
     // Link Editor Panel
     if (state.panels.link_editor) {
+        // Build title with RAW and Link name
+        std::string editor_title = "Link Editor";
+        if (state.has_project() && state.selection.link >= 0) {
+            const auto& proj = state.current_project();
+            if (state.selection.link < static_cast<int>(proj.links.size())) {
+                editor_title = proj.name + " > " + proj.links[state.selection.link].name;
+            }
+        }
+
         float editor_x = (display_w - desk::LINK_EDITOR_WIDTH) / 2.0f;
         float editor_y = display_h - desk::LINK_EDITOR_HEIGHT - 20;
         ImGui::SetNextWindowPos(ImVec2(editor_x, editor_y), ImGuiCond_FirstUseEver);
@@ -161,12 +245,74 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             ImVec2(desk::LINK_EDITOR_WIDTH, desk::LINK_EDITOR_HEIGHT),
             ImGuiCond_FirstUseEver);
 
-        ImGui::Begin("Link Editor", &state.panels.link_editor, ImGuiWindowFlags_NoCollapse);
-        desk::render_module_menus(state);
+        ImGui::Begin(editor_title.c_str(), &state.panels.link_editor, ImGuiWindowFlags_NoCollapse);
+        selection_changed |= desk::render_module_menus(state);
+        ImGui::End();
+    }
+
+    // Embedded Preview Panel
+    if (state.panels.embedded && state.has_embedded && state.embedded_texture.loaded) {
+        ImGui::SetNextWindowPos(
+            ImVec2(display_w - desk::EMBEDDED_PANEL_WIDTH - 10,
+                   display_h - desk::EMBEDDED_PANEL_HEIGHT - 20),
+            ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(
+            ImVec2(desk::EMBEDDED_PANEL_WIDTH, desk::EMBEDDED_PANEL_HEIGHT),
+            ImGuiCond_FirstUseEver);
+
+        std::string emb_title = "Embedded Preview";
+        if (state.has_project()) {
+            emb_title = "Embedded: " + state.current_project().name;
+        }
+
+        ImGui::Begin(emb_title.c_str(), &state.panels.embedded, ImGuiWindowFlags_NoCollapse);
+
+        // Display embedded image scaled to fit
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float img_aspect = static_cast<float>(state.embedded_texture.width) / state.embedded_texture.height;
+        float win_aspect = avail.x / avail.y;
+
+        float disp_w, disp_h;
+        if (img_aspect > win_aspect) {
+            disp_w = avail.x;
+            disp_h = avail.x / img_aspect;
+        } else {
+            disp_h = avail.y;
+            disp_w = avail.y * img_aspect;
+        }
+
+        // Center the image
+        float offset_x = (avail.x - disp_w) * 0.5f;
+        float offset_y = (avail.y - disp_h) * 0.5f;
+        ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + offset_x, ImGui::GetCursorPosY() + offset_y));
+
+        ImGui::Image((ImTextureID)(intptr_t)state.embedded_texture.id, ImVec2(disp_w, disp_h));
+
         ImGui::End();
     }
 
     ImGui::PopStyleVar();
+
+    // Working overlay (drawn outside panel alpha)
+    if (state.is_working) {
+        ImVec2 center(display_w * 0.5f, display_h * 0.5f);
+        ImGui::SetNextWindowPos(center, ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+        ImGui::SetNextWindowSize(ImVec2(200, 60));
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.1f, 0.1f, 0.1f, 0.9f));
+        ImGui::Begin("##Working", nullptr,
+            ImGuiWindowFlags_NoTitleBar |
+            ImGuiWindowFlags_NoResize |
+            ImGuiWindowFlags_NoMove |
+            ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoCollapse);
+
+        ImGui::SetCursorPosX((200 - ImGui::CalcTextSize("Working...").x) * 0.5f);
+        ImGui::SetCursorPosY(20);
+        ImGui::Text("Working...");
+
+        ImGui::End();
+        ImGui::PopStyleColor();
+    }
 
     return selection_changed;
 }
@@ -187,7 +333,7 @@ void process_file_dialogs(desk::State& state) {
             state.project_folder_set = true;
             desk::scan_projects(state);
             if (!state.projects.empty()) {
-                state.panels.projects = true;
+                state.panels.workspace = true;
             }
         }
         ImGuiFileDialog::Instance()->Close();
@@ -201,7 +347,7 @@ void process_file_dialogs(desk::State& state) {
             std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
             desk::create_project(state, path);
             desk::scan_projects(state);  // Refresh project list
-            state.panels.projects = true;
+            state.panels.workspace = true;
         }
         ImGuiFileDialog::Instance()->Close();
     }
@@ -212,9 +358,23 @@ void process_file_dialogs(desk::State& state) {
 // ============================================================
 
 void handle_selection_change(desk::State& state, int& prev_project, bool selection_changed) {
-    namespace fs = std::filesystem;
+    bool project_changed = (selection_changed || state.selection.project != prev_project);
 
-    if (!selection_changed && state.selection.project == prev_project) {
+    // Handle full-size export request (saves PNG)
+    if (state.needs_export && state.has_project()) {
+        const auto& proj = state.current_project();
+        desk::export_project(state, proj);
+        state.needs_export = false;
+    }
+
+    // Handle reprocess request (e.g., slider changed) - render to texture
+    if (state.needs_reprocess && state.has_project()) {
+        const auto& proj = state.current_project();
+        desk::render_to_texture(state, proj, state.working_size);
+        state.needs_reprocess = false;
+    }
+
+    if (!project_changed) {
         return;
     }
 
@@ -226,15 +386,14 @@ void handle_selection_change(desk::State& state, int& prev_project, bool selecti
         // Load RAW metadata
         desk::load_raw_info(state, proj);
 
-        // Render if PNG missing or reprocess requested
-        if (!fs::exists(proj.png_path) || state.needs_reprocess) {
-            desk::render_project(state, proj);
-            state.needs_reprocess = false;
-        }
+        // Load embedded preview (if available)
+        desk::load_embedded_preview(state, proj);
 
-        desk::load_texture(state, proj.png_path);
+        // Render to texture at working size (no PNG involved)
+        desk::render_to_texture(state, proj, state.working_size);
     } else {
         desk::unload_texture(state);
+        desk::unload_embedded_texture(state);
         state.raw_info.clear();
     }
 }
@@ -341,6 +500,7 @@ int main(int argc, char** argv) {
 
     // Cleanup
     desk::unload_texture(state);
+    desk::unload_embedded_texture(state);
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

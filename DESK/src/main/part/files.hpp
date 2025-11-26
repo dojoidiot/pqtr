@@ -34,8 +34,12 @@ bool save_pipe_json(const Project& project);
 // Create new project from RAW file (copies to root, creates sidecars)
 bool create_project(State& state, const std::filesystem::path& raw_file);
 
-// Render project through LABS pipe (RAW -> PNG)
-bool render_project(State& state, const Project& project);
+// Render project through LABS pipe directly to texture (no PNG)
+// size: max dimension (0 = full resolution)
+bool render_to_texture(State& state, const Project& project, int size = 0);
+
+// Export project to PNG file (full resolution)
+bool export_project(State& state, const Project& project);
 
 // ============================================================
 // Texture Operations
@@ -46,6 +50,12 @@ bool load_texture(State& state, const std::filesystem::path& png_path);
 
 // Unload current texture
 void unload_texture(State& state);
+
+// Load embedded preview from RAW (if available)
+bool load_embedded_preview(State& state, const Project& project);
+
+// Unload embedded texture
+void unload_embedded_texture(State& state);
 
 // ============================================================
 // RAW Metadata

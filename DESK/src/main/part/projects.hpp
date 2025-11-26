@@ -1,5 +1,4 @@
-// projects.hpp - Projects panel component
-// Left floating panel showing project tree with links
+// projects.hpp - Workspace and Pipe panel components
 
 #pragma once
 
@@ -7,9 +6,13 @@
 
 namespace desk {
 
-// Render the projects panel (tree view of RAW files and links)
+// Render the workspace panel (list of RAW files)
 // Returns true if selection changed
-bool render_projects_panel(State& state);
+bool render_workspace_panel(State& state);
+
+// Render the pipe panel (tree of Links/Modules/Dials for selected RAW)
+// Returns true if selection changed
+bool render_pipe_panel(State& state);
 
 // Render RAW metadata info panel (scrolling table)
 void render_info_panel(State& state);

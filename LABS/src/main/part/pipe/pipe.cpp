@@ -24,6 +24,60 @@ namespace pipe
 {
 
 // ============================================================
+// Gamma Encoding (linear → sRGB display)
+// ============================================================
+
+static bool applyGamma(const cv::UMat& linear, cv::UMat& gamma)
+{
+    cv::UMat clamped;
+    cv::max(linear, 0.0f, clamped);
+
+    cv::UMat lowMask, highMask;
+    cv::compare(clamped, 0.0031308f, lowMask, cv::CMP_LE);
+    cv::compare(clamped, 0.0031308f, highMask, cv::CMP_GT);
+
+    cv::UMat lowPart, highPart;
+    cv::multiply(clamped, 12.92f, lowPart);
+
+    cv::UMat temp;
+    cv::pow(clamped, 1.0f / 2.4f, temp);
+    cv::multiply(temp, 1.055f, temp);
+    cv::subtract(temp, 0.055f, highPart);
+
+    gamma.create(linear.size(), linear.type());
+    lowPart.copyTo(gamma, lowMask);
+    highPart.copyTo(gamma, highMask);
+
+    return true;
+}
+
+// Convert linear scene data to 8-bit BGR for display
+static View toDisplayView(const View& linear, int max_dim = 0)
+{
+    View scaled = linear;
+
+    // Scale if requested
+    if (max_dim > 0)
+    {
+        float scale = (float)max_dim / std::max(linear.cols, linear.rows);
+        if (scale < 1.0f)
+        {
+            View small;
+            cv::resize(linear, small, cv::Size(), scale, scale, cv::INTER_AREA);
+            scaled = small;
+        }
+    }
+
+    cv::UMat gamma;
+    applyGamma(scaled, gamma);
+
+    cv::UMat out8;
+    gamma.convertTo(out8, CV_8UC3, 255.0);
+
+    return out8;
+}
+
+// ============================================================
 // DataImpl
 // ============================================================
 
@@ -484,56 +538,70 @@ public:
 };
 
 // ============================================================
-// TailImpl
+// TailImpl - Has access to full-res data and links for export
 // ============================================================
 
 class TailImpl : public Tail
 {
-    DataImpl& m_data;
-
-    // sRGB gamma OETF (linear → display)
-    static bool applyGamma(const cv::UMat& linear, cv::UMat& gamma)
-    {
-        cv::UMat clamped;
-        cv::max(linear, 0.0f, clamped);
-
-        cv::UMat lowMask, highMask;
-        cv::compare(clamped, 0.0031308f, lowMask, cv::CMP_LE);
-        cv::compare(clamped, 0.0031308f, highMask, cv::CMP_GT);
-
-        cv::UMat lowPart, highPart;
-        cv::multiply(clamped, 12.92f, lowPart);
-
-        cv::UMat temp;
-        cv::pow(clamped, 1.0f / 2.4f, temp);
-        cv::multiply(temp, 1.055f, temp);
-        cv::subtract(temp, 0.055f, highPart);
-
-        gamma.create(linear.size(), linear.type());
-        lowPart.copyTo(gamma, lowMask);
-        highPart.copyTo(gamma, highMask);
-
-        return true;
-    }
+    DataImpl& m_full_data;  // Full resolution from Head
+    std::vector<std::unique_ptr<LinkImpl>>& m_links;
 
 public:
-    TailImpl(DataImpl& data) : m_data(data) {}
+    TailImpl(DataImpl& full_data, std::vector<std::unique_ptr<LinkImpl>>& links)
+        : m_full_data(full_data), m_links(links) {}
 
-    bool save(const std::string& path) override
+    bool save(const std::string& path, int max_dim) override
     {
-        View linear = m_data.view();
+        // Run pipeline on full-res data at requested output size
+        View linear = m_full_data.view();
 
-        cv::UMat gamma;
-        if (!applyGamma(linear, gamma))
-            return false;
+        // Scale to output size BEFORE processing
+        if (max_dim > 0)
+        {
+            float scale = (float)max_dim / std::max(linear.cols, linear.rows);
+            if (scale < 1.0f)
+            {
+                View small;
+                cv::resize(linear, small, cv::Size(), scale, scale, cv::INTER_AREA);
+                linear = small;
+            }
+        }
 
-        cv::UMat out8;
-        gamma.convertTo(out8, CV_8UC3, 255.0);
+        // Run all links
+        for (auto& link : m_links)
+            linear = link->run(linear);
+
+        // Convert to display format and save
+        View display = toDisplayView(linear);
 
         cv::Mat cpu;
-        out8.copyTo(cpu);
+        display.copyTo(cpu);
 
         return cv::imwrite(path, cpu);
+    }
+
+    View view(int max_dim) override
+    {
+        // Run pipeline on full-res data at requested output size
+        View linear = m_full_data.view();
+
+        // Scale to output size BEFORE processing
+        if (max_dim > 0)
+        {
+            float scale = (float)max_dim / std::max(linear.cols, linear.rows);
+            if (scale < 1.0f)
+            {
+                View small;
+                cv::resize(linear, small, cv::Size(), scale, scale, cv::INTER_AREA);
+                linear = small;
+            }
+        }
+
+        // Run all links
+        for (auto& link : m_links)
+            linear = link->run(linear);
+
+        return toDisplayView(linear);
     }
 };
 
@@ -543,13 +611,14 @@ public:
 
 class BodyImpl : public Body
 {
-    DataImpl& m_data;
+    DataImpl& m_working;    // Working size data for preview
+    DataImpl& m_full;       // Full resolution data for export
     std::vector<std::unique_ptr<LinkImpl>> m_links;
     std::unique_ptr<IteratorImpl> m_iterator;
     std::unique_ptr<TailImpl> m_tail;
 
 public:
-    BodyImpl(DataImpl& data) : m_data(data) {}
+    BodyImpl(DataImpl& working, DataImpl& full) : m_working(working), m_full(full) {}
 
     Link& add(Name name) override
     {
@@ -571,17 +640,23 @@ public:
         return *m_iterator;
     }
 
-    Data& data() override { return m_data; }
+    Data& data() override { return m_working; }
+
+    View view(int max_dim = 0) override
+    {
+        // Run all links on working size data
+        View linear = m_working.view();
+        for (auto& link : m_links)
+            linear = link->run(linear);
+
+        // Return display-ready 8-bit BGR, optionally scaled further
+        return toDisplayView(linear, max_dim);
+    }
 
     Tail& tail() override
     {
-        // Run all links (each link only runs its active modules)
-        View view = m_data.view();
-        for (auto& link : m_links)
-            view = link->run(view);
-        m_data.setView(view);
-
-        if (!m_tail) m_tail = std::make_unique<TailImpl>(m_data);
+        // Tail gets full-res data and links for export at any size
+        if (!m_tail) m_tail = std::make_unique<TailImpl>(m_full, m_links);
         return *m_tail;
     }
 };
@@ -592,9 +667,11 @@ public:
 
 class HeadImpl : public Head
 {
-    DataImpl m_data;  // Scene-linear RGB + full metadata
-    DataImpl m_view;  // Embedded preview + view-specific metadata
+    DataImpl m_data;      // Scene-linear RGB + full metadata (full resolution)
+    DataImpl m_view;      // Embedded preview + view-specific metadata
+    DataImpl m_working;   // Scaled working copy for preview processing
     std::unique_ptr<BodyImpl> m_body;
+    int m_current_working_size = 0;
 public:
     HeadImpl(Info dataInfo, View dataView, Info viewInfo, View viewImage)
         : m_data(std::move(dataInfo), std::move(dataView))
@@ -603,9 +680,39 @@ public:
     Data& data() override { return m_data; }
     Data& view() override { return m_view; }
 
-    Body& body() override
+    Body& body(int working_size = 0) override
     {
-        if (!m_body) m_body = std::make_unique<BodyImpl>(m_data);
+        // If working_size changed or body doesn't exist, create/recreate
+        if (!m_body || working_size != m_current_working_size)
+        {
+            m_current_working_size = working_size;
+
+            // Get full resolution data
+            View full = m_data.view();
+
+            if (working_size > 0)
+            {
+                // Scale down for faster preview processing
+                float scale = (float)working_size / std::max(full.cols, full.rows);
+                if (scale < 1.0f)
+                {
+                    View small;
+                    cv::resize(full, small, cv::Size(), scale, scale, cv::INTER_AREA);
+                    m_working = DataImpl(m_data.info(), std::move(small));
+                }
+                else
+                {
+                    m_working = DataImpl(m_data.info(), full);
+                }
+            }
+            else
+            {
+                m_working = DataImpl(m_data.info(), full);
+            }
+
+            // Body gets working data for preview, full data for export via tail
+            m_body = std::make_unique<BodyImpl>(m_working, m_data);
+        }
         return *m_body;
     }
 };

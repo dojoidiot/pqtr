@@ -1,4 +1,4 @@
-// projects.cpp - Projects panel implementation
+// projects.cpp - Workspace and Pipe panel implementation
 
 #include "projects.hpp"
 #include "files.hpp"
@@ -8,171 +8,351 @@
 namespace desk {
 
 // ============================================================
-// Projects Panel
+// Workspace Panel - Simple list of RAW files
 // ============================================================
 
-bool render_projects_panel(State& state) {
+bool render_workspace_panel(State& state) {
     bool selection_changed = false;
 
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Projects");
-
-    // Add project button
-    ImGui::SameLine(ImGui::GetWindowWidth() - 30);
-    if (ImGui::SmallButton("+##add_project")) {
+    // Add RAW button
+    if (ImGui::SmallButton("+##add_raw")) {
         if (state.project_folder_set) {
             open_raw_file_dialog(state);
         }
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Add RAW file to project");
+        ImGui::SetTooltip("Add RAW file");
     }
 
     ImGui::Separator();
 
     if (!state.project_folder_set) {
-        ImGui::TextWrapped("No project folder set.\n\nClick New Project to add a RAW file.");
+        ImGui::TextWrapped("No folder set.\n\nClick 'Open Folder' to select a workspace.");
         return false;
     }
 
     if (state.projects.empty()) {
-        ImGui::TextWrapped("No projects found.\n\nClick + to add a RAW file.");
+        ImGui::TextWrapped("No RAW files.\n\nClick + to add a RAW file.");
         return false;
     }
 
-    // Project tree
+    // Simple selectable list of RAW files
     for (int p = 0; p < static_cast<int>(state.projects.size()); p++) {
         Project& proj = state.projects[p];
 
         ImGui::PushID(p);
 
-        // Tree node flags
-        ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow |
-                                   ImGuiTreeNodeFlags_OpenOnDoubleClick;
-        if (state.selection.project == p && state.selection.link == -1) {
-            flags |= ImGuiTreeNodeFlags_Selected;
-        }
-        if (proj.links.empty()) {
-            flags |= ImGuiTreeNodeFlags_Leaf;
-        }
+        bool is_selected = (state.selection.project == p);
 
-        bool node_open = ImGui::TreeNodeEx(proj.name.c_str(), flags);
-
-        // Select project on click
-        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        if (ImGui::Selectable(proj.name.c_str(), is_selected)) {
             if (state.selection.project != p) {
                 state.selection.project = p;
                 state.selection.link = -1;
                 selection_changed = true;
+                // Auto-open pipe panel when selecting a RAW
+                state.panels.pipe = true;
             }
         }
 
-        // Project buttons
-        ImGui::SameLine(ImGui::GetWindowWidth() - 60);
-
-        // Add link button
-        if (ImGui::SmallButton("+##add_link")) {
-            proj.links.push_back(Link("New Link"));
-            save_pipe_json(proj);
-            state.needs_reprocess = true;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Add Link");
-        }
-
-        ImGui::SameLine();
-
-        // Hide project button
-        if (ImGui::SmallButton("-##hide")) {
-            proj.hidden = true;
-            save_desk_json(proj);
-            if (state.selection.project == p) {
-                state.selection.project = -1;
-                state.selection.link = -1;
-                selection_changed = true;
+        // Context menu for hiding
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Hide")) {
+                proj.hidden = true;
+                save_desk_json(proj);
+                if (state.selection.project == p) {
+                    state.selection.project = -1;
+                    state.selection.link = -1;
+                    selection_changed = true;
+                }
+                state.projects.erase(state.projects.begin() + p);
+                p--;
             }
-            state.projects.erase(state.projects.begin() + p);
-            p--;
-            ImGui::PopID();
-            if (node_open) ImGui::TreePop();
-            continue;
-        }
-        if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Hide Project");
+            ImGui::EndPopup();
         }
 
-        // Links under project
-        if (node_open) {
-            for (int l = 0; l < static_cast<int>(proj.links.size()); l++) {
-                Link& link = proj.links[l];
+        ImGui::PopID();
+    }
 
-                ImGui::PushID(l);
+    return selection_changed;
+}
 
-                ImGuiTreeNodeFlags link_flags = ImGuiTreeNodeFlags_Leaf |
-                                                ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (state.selection.project == p && state.selection.link == l) {
-                    link_flags |= ImGuiTreeNodeFlags_Selected;
+// ============================================================
+// Pipe Panel - Tree of Links/Modules/Dials
+// ============================================================
+
+// Module dial definitions for tree display
+struct DialDef {
+    const char* name;
+    const char* key;
+};
+
+static const DialDef COLOR_CORRECTION_DIALS[] = {
+    {"Exposure", "exposure"},
+    {"Temperature", "temperature"},
+    {"Tint", "tint"},
+};
+
+static const DialDef TONE_MAPPING_DIALS[] = {
+    {"Contrast", "contrast"},
+    {"Highlights", "highlights"},
+    {"Shadows", "shadows"},
+    {"Black", "black"},
+    {"White", "white"},
+};
+
+static const DialDef GLOBAL_COLOR_DIALS[] = {
+    {"Vibrance", "vibrance"},
+    {"Saturation", "saturation"},
+    {"Density", "color_density"},
+};
+
+static const DialDef DETAIL_DIALS[] = {
+    {"Sharp Amt", "sharpen_amount"},
+    {"Sharp Rad", "sharpen_radius"},
+    {"Denoise L", "denoise_luminance"},
+    {"Denoise C", "denoise_chroma"},
+};
+
+// Check if dial differs from default (0.5 for most, special cases handled)
+static bool dial_is_set(const char* key, float value) {
+    // Special defaults
+    if (strcmp(key, "black") == 0) return value != 0.15f;
+    if (strcmp(key, "white") == 0) return value != 0.85f;
+    if (strcmp(key, "crop_top") == 0 || strcmp(key, "crop_right") == 0 ||
+        strcmp(key, "crop_bottom") == 0 || strcmp(key, "crop_left") == 0)
+        return value != 0.0f;
+    // Default is 0.5
+    return value != 0.5f;
+}
+
+// Render dials for a module, returns true if any dial was clicked
+static bool render_module_dials(const Module& mod, const DialDef* dials, int count,
+                                State& state, int link_idx, int mod_idx) {
+    bool changed = false;
+
+    for (int d = 0; d < count; d++) {
+        auto it = mod.dials.find(dials[d].key);
+        if (it == mod.dials.end()) continue;
+
+        float value = it->second;
+        bool is_set = dial_is_set(dials[d].key, value);
+
+        ImGui::PushID(d);
+
+        // Only show dials that are set (non-default)
+        if (is_set) {
+            ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf |
+                                       ImGuiTreeNodeFlags_NoTreePushOnOpen;
+
+            // Highlight if this dial is selected in editor
+            if (state.selection.link == link_idx &&
+                state.selection.module == mod_idx &&
+                state.selection.dial == d) {
+                flags |= ImGuiTreeNodeFlags_Selected;
+            }
+
+            char label[64];
+            snprintf(label, sizeof(label), "%s: %.2f", dials[d].name, value);
+            ImGui::TreeNodeEx(label, flags);
+
+            if (ImGui::IsItemClicked()) {
+                state.selection.link = link_idx;
+                state.selection.module = mod_idx;
+                state.selection.dial = d;
+                state.panels.link_editor = true;
+                changed = true;
+            }
+        }
+
+        ImGui::PopID();
+    }
+
+    return changed;
+}
+
+// Render selective color module (8 colors x 3 dials)
+static bool render_selective_color(const Module& mod, State& state, int link_idx) {
+    bool changed = false;
+    const char* colors[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+    const char* color_names[] = {"Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Magenta"};
+
+    for (int c = 0; c < 8; c++) {
+        // Check if any dial for this color is set
+        std::string hue_key = std::string(colors[c]) + "_hue";
+        std::string sat_key = std::string(colors[c]) + "_saturation";
+        std::string lum_key = std::string(colors[c]) + "_luminance";
+
+        auto hue_it = mod.dials.find(hue_key);
+        auto sat_it = mod.dials.find(sat_key);
+        auto lum_it = mod.dials.find(lum_key);
+
+        bool has_hue = hue_it != mod.dials.end() && hue_it->second != 0.5f;
+        bool has_sat = sat_it != mod.dials.end() && sat_it->second != 0.5f;
+        bool has_lum = lum_it != mod.dials.end() && lum_it->second != 0.5f;
+
+        if (!has_hue && !has_sat && !has_lum) continue;
+
+        ImGui::PushID(c);
+
+        if (ImGui::TreeNode(color_names[c])) {
+            if (has_hue) {
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                char label[32];
+                snprintf(label, sizeof(label), "Hue: %.2f", hue_it->second);
+                ImGui::TreeNodeEx(label, flags);
+            }
+            if (has_sat) {
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                char label[32];
+                snprintf(label, sizeof(label), "Sat: %.2f", sat_it->second);
+                ImGui::TreeNodeEx(label, flags);
+            }
+            if (has_lum) {
+                ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+                char label[32];
+                snprintf(label, sizeof(label), "Lum: %.2f", lum_it->second);
+                ImGui::TreeNodeEx(label, flags);
+            }
+            ImGui::TreePop();
+        }
+
+        ImGui::PopID();
+    }
+
+    return changed;
+}
+
+// Check if a module has any non-default dials
+static bool module_has_settings(const Module& mod) {
+    for (const auto& [key, value] : mod.dials) {
+        if (dial_is_set(key.c_str(), value)) return true;
+    }
+    return false;
+}
+
+bool render_pipe_panel(State& state) {
+    bool selection_changed = false;
+
+    if (!state.has_project()) {
+        ImGui::TextDisabled("Select a RAW file");
+        return false;
+    }
+
+    Project& proj = state.current_project();
+
+    // Add link button
+    if (ImGui::SmallButton("+##add_link")) {
+        proj.links.push_back(Link("Link " + std::to_string(proj.links.size() + 1)));
+        save_pipe_json(proj);
+        state.needs_reprocess = true;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Add Link");
+    }
+
+    ImGui::Separator();
+
+    if (proj.links.empty()) {
+        ImGui::TextWrapped("No links.\n\nClick + to add a processing link.");
+        return false;
+    }
+
+    // Tree of links
+    for (int l = 0; l < static_cast<int>(proj.links.size()); l++) {
+        Link& link = proj.links[l];
+
+        ImGui::PushID(l);
+
+        ImGuiTreeNodeFlags link_flags = ImGuiTreeNodeFlags_OpenOnArrow |
+                                        ImGuiTreeNodeFlags_DefaultOpen;
+        if (state.selection.link == l) {
+            link_flags |= ImGuiTreeNodeFlags_Selected;
+        }
+
+        bool link_open = ImGui::TreeNodeEx(link.name.c_str(), link_flags);
+
+        // Select link on click
+        if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+            state.selection.link = l;
+            state.panels.link_editor = true;
+            selection_changed = true;
+        }
+
+        // Context menu
+        if (ImGui::BeginPopupContextItem()) {
+            if (ImGui::MenuItem("Rename")) {
+                link.editing_name = true;
+            }
+            if (ImGui::MenuItem("Remove")) {
+                proj.links.erase(proj.links.begin() + l);
+                save_pipe_json(proj);
+                if (state.selection.link == l) {
+                    state.selection.link = -1;
                 }
-
-                // Link name (editable)
-                if (link.editing_name) {
-                    static char name_buf[64];
-                    if (ImGui::IsWindowAppearing() || !link.editing_name) {
-                        strncpy(name_buf, link.name.c_str(), sizeof(name_buf) - 1);
-                        name_buf[sizeof(name_buf) - 1] = '\0';
-                    }
-
-                    ImGui::SetNextItemWidth(120);
-                    if (ImGui::InputText("##name", name_buf, sizeof(name_buf),
-                                         ImGuiInputTextFlags_EnterReturnsTrue |
-                                         ImGuiInputTextFlags_AutoSelectAll)) {
-                        link.name = name_buf;
-                        link.editing_name = false;
-                        save_pipe_json(proj);
-                    }
-                    if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0)) {
-                        link.editing_name = false;
-                    }
-                } else {
-                    ImGui::TreeNodeEx(link.name.c_str(), link_flags);
-
-                    if (ImGui::IsItemClicked()) {
-                        state.selection.project = p;
-                        state.selection.link = l;
-                        selection_changed = true;
-                    }
-                }
-
-                // Link buttons
-                ImGui::SameLine(ImGui::GetWindowWidth() - 60);
-
-                // Edit name button
-                if (ImGui::SmallButton("E##edit")) {
-                    link.editing_name = true;
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Edit Name");
-                }
-
-                ImGui::SameLine();
-
-                // Remove link button
-                if (ImGui::SmallButton("-##remove")) {
-                    proj.links.erase(proj.links.begin() + l);
-                    save_pipe_json(proj);
-                    if (state.selection.link == l) {
-                        state.selection.link = -1;
-                        selection_changed = true;
-                    } else if (state.selection.link > l) {
-                        state.selection.link--;
-                    }
-                    state.needs_reprocess = true;
-                    l--;
-                }
-                if (ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("Remove Link");
-                }
-
+                state.needs_reprocess = true;
+                ImGui::EndPopup();
                 ImGui::PopID();
+                if (link_open) ImGui::TreePop();
+                continue;
+            }
+            ImGui::EndPopup();
+        }
+
+        // Inline rename
+        if (link.editing_name) {
+            static char name_buf[64];
+            strncpy(name_buf, link.name.c_str(), sizeof(name_buf) - 1);
+            ImGui::SetNextItemWidth(120);
+            if (ImGui::InputText("##rename", name_buf, sizeof(name_buf),
+                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+                link.name = name_buf;
+                link.editing_name = false;
+                save_pipe_json(proj);
+            }
+            if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0)) {
+                link.editing_name = false;
+            }
+        }
+
+        if (link_open) {
+            // Color Correction
+            if (module_has_settings(link.color_correction)) {
+                if (ImGui::TreeNode("Color Correction")) {
+                    render_module_dials(link.color_correction, COLOR_CORRECTION_DIALS, 3, state, l, MOD_COLOR_CORRECTION);
+                    ImGui::TreePop();
+                }
+            }
+
+            // Tone Mapping
+            if (module_has_settings(link.tone_mapping)) {
+                if (ImGui::TreeNode("Tone Mapping")) {
+                    render_module_dials(link.tone_mapping, TONE_MAPPING_DIALS, 5, state, l, MOD_TONE_MAPPING);
+                    ImGui::TreePop();
+                }
+            }
+
+            // Global Color
+            if (module_has_settings(link.global_color)) {
+                if (ImGui::TreeNode("Global Color")) {
+                    render_module_dials(link.global_color, GLOBAL_COLOR_DIALS, 3, state, l, MOD_GLOBAL_COLOR);
+                    ImGui::TreePop();
+                }
+            }
+
+            // Selective Color
+            if (module_has_settings(link.selective_color)) {
+                if (ImGui::TreeNode("Selective Color")) {
+                    render_selective_color(link.selective_color, state, l);
+                    ImGui::TreePop();
+                }
+            }
+
+            // Detail
+            if (module_has_settings(link.detail)) {
+                if (ImGui::TreeNode("Detail")) {
+                    render_module_dials(link.detail, DETAIL_DIALS, 4, state, l, MOD_DETAIL);
+                    ImGui::TreePop();
+                }
             }
 
             ImGui::TreePop();
@@ -189,9 +369,6 @@ bool render_projects_panel(State& state) {
 // ============================================================
 
 void render_info_panel(State& state) {
-    ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "RAW Info");
-    ImGui::Separator();
-
     if (state.raw_info.empty()) {
         ImGui::TextDisabled("No metadata loaded");
         return;

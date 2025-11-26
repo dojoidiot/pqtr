@@ -341,15 +341,21 @@ namespace pipe
 
         virtual Iterator& links() = 0;
 
-        // Current state of image data and metadata
+        // Current state of image data and metadata (scene-linear RGB)
         virtual Data& data() = 0;
 
-        // Continue to tail (builder pattern)
+        // Run pipeline and return display-ready image
+        // Processes all links, applies gamma encoding
+        // Returns 8-bit BGR suitable for GUI display
+        // max_dim: 0 = working size, >0 = scale to fit (can be smaller than working)
+        virtual View view(int max_dim = 0) = 0;
+
+        // Continue to tail for save operations (builder pattern)
         virtual Tail& tail() = 0;
     };
 
     // ============================================================
-    // TAIL - Finalizes processing and outputs PNG
+    // TAIL - Export using Head's full-resolution data
     // ============================================================
 
     class Tail
@@ -357,8 +363,16 @@ namespace pipe
     public:
         virtual ~Tail() = default;
 
-        // Save to PNG file (gamma encoding applied internally)
-        virtual bool save(const std::string& path) = 0;
+        // Save to PNG file using Head's full-res data
+        // Scales to max_dim BEFORE processing, then runs pipeline, applies gamma
+        // max_dim: 0 = full resolution, >0 = scale to fit before processing
+        virtual bool save(const std::string& path, int max_dim = 0) = 0;
+
+        // Return display-ready image using Head's full-res data
+        // Scales to max_dim BEFORE processing, then runs pipeline, applies gamma
+        // Returns 8-bit BGR
+        // max_dim: 0 = full resolution, >0 = scale to fit before processing
+        virtual View view(int max_dim = 0) = 0;
     };
 
     // ============================================================
@@ -377,7 +391,8 @@ namespace pipe
         virtual Data& view() = 0;
 
         // Continue to body processing (builder pattern)
-        virtual Body& body() = 0;
+        // working_size: 0 = full resolution, >0 = scale decoded data for faster preview
+        virtual Body& body(int working_size = 0) = 0;
     };
 
     // ============================================================

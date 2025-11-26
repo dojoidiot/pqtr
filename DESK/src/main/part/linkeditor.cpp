@@ -1,9 +1,11 @@
 // linkeditor.cpp - Link editor implementation
-// Module menus with cookie-trail navigation and graphic equalizer
+// Graphic equalizer for editing Link dial values
 
 #include "linkeditor.hpp"
+#include "files.hpp"
 #include "imgui.h"
 #include <cmath>
+#include <cstring>
 
 namespace desk {
 
@@ -11,17 +13,17 @@ namespace desk {
 // Constants
 // ============================================================
 
-// Subject names (5 golden modules - Geometric hidden per spec)
+// Subject names (5 modules - Geometric hidden)
 static const char* SUBJECT_NAMES[] = {
     "Color Correction", "Tone Mapping", "Global Color", "Selective Colour", "Detail"
 };
 
 // Module dial names per subject
 static const char* MODULE_NAMES_CC[] = {"Exposure", "Temperature", "Tint"};
-static const char* MODULE_NAMES_TONE[] = {"Contrast", "Highlights", "Shadows"};
-static const char* MODULE_NAMES_COLOR[] = {"Vibrance", "Saturation", "Colour Density"};
+static const char* MODULE_NAMES_TONE[] = {"Contrast", "Highlights", "Shadows", "Black", "White"};
+static const char* MODULE_NAMES_COLOR[] = {"Vibrance", "Saturation", "Density"};
 static const char* MODULE_NAMES_SEL[] = {"Red", "Orange", "Yellow", "Green", "Cyan", "Blue", "Purple", "Magenta"};
-static const char* MODULE_NAMES_DTL[] = {"Sharp Amount", "Sharp Radius", "Denoise Lum", "Denoise Chroma"};
+static const char* MODULE_NAMES_DTL[] = {"Sharp Amt", "Sharp Rad", "Denoise L", "Denoise C"};
 
 static const char** MODULE_NAMES[] = {
     MODULE_NAMES_CC,
@@ -31,17 +33,17 @@ static const char** MODULE_NAMES[] = {
     MODULE_NAMES_DTL
 };
 
-static const int MODULE_COUNTS[] = {3, 3, 3, 8, 4};
+static const int MODULE_COUNTS[] = {3, 5, 3, 8, 4};
 static constexpr int SUBJECT_COUNT = 5;
 
-// Detail menus for subjects that have sub-dials
-static const char* DETAIL_TONE[] = {"Black", "White"};
+// Detail menus for selective color
 static const char* DETAIL_SEL[] = {"Hue", "Saturation", "Luminance"};
 
-// Box styling
-static const ImVec4 BOX_NORMAL = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
-static const ImVec4 BOX_HOVER = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
-static const ImVec4 BOX_SELECTED = ImVec4(0.3f, 0.5f, 0.7f, 1.0f);
+// Dial keys for each module
+static const char* DIAL_KEYS_CC[] = {"exposure", "temperature", "tint"};
+static const char* DIAL_KEYS_TONE[] = {"contrast", "highlights", "shadows", "black", "white"};
+static const char* DIAL_KEYS_COLOR[] = {"vibrance", "saturation", "color_density"};
+static const char* DIAL_KEYS_DTL[] = {"sharpen_amount", "sharpen_radius", "denoise_luminance", "denoise_chroma"};
 
 // Slider styling
 static const ImU32 SLIDER_LINE_INACTIVE = IM_COL32(60, 60, 60, 255);
@@ -49,59 +51,109 @@ static const ImU32 SLIDER_LINE_ACTIVE = IM_COL32(80, 130, 180, 255);
 static const ImU32 SLIDER_BALL_INACTIVE = IM_COL32(100, 100, 100, 255);
 static const ImU32 SLIDER_BALL_ACTIVE = IM_COL32(200, 200, 200, 255);
 
-// Total visible dials (39 = 45 - 6 geometric)
-static constexpr int DIAL_COUNT = 39;
+// Total visible dials (21 = 3+5+3+3+4+3 for selective)
+// For selective color we show 3 dials for the selected color
+static constexpr int MAX_DIALS = 21;
 
 // ============================================================
 // Module State
 // ============================================================
 
-// Editor state
-static int expanding = 0;   // 0=collapsed, 1=subject, 2=module, 3=detail
-static int detail_sel = 0;  // Sub-dial selection
+static int expanding = 0;      // 0=collapsed, 1=subject, 2=module, 3=detail
+static int detail_sel = 0;     // Sub-dial selection for selective color
 static int dragging_slider = -1;
 
-// All dial values
-static float all_dials[DIAL_COUNT] = {
-    // ColorCorrection (0-2): exposure, temperature, tint
-    0.5f, 0.5f, 0.5f,
-    // ToneMapping (3-7): contrast, highlights, shadows, black, white
-    0.5f, 0.5f, 0.5f, 0.15f, 0.85f,
-    // GlobalColor (8-10): vibrance, saturation, colour_density
-    0.5f, 0.5f, 0.5f,
-    // SelectiveColour (11-34): 8 colors x 3 (hue, sat, lum)
-    0.5f, 0.5f, 0.5f,  // red
-    0.5f, 0.5f, 0.5f,  // orange
-    0.5f, 0.5f, 0.5f,  // yellow
-    0.5f, 0.5f, 0.5f,  // green
-    0.5f, 0.5f, 0.5f,  // cyan
-    0.5f, 0.5f, 0.5f,  // blue
-    0.5f, 0.5f, 0.5f,  // purple
-    0.5f, 0.5f, 0.5f,  // magenta
-    // Detail (35-38): sharp_amount, sharp_radius, denoise_lum, denoise_chroma
-    0.5f, 0.5f, 0.5f, 0.5f,
-};
-
 // ============================================================
-// Helper Functions
+// Helper: Get dial value from Link
 // ============================================================
 
-static bool render_box(const char* label, bool selected, float width = 0.0f) {
-    ImVec4 color = selected ? BOX_SELECTED : BOX_NORMAL;
-
-    ImGui::PushStyleColor(ImGuiCol_Button, color);
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? BOX_SELECTED : BOX_HOVER);
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, BOX_SELECTED);
-
-    bool clicked = (width > 0.0f)
-        ? ImGui::Button(label, ImVec2(width, 0))
-        : ImGui::Button(label);
-
-    ImGui::PopStyleColor(3);
-    return clicked;
+static float get_dial_value(const Link& link, int subject, int dial_index, int detail = 0) {
+    switch (subject) {
+        case MOD_COLOR_CORRECTION:
+            if (dial_index < 3) {
+                auto it = link.color_correction.dials.find(DIAL_KEYS_CC[dial_index]);
+                if (it != link.color_correction.dials.end()) return it->second;
+            }
+            break;
+        case MOD_TONE_MAPPING:
+            if (dial_index < 5) {
+                auto it = link.tone_mapping.dials.find(DIAL_KEYS_TONE[dial_index]);
+                if (it != link.tone_mapping.dials.end()) return it->second;
+            }
+            break;
+        case MOD_GLOBAL_COLOR:
+            if (dial_index < 3) {
+                auto it = link.global_color.dials.find(DIAL_KEYS_COLOR[dial_index]);
+                if (it != link.global_color.dials.end()) return it->second;
+            }
+            break;
+        case MOD_SELECTIVE_COLOR: {
+            const char* colors[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+            const char* attrs[] = {"_hue", "_saturation", "_luminance"};
+            if (dial_index < 8 && detail < 3) {
+                std::string key = std::string(colors[dial_index]) + attrs[detail];
+                auto it = link.selective_color.dials.find(key);
+                if (it != link.selective_color.dials.end()) return it->second;
+            }
+            break;
+        }
+        case MOD_DETAIL:
+            if (dial_index < 4) {
+                auto it = link.detail.dials.find(DIAL_KEYS_DTL[dial_index]);
+                if (it != link.detail.dials.end()) return it->second;
+            }
+            break;
+    }
+    return 0.5f;
 }
 
-static bool custom_vslider(int id, float width, float height, float* value, bool active) {
+// ============================================================
+// Helper: Set dial value in Link
+// ============================================================
+
+static void set_dial_value(Link& link, int subject, int dial_index, float value, int detail = 0) {
+    switch (subject) {
+        case MOD_COLOR_CORRECTION:
+            if (dial_index < 3) {
+                link.color_correction.dials[DIAL_KEYS_CC[dial_index]] = value;
+            }
+            break;
+        case MOD_TONE_MAPPING:
+            if (dial_index < 5) {
+                link.tone_mapping.dials[DIAL_KEYS_TONE[dial_index]] = value;
+            }
+            break;
+        case MOD_GLOBAL_COLOR:
+            if (dial_index < 3) {
+                link.global_color.dials[DIAL_KEYS_COLOR[dial_index]] = value;
+            }
+            break;
+        case MOD_SELECTIVE_COLOR: {
+            const char* colors[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+            const char* attrs[] = {"_hue", "_saturation", "_luminance"};
+            if (dial_index < 8 && detail < 3) {
+                std::string key = std::string(colors[dial_index]) + attrs[detail];
+                link.selective_color.dials[key] = value;
+            }
+            break;
+        }
+        case MOD_DETAIL:
+            if (dial_index < 4) {
+                link.detail.dials[DIAL_KEYS_DTL[dial_index]] = value;
+            }
+            break;
+    }
+}
+
+// ============================================================
+// Helper: Custom vertical slider
+// ============================================================
+
+// Slider result: bit 0 = value changed, bit 1 = drag ended
+static constexpr int SLIDER_CHANGED = 1;
+static constexpr int SLIDER_RELEASED = 2;
+
+static int custom_vslider(int id, float width, float height, float* value, bool active) {
     ImGui::PushID(id);
 
     ImVec2 pos = ImGui::GetCursorScreenPos();
@@ -118,7 +170,7 @@ static bool custom_vslider(int id, float width, float height, float* value, bool
     bool hovered = ImGui::IsItemHovered();
     bool held = ImGui::IsItemActive();
 
-    bool changed = false;
+    int result = 0;
 
     // Start drag on ball click
     if (hovered && ImGui::IsMouseClicked(0)) {
@@ -136,13 +188,14 @@ static bool custom_vslider(int id, float width, float height, float* value, bool
         new_value = new_value < 0.0f ? 0.0f : (new_value > 1.0f ? 1.0f : new_value);
         if (new_value != *value) {
             *value = new_value;
-            changed = true;
+            result |= SLIDER_CHANGED;
         }
     }
 
     // Release drag
     if (!held && dragging_slider == id) {
         dragging_slider = -1;
+        result |= SLIDER_RELEASED;
     }
 
     // Draw track
@@ -155,42 +208,30 @@ static bool custom_vslider(int id, float width, float height, float* value, bool
     draw->AddCircleFilled(ImVec2(center_x, ball_y), ball_radius, ball_col);
 
     ImGui::PopID();
-    return changed;
+    return result;
 }
 
-// Map selection to dial index
-static int get_active_dial(int subject, int module, int detail) {
-    switch (subject) {
-        case 0: return module;                    // ColorCorrection: 0-2
-        case 1: return (module < 3) ? (3 + module) : (6 + detail);  // ToneMapping: 3-7
-        case 2: return 8 + module;                // GlobalColor: 8-10
-        case 3: return 11 + module * 3 + detail;  // SelectiveColour: 11-34
-        case 4: return 35 + module;               // Detail: 35-38
-        default: return 0;
-    }
-}
+// ============================================================
+// Helper: Render selection box
+// ============================================================
 
-// Reverse mapping
-static void dial_to_selection(int dial, int& subject, int& module, int& detail) {
-    if (dial < 3) {
-        subject = 0; module = dial; detail = 0;
-    } else if (dial < 8) {
-        subject = 1;
-        if (dial < 6) {
-            module = dial - 3; detail = 0;
-        } else {
-            module = 0; detail = dial - 6;
-        }
-    } else if (dial < 11) {
-        subject = 2; module = dial - 8; detail = 0;
-    } else if (dial < 35) {
-        subject = 3;
-        int offset = dial - 11;
-        module = offset / 3;
-        detail = offset % 3;
-    } else {
-        subject = 4; module = dial - 35; detail = 0;
-    }
+static const ImVec4 BOX_NORMAL = ImVec4(0.2f, 0.2f, 0.2f, 1.0f);
+static const ImVec4 BOX_HOVER = ImVec4(0.3f, 0.3f, 0.3f, 1.0f);
+static const ImVec4 BOX_SELECTED = ImVec4(0.3f, 0.5f, 0.7f, 1.0f);
+
+static bool render_box(const char* label, bool selected, float width = 0.0f) {
+    ImVec4 color = selected ? BOX_SELECTED : BOX_NORMAL;
+
+    ImGui::PushStyleColor(ImGuiCol_Button, color);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, selected ? BOX_SELECTED : BOX_HOVER);
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, BOX_SELECTED);
+
+    bool clicked = (width > 0.0f)
+        ? ImGui::Button(label, ImVec2(width, 0))
+        : ImGui::Button(label);
+
+    ImGui::PopStyleColor(3);
+    return clicked;
 }
 
 // ============================================================
@@ -198,13 +239,29 @@ static void dial_to_selection(int dial, int& subject, int& module, int& detail) 
 // ============================================================
 
 bool render_module_menus(State& state) {
-    bool changed = false;
-    bool has_detail = (state.selection.module == 1 || state.selection.module == 3);
+    // Check if we have a valid link selected
+    if (!state.has_project()) {
+        ImGui::TextDisabled("Select a RAW file first");
+        return false;
+    }
 
-    ImGui::Text("Select:");
+    Project& proj = state.current_project();
+
+    if (state.selection.link < 0 || state.selection.link >= static_cast<int>(proj.links.size())) {
+        ImGui::TextDisabled("Select a Link to edit");
+        return false;
+    }
+
+    Link& link = proj.links[state.selection.link];
+    bool changed = false;
+
+    // Determine if we need detail menu (only for Selective Color)
+    bool has_detail = (state.selection.module == MOD_SELECTIVE_COLOR);
+
+    ImGui::Text("Module:");
     ImGui::SameLine();
 
-    // --- Subject section ---
+    // --- Subject/Module selection ---
     if (expanding == 1) {
         for (int s = 0; s < SUBJECT_COUNT; s++) {
             ImGui::PushID(s);
@@ -214,7 +271,6 @@ bool render_module_menus(State& state) {
                 state.selection.dial = 0;
                 detail_sel = 0;
                 expanding = 0;
-                changed = true;
             }
             ImGui::PopID();
         }
@@ -230,7 +286,7 @@ bool render_module_menus(State& state) {
     ImGui::Text(">");
     ImGui::SameLine();
 
-    // --- Module section ---
+    // --- Dial selection ---
     if (expanding == 2) {
         int mod_count = MODULE_COUNTS[state.selection.module];
         const char** mod_names = MODULE_NAMES[state.selection.module];
@@ -240,7 +296,6 @@ bool render_module_menus(State& state) {
             if (render_box(mod_names[m], state.selection.dial == m)) {
                 state.selection.dial = m;
                 expanding = 0;
-                changed = true;
             }
             ImGui::PopID();
         }
@@ -253,42 +308,25 @@ bool render_module_menus(State& state) {
         ImGui::PopID();
     }
 
-    // --- Detail section ---
+    // --- Detail selection (Selective Color only) ---
     if (has_detail) {
         ImGui::SameLine();
         ImGui::Text(">");
         ImGui::SameLine();
 
         if (expanding == 3) {
-            if (state.selection.module == 1) {
-                for (int c = 0; c < 2; c++) {
-                    ImGui::PushID(200 + c);
-                    if (c > 0) ImGui::SameLine();
-                    if (render_box(DETAIL_TONE[c], detail_sel == c)) {
-                        detail_sel = c;
-                        expanding = 0;
-                        changed = true;
-                    }
-                    ImGui::PopID();
+            for (int h = 0; h < 3; h++) {
+                ImGui::PushID(300 + h);
+                if (h > 0) ImGui::SameLine();
+                if (render_box(DETAIL_SEL[h], detail_sel == h)) {
+                    detail_sel = h;
+                    expanding = 0;
                 }
-            } else {
-                for (int h = 0; h < 3; h++) {
-                    ImGui::PushID(300 + h);
-                    if (h > 0) ImGui::SameLine();
-                    if (render_box(DETAIL_SEL[h], detail_sel == h)) {
-                        detail_sel = h;
-                        expanding = 0;
-                        changed = true;
-                    }
-                    ImGui::PopID();
-                }
+                ImGui::PopID();
             }
         } else {
             ImGui::PushID(2);
-            const char* detail_name = (state.selection.module == 1)
-                ? DETAIL_TONE[detail_sel]
-                : DETAIL_SEL[detail_sel];
-            if (render_box(detail_name, true)) {
+            if (render_box(DETAIL_SEL[detail_sel], true)) {
                 expanding = 3;
             }
             ImGui::PopID();
@@ -296,40 +334,64 @@ bool render_module_menus(State& state) {
     }
 
     // Show current value
-    int active_dial = get_active_dial(state.selection.module, state.selection.dial, detail_sel);
+    float current_value = get_dial_value(link, state.selection.module, state.selection.dial, detail_sel);
     ImGui::SameLine();
-    ImGui::Text(">");
-    ImGui::SameLine();
-    ImGui::Text("%.2f", all_dials[active_dial]);
+    ImGui::Text("= %.2f", current_value);
 
     // --- Graphic Equalizer ---
     ImGui::Spacing();
 
+    // Determine how many sliders to show based on module
+    int dial_count = MODULE_COUNTS[state.selection.module];
+
     float avail_width = ImGui::GetContentRegionAvail().x;
     float avail_height = ImGui::GetContentRegionAvail().y;
-    float slider_width = (avail_width / DIAL_COUNT) - 2.0f;
-    float slider_height = avail_height - 4.0f;
+    float slider_width = (avail_width / dial_count) - 4.0f;
+    float slider_height = avail_height - 20.0f;
     if (slider_height < 50.0f) slider_height = 50.0f;
+    if (slider_width < 20.0f) slider_width = 20.0f;
 
-    for (int d = 0; d < DIAL_COUNT; d++) {
-        bool is_active = (d == active_dial);
+    // Render sliders for current module
+    for (int d = 0; d < dial_count; d++) {
+        bool is_active = (d == state.selection.dial);
 
-        if (custom_vslider(400 + d, slider_width, slider_height, &all_dials[d], is_active)) {
+        // Get current value from link
+        float value = get_dial_value(link, state.selection.module, d, detail_sel);
+
+        ImGui::PushID(400 + d);
+
+        int slider_result = custom_vslider(d, slider_width, slider_height, &value, is_active);
+
+        if (slider_result & SLIDER_CHANGED) {
+            // Value changed during drag - update link data and trigger live re-render
+            set_dial_value(link, state.selection.module, d, value, detail_sel);
+            state.needs_reprocess = true;
             changed = true;
         }
 
-        // Click to select
+        if (slider_result & SLIDER_RELEASED) {
+            // Drag ended - save the final value to disk
+            save_pipe_json(proj);
+        }
+
+        // Click to select this dial
         if (!is_active && ImGui::IsItemClicked() && dragging_slider == -1) {
-            int new_subject, new_module, new_detail;
-            dial_to_selection(d, new_subject, new_module, new_detail);
-            state.selection.module = new_subject;
-            state.selection.dial = new_module;
-            detail_sel = new_detail;
-            expanding = 0;
+            state.selection.dial = d;
             changed = true;
         }
 
-        if (d < DIAL_COUNT - 1) ImGui::SameLine(0, 2.0f);
+        // Label under slider
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX());
+        const char** names = MODULE_NAMES[state.selection.module];
+        // Truncate long names
+        char short_name[8];
+        strncpy(short_name, names[d], 6);
+        short_name[6] = '\0';
+        ImGui::TextDisabled("%s", short_name);
+
+        ImGui::PopID();
+
+        if (d < dial_count - 1) ImGui::SameLine(0, 4.0f);
     }
 
     return changed;

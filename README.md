@@ -1,6 +1,70 @@
 # PQTR
 
-PQTR is a scalable media technology platform that streamlines enterprise creative workflows, from capture through collaboration to delivery.
+Professional photo processing, from camera to social media.
+
+**If we get F1 right, we get everyone right.**
+
+## What It Does
+
+PQTR takes RAW photos from professional cameras and automatically processes them to match your style. One workflow to go from camera file to Instagram-ready image.
+
+**The Problem:** Professional photographers spend hours in Lightroom adjusting every photo. Social media demands fast turnaround.
+
+**The Solution:** PQTR learns your editing style once, then applies it automatically to every photo.
+
+| Metric | Value |
+|--------|-------|
+| Processing time | <1 second per photo |
+| Automated adjustments | 45 dials |
+| Output sizes | Any (1080px social, 2048px web, full resolution) |
+
+## Product Suite
+
+| Project | Description | Status |
+|---------|-------------|--------|
+| **DESK** | Create vibes | In Dev |
+| **FAST** | Perfect social media delivery, now | Planned |
+| **PLAY** | Apply pro vibes | Planned |
+
+## Core Innovation: TUNE
+
+TUNE automatically learns your style from a single reference photo:
+
+| Component | What It Does | Dials | Time |
+|-----------|--------------|-------|------|
+| **GeoS** | Color & tone matching (warm/cool, saturated/muted, contrast) | 35 | ~60s |
+| **Diff** | Sharpness matching (texture, edge definition) | 4 | ~2s |
+| User | Geometry (crop, rotation) | 6 | manual |
+
+GeoS uses geodesic distance on a mathematical hypersphere to measure style similarity regardless of image content. Show PQTR one photo you love, and it learns to make all your photos look like that.
+
+## The Vibe Workflow
+
+**Vibes** are portable style presets created using TUNE:
+
+1. **Create** (DESK) - Pro creates a Vibe using TUNE
+2. **Publish** - Vibe syncs to cloud instantly
+3. **Apply** (FAST/PLAY) - Anyone applies the Vibe to their photos in one tap
+
+A wedding photographer creates their signature look once on DESK. That Vibe is instantly available to their second shooter (FAST), the bride (PLAY), or any client who purchases the Vibe pack.
+
+## Competitive Advantage
+
+- **Speed** - 30x faster than manual Lightroom editing
+- **Consistency** - Same look across thousands of photos
+- **No lock-in** - GPL-free codebase, standard PNG output
+- **Social-first** - Built for web delivery, not print
+- **Style transfer** - Learn once, apply everywhere (GeoS innovation)
+
+## Business Model
+
+- **Pro tier** - DESK license for professional photographers and studios
+- **Consumer tier** - PLAY freemium with premium style packs
+- **Enterprise** - LABS embedded in to media company, agency, and newsroom workflows.
+
+---
+
+# Technical Reference
 
 ## Quick Start
 
@@ -9,31 +73,45 @@ make        # Build everything
 make clean  # Clean all projects
 ```
 
-## High-Level Architecture: MAINs
+## Architecture: MAINs
 
 The repository is organized into top-level projects called **MAINs**. These are self-contained applications or services with their own executables.
 
 ### Design Philosophy
 
-We use a **PIMPL-style separation** at the project level for code clarity:
+We use a **PIMPL-style separation** at the project level:
 
 - Each MAIN is self-contained with its own `src/`, `inc/`, and `lib/` directories
 - MAINs do not share code directly—they consume **artifacts** (headers, source, libraries) from other MAINs
 - Dependencies are explicit and managed through symlinks created by `wire.sh`
 - A master `Makefile` orchestrates builds in the correct dependency order
 
-This gives us the benefits of a monorepo (single checkout, atomic changes) while maintaining clear boundaries between projects.
+### All Projects
 
-### Current MAINs
+| Project | Description | Status |
+|---------|-------------|--------|
+| [**RAWS**](./RAWS/README.md) | Camera RAW decoder (Sony, Canon, Nikon) | Active |
+| [**LABS**](./LABS/README.md) | Core processing engine with 45 adjustment dials | Active |
+| [**DESK**](./DESK/README.md) | Create vibes | In Dev |
+| [**FAST**](./FAST/README.md) | Perfect social media delivery, now | Planned |
+| [**PLAY**](./PLAY/README.md) | Apply pro vibes | Planned |
+| [**SITE**](./SITE/README.md) | Marketing website at pqtr.ai | In Dev |
 
-| Project | Description | Produces |
-|---------|-------------|----------|
-| [**RAWS**](./RAWS/README.md) | GPL-free RAW decoder (Sony, future: Canon, Nikon) | `raws.a` static library |
-| [**LABS**](./LABS/README.md) | Digital film development laboratory | `labs.a` static library |
-| [**DESK**](./DESK/README.md) | Desktop pipeline editor for power users | `desk` executable |
-| [**FAST**](./FAST/README.md) | Field capture app (custom Android) | — |
-| [**PLAY**](./PLAY/README.md) | Consumer mobile app (iOS/Android) | — |
-| [**SITE**](./SITE/README.md) | Public website for pqtr.ai | — |
+### Data Flow
+
+```
+Camera RAW files
+       │
+       ▼
+    [RAWS] ─── decodes ───► Scene-linear RGB
+       │
+       ▼
+    [LABS] ─── TUNE ──► Vibe (style preset)
+       │
+       ├──► DESK (create Vibes)
+       ├──► FAST (apply Vibes in field)
+       └──► PLAY (apply Vibes on phone)
+```
 
 ### Dependency Tree
 
@@ -48,14 +126,17 @@ RAWS (RAW decoder library)
   └──[standalone]──► RAWS test binary (make raws-test)
 ```
 
-**Flow:**
-1. **RAWS** builds `raws.a` exposing `raws::decode()` API
-2. **LABS** links `raws.a` into `labs.a`, calls `raws::decode()` - knows nothing about Sony internals
-3. **DESK** links `labs.a` to build the GUI
+### Layer Separation
+
+| Layer | Project | Role |
+|-------|---------|------|
+| **Decoder** | RAWS | Camera-specific RAW decoding. R&D happens here as new cameras are supported. Isolated from LABS. |
+| **Pipeline** | LABS | Core processing engine. Stable library exposing `pipe::Pipe` for HEAD→BODY→TAIL processing. |
+| **Apps** | DESK/FAST/PLAY | User interfaces. DESK creates Vibes, FAST/PLAY consume them. |
 
 ## Dependency Wiring
 
-The `wire.sh` script manages cross-project dependencies by creating symbolic links. This allows projects to share headers, source files, and libraries without duplicating code.
+The `wire.sh` script manages cross-project dependencies by creating symbolic links.
 
 ### Model
 
@@ -66,21 +147,6 @@ WIRE <FROM> <type> <INTO>
 - **FROM**: The source project that provides the artifact
 - **type**: One of `inc` (headers), `src` (source), or `lib` (static library)
 - **INTO**: The target project that consumes the artifact
-
-The symlink is created inside INTO, pointing to FROM's artifact.
-
-### Assumptions
-
-- Projects use **UPPERCASE** directory names (LABS, DESK, RAWS)
-- Each project follows a standard structure:
-  ```
-  PROJECT/
-  ├── inc/      # public headers
-  ├── src/      # source files
-  └── lib/      # built libraries
-  ```
-- Static libraries are named `<project>.a` in **lowercase** (e.g., `LABS/lib/labs.a`)
-- Script must run from repository root
 
 ### Current Wiring Rules
 
@@ -97,11 +163,7 @@ The symlink is created inside INTO, pointing to FROM's artifact.
 ./wire.sh --unwire  # Remove all symlinks
 ```
 
-Symlinks are automatically added to `.gitignore`.
-
 ## Building
-
-The master `Makefile` handles wiring and build order automatically:
 
 ```bash
 make          # Wire + build LABS + build DESK
@@ -111,49 +173,3 @@ make raws     # Build RAWS standalone test binary
 make clean    # Clean all projects
 make rewire   # Remove and recreate all symlinks
 ```
-
-### Manual Build (if needed)
-
-```bash
-./wire.sh                        # Create symlinks
-cd RAWS && make -f Makefile.raws # Build RAWS (produces raws.a)
-cd LABS && make -f Makefile.labs # Build LABS (produces labs.a, includes raws.a)
-cd DESK && make -f Makefile.desk # Build DESK (links labs.a)
-```
-
-## Product Vision
-
-PQTR is a layered ecosystem for RAW image processing:
-
-### Core Libraries
-
-| Layer | Project | Role |
-|-------|---------|------|
-| **Decoder** | RAWS | Camera-specific RAW decoding. R&D happens here as new cameras are supported. Isolated from LABS—changes don't affect downstream. |
-| **Pipeline** | LABS | The "settled science" of image processing. Stable utility library exposing `pipe::Pipe` for HEAD→BODY→TAIL processing. |
-
-### Applications
-
-| App | Platform | Audience | Description |
-|-----|----------|----------|-------------|
-| **DESK** | Desktop | Power users | Full-featured pipeline editor. Create and tune processing styles. |
-| **FAST** | Android (custom) | Field shooters | Minimal app on custom Android build. FTP transfer over WiFi for rapid ingest. |
-| **PLAY** | iOS/Android | Consumers | Apply DESK-created styles to phone DNGs. Bridges pro workflows to casual users. |
-
-### Data Flow
-
-```
-Camera RAW files
-       │
-       ▼
-    [RAWS] ─── decodes ───► Scene-linear RGB
-       │
-       ▼
-    [LABS] ─── processes ──► Styled output
-       │
-       ├──► DESK (create styles)
-       ├──► FAST (field capture)
-       └──► PLAY (apply styles)
-```
-
-DESK users create styles. PLAY users consume them. FAST users capture for later processing.

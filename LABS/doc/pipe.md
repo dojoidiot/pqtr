@@ -60,12 +60,17 @@ pipe::Data& data = head->data();
 
 Processing via Links containing 6 golden modules.
 
+**Working Size**: Body can process at a reduced size for faster preview:
+
+```cpp
+// Continue from HEAD to BODY with optional working size
+pipe::Body& body = head->body(1024);  // Process at 1024px for fast preview
+pipe::Body& body = head->body();      // Process at full resolution (default)
+```
+
 **Activation Model**: Modules only run when dials are set. Setting any dial activates its parent module. If no dials are set, the module is skipped (passthrough).
 
 ```cpp
-// Continue from HEAD to BODY
-pipe::Body& body = head->body();
-
 // Create a named Link with all 6 modules
 pipe::Body::Link& link = body.add("tune");
 
@@ -75,6 +80,10 @@ link.toneMapping().contrast().set(0.55f);           // activates ToneMapping
 link.globalColor().vibrance().set(0.6f);            // activates GlobalColor
 
 // Modules with no dials set are skipped (Geometric, SelectiveColour, Detail)
+
+// Get display-ready view (8-bit BGR, gamma encoded)
+pipe::View display = body.view();       // At working size
+pipe::View display = body.view(512);    // Further scaled to 512px
 ```
 
 **Modules** (see [libs.md](./libs.md) for implementation details):
@@ -87,12 +96,17 @@ link.globalColor().vibrance().set(0.6f);            // activates GlobalColor
 
 ### TAIL Stage
 
+Tail has access to Head's full-resolution data and can export at any size:
+
 ```cpp
-// Continue from BODY to TAIL
+// Continue from BODY to TAIL for export
 pipe::Tail& tail = body.tail();
 
-// Save to PNG (gamma encoding applied internally)
-tail.save("/path/to/output.png");
+// Save to PNG - Tail runs pipeline on full-res data at requested output size
+// max_dim: 0 = full resolution, >0 = scale to fit before processing
+tail.save("/path/to/output.png");           // Full resolution
+tail.save("/path/to/social.png", 1080);     // Process at 1080px, save
+tail.save("/path/to/web.png", 2048);        // Process at 2048px, save
 ```
 
 ---
@@ -181,6 +195,57 @@ The pipe automatically handles color space conversions:
 
 ---
 
+## Working Size Architecture
+
+The pipe supports a two-tier sizing model for fast preview and high-quality export:
+
+### Body Working Size
+
+`head->body(working_size)` controls the resolution used for preview processing:
+
+- **working_size = 0** (default): Process at full decoded resolution
+- **working_size > 0**: Scale decoded data down before processing (faster)
+
+### Body View Size
+
+`body.view(max_dim)` returns display-ready 8-bit BGR:
+
+- **max_dim = 0** (default): Return at working size
+- **max_dim > 0**: Further scale down for display (e.g., thumbnail)
+
+### Tail Output Size
+
+`tail.save(path, max_dim)` exports using Head's full-resolution data:
+
+- **max_dim = 0** (default): Process and save at full resolution
+- **max_dim > 0**: Scale full-res data down, process, save
+
+### Workflow: Edit Small, Export Full
+
+```cpp
+// Create pipe and configure settings
+auto head = pipe->open(sink);
+auto& body = head->body(1024);   // Work at 1024px for fast preview
+auto& link = body.add("tune");
+
+// Adjust dials with instant feedback
+link.colorCorrection().exposure().set(0.6f);
+link.toneMapping().contrast().set(0.55f);
+
+// Display preview (runs pipe at 1024px working size)
+auto display = body.view();      // 1024px display
+auto thumb = body.view(256);     // Further scaled to 256px thumbnail
+
+// Export at multiple sizes (Tail uses Head's full-res data)
+body.tail().save("output_full.png");             // Full resolution
+body.tail().save("output_web.png", 2048);        // 2048px
+body.tail().save("output_social.png", 1080);     // 1080px
+```
+
+The resize uses `cv::INTER_AREA` for proper downscaling in linear space before processing.
+
+---
+
 ## Usage Patterns
 
 ### Library Usage (C++)
@@ -197,8 +262,8 @@ void processRaw(const std::string& rawPath, const std::string& outPath) {
     pqtr::Hold<pipe::Pipe> pipe = pipe::make();
     pqtr::Hold<pipe::Head> head = pipe->open(std::move(sink));
 
-    // Continue to BODY
-    pipe::Body& body = head->body();
+    // Continue to BODY with working size for fast preview
+    pipe::Body& body = head->body(1024);  // Preview at 1024px
 
     // Create and configure a Link (setting dials activates modules)
     pipe::Body::Link& link = body.add("tune");
@@ -209,8 +274,13 @@ void processRaw(const std::string& rawPath, const std::string& outPath) {
     link.globalColor().vibrance().set(0.6f);
     link.globalColor().saturation().set(0.55f);
 
-    // Continue to TAIL and save (runs active modules, applies gamma)
-    body.tail().save(outPath);
+    // Get display preview (runs pipe at working size)
+    pipe::View preview = body.view();  // 8-bit BGR at 1024px
+
+    // Export via TAIL (uses Head's full-res data, same link settings)
+    body.tail().save(outPath + "_social.png", 1080);  // Social media
+    body.tail().save(outPath + "_web.png", 2048);     // Website
+    body.tail().save(outPath + "_full.png");          // Full resolution
 }
 ```
 

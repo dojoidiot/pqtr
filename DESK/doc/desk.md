@@ -42,7 +42,7 @@ For each RAW file `<name>.ARW`:
 |------|---------|
 | `<name>.desk.json` | DESK project settings |
 | `<name>.pipe.json` | Pipe configuration (see [LABS/doc/data.md](../../LABS/doc/data.md)) |
-| `<name>.png` | Output image from pipe TAIL |
+| `<name>.png` | Exported image (created on Export, not during preview) |
 
 ### Example
 
@@ -140,10 +140,13 @@ Each RAW file appears as a tree root node.
 
 ### Work Area
 
-The Work Area displays the output PNG of the currently selected project. The image updates when:
+The Work Area displays the processed image at the selected preview size. Rendering is done directly from the pipe to an OpenGL texture—no PNG file is written for preview. The image updates when:
 - A new project is selected
 - Dial values change
 - Links are added or removed
+- Preview size changes
+
+Preview sizes: 512, 1024, 2048, 4096, or Full resolution.
 
 ### Link Editor
 
@@ -229,8 +232,7 @@ Square region on the right side of the panel. Shows the dial widget for the sele
 4. Sidecar files are created:
    - `<name>.desk.json` with `hidden: false`
    - `<name>.pipe.json` with empty links array
-5. Pipe runs HEAD only → produces `<name>.png`
-6. Project appears in tree
+5. Project appears in tree
 
 ### Hiding a Project
 
@@ -260,8 +262,14 @@ Square region on the right side of the panel. Shows the dial widget for the sele
 2. Link Editor opens showing 6 modules
 3. User adjusts dials
 4. Pipe re-runs on dial change
-5. Output PNG updates in Work Area
+5. Work Area updates (rendered to texture at preview size)
 6. `pipe.json` is updated automatically
+
+### Exporting
+
+1. User clicks **Export** button
+2. Pipe runs at full resolution
+3. PNG saved to `<name>.png`
 
 ---
 
@@ -273,9 +281,21 @@ DESK uses the LABS pipe system defined in `LABS/inc/pipe.hpp`.
 
 | Stage | DESK Trigger |
 |-------|--------------|
-| **HEAD** | RAW decode on project add |
+| **HEAD** | RAW decode on project select |
 | **BODY** | Link processing on dial change |
-| **TAIL** | PNG output on any change |
+| **TAIL** | `view()` for preview display, `save()` on Export |
+
+### Rendering Flow
+
+**Preview (in-memory)**:
+1. `pipe::make()` → `open(sink)` → `head->body()`
+2. Add links with dial values
+3. `body.tail().view(working_size)` → 8-bit BGR
+4. Upload to OpenGL texture → display
+
+**Export (to file)**:
+1. Same pipeline setup
+2. `body.tail().save(path, 0)` → full-resolution PNG
 
 ### Link Structure
 
