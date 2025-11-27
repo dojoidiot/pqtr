@@ -1,10 +1,9 @@
 // geos.cpp
-// Block-wise SPSA optimizer for color/tone dials
+// SPSA optimizer for color/tone dials
 //
-// Strategy:
-//   Phase 1: Optimize Block A (8 dials: exposure, temp, tint, contrast, highlights, shadows, black, white)
-//   Phase 2: Optimize Block B (3 dials: vibrance, saturation, colourDensity)
-//   Phase 3: Joint refinement of A+B (11 dials)
+// Two modes:
+//   BLOCKWISE: 4-phase stepwise optimization
+//   FULL_35D:  All 35 dials simultaneously
 //
 // Algorithm: Simultaneous Perturbation Stochastic Approximation
 // See doc/geos.md for theory
@@ -19,22 +18,29 @@
 namespace tune::internal
 {
     // ============================================================
-    // Dial mapping: 35 dials ↔ theta vector [0,1]^35
+    // Dial mapping: 35 dials <-> theta vector [0,1]^35
     // ============================================================
     //
     // Index layout:
-    //   [0]     exposure          \
+    //   [0]     exposure           |
     //   [1]     temperature        | Block A (8)
     //   [2]     tint               |
     //   [3]     contrast           |
     //   [4]     highlights         |
     //   [5]     shadows            |
     //   [6]     black              |
-    //   [7]     white             /
-    //   [8]     vibrance         \
-    //   [9]     saturation        | Block B (3)
-    //   [10]    colourDensity    /
-    //   [11-34] SelectiveColour (not optimized)
+    //   [7]     white              |
+    //   [8]     vibrance           |
+    //   [9]     saturation         | Block B (3)
+    //   [10]    colourDensity      |
+    //   [11-13] red H/S/L          |
+    //   [14-16] orange H/S/L       |
+    //   [17-19] yellow H/S/L       | Block C (24)
+    //   [20-22] green H/S/L        | SelectiveColour
+    //   [23-25] cyan H/S/L         |
+    //   [26-28] blue H/S/L         |
+    //   [29-31] purple H/S/L       |
+    //   [32-34] magenta H/S/L      |
 
     using Theta = std::array<float, GEOS_DIAL_COUNT>;
 
@@ -58,7 +64,7 @@ namespace tune::internal
         theta[9] = link.globalColor().saturation().get();
         theta[10] = link.globalColor().colourDensity().get();
 
-        // SelectiveColour (24) - read but not optimized
+        // SelectiveColour (24)
         auto readHSL = [&](pipe::Body::Link::SelectiveColour::HslAdjust& hsl, int base) {
             theta[base + 0] = hsl.hue();
             theta[base + 1] = hsl.saturation();
@@ -95,7 +101,7 @@ namespace tune::internal
         link.globalColor().saturation().set(theta[9]);
         link.globalColor().colourDensity().set(theta[10]);
 
-        // SelectiveColour (24) - write but not optimized
+        // SelectiveColour (24)
         auto writeHSL = [&](pipe::Body::Link::SelectiveColour::HslAdjust& hsl, int base) {
             hsl.hue(theta[base + 0]);
             hsl.saturation(theta[base + 1]);
@@ -153,24 +159,22 @@ namespace tune::internal
     // ============================================================
     // Block SPSA: optimize a contiguous block of dials
     // ============================================================
-    // Returns: final loss after this block's optimization
     float optimizeBlock(
         pipe::Body& body,
         pipe::Body::Link& link,
         const StyleFeatures& targetStyle,
-        Theta& theta,           // Full theta, modified in place
+        Theta& theta,
         int blockStart,
         int blockSize,
         const PhaseParams& params,
         int maxIter,
-        int& iterCount,         // Running iteration count for progress
-        int totalMaxIter,       // Total iterations for progress display
+        int& iterCount,
+        int totalMaxIter,
         Progress::Phase phase,
         float targetLaplacianVar,
         Callback progress,
         std::mt19937& rng)
     {
-        // Best tracking for this block
         Theta bestTheta = theta;
         float bestLoss = evaluateLoss(body, targetStyle);
 
@@ -180,14 +184,15 @@ namespace tune::internal
 
         std::bernoulli_distribution coin(0.5);
 
+        // Dynamic delta array (supports up to 35 dims)
+        std::array<float, GEOS_DIAL_COUNT> delta;
+
         for (int k = 0; k < maxIter; k++)
         {
-            // Compute gain coefficients
             float a_k = computeA(k, params);
             float c_k = computeC(k, params);
 
-            // Generate perturbation for this block only
-            std::array<float, BLOCK_AB_SIZE> delta;
+            // Generate perturbation for this block
             for (int i = 0; i < blockSize; i++)
             {
                 delta[i] = coin(rng) ? 1.0f : -1.0f;
@@ -213,7 +218,7 @@ namespace tune::internal
             writeDials(link, thetaMinus);
             float lossMinus = evaluateLoss(body, targetStyle);
 
-            // Estimate gradient and update (only for this block)
+            // Estimate gradient and update
             for (int i = 0; i < blockSize; i++)
             {
                 float g_i = (lossPlus - lossMinus) / (2.0f * c_k * delta[i]);
@@ -222,7 +227,6 @@ namespace tune::internal
             clipTheta(theta, blockStart, blockSize);
             writeDials(link, theta);
 
-            // Evaluate new position
             float newLoss = evaluateLoss(body, targetStyle);
 
             // Track best
@@ -230,16 +234,13 @@ namespace tune::internal
             {
                 bestLoss = newLoss;
                 bestTheta = theta;
-                // DEBUG: print what we're recording
-                std::cerr << "[BEST] k=" << k << " newLoss=" << newLoss
-                          << " theta[0..3]=" << theta[blockStart]
-                          << "," << theta[blockStart+1]
-                          << "," << theta[blockStart+2]
-                          << "," << (blockSize > 3 ? theta[blockStart+3] : 0.0f) << std::endl;
+                if (k % 20 == 0 || newLoss < 0.02f)
+                {
+                    std::cerr << "[BEST] k=" << k << " loss=" << newLoss << std::endl;
+                }
             }
             else if (newLoss > bestLoss * 2.0f)
             {
-                // Revert if we've diverged badly
                 theta = bestTheta;
                 writeDials(link, theta);
             }
@@ -272,37 +273,24 @@ namespace tune::internal
 
                 if (!progress(p))
                 {
-                    // User cancelled - restore best and return
                     theta = bestTheta;
                     writeDials(link, theta);
                     return bestLoss;
                 }
             }
 
-            // Early termination
-            if (bestLoss < CONVERGE_THRESHOLD)
-            {
-                std::cerr << "[BLOCK] Early converge at iter=" << k
-                          << " loss=" << bestLoss << std::endl;
-                break;
-            }
+            // Early termination disabled for testing all phases
+            // if (bestLoss < CONVERGE_THRESHOLD)
+            // {
+            //     std::cerr << "[BLOCK] Early converge at iter=" << k
+            //               << " loss=" << bestLoss << std::endl;
+            //     break;
+            // }
         }
 
-        // Restore best found for this block
-        std::cerr << "[RESTORE] bestTheta[0..3]=" << bestTheta[blockStart]
-                  << "," << bestTheta[blockStart+1]
-                  << "," << bestTheta[blockStart+2]
-                  << "," << (blockSize > 3 ? bestTheta[blockStart+3] : 0.0f) << std::endl;
+        // Restore best
         theta = bestTheta;
         writeDials(link, theta);
-
-        // Verify what was actually written
-        Theta verify;
-        readDials(link, verify);
-        std::cerr << "[VERIFY] readBack[0..3]=" << verify[blockStart]
-                  << "," << verify[blockStart+1]
-                  << "," << verify[blockStart+2]
-                  << "," << (blockSize > 3 ? verify[blockStart+3] : 0.0f) << std::endl;
 
         float finalLoss = evaluateLoss(body, targetStyle);
         std::cerr << "[BLOCK] End bestLoss=" << bestLoss
@@ -312,9 +300,9 @@ namespace tune::internal
     }
 
     // ============================================================
-    // Main block-wise optimization
+    // BLOCKWISE mode: 4-phase optimization
     // ============================================================
-    int optimizeGeos(
+    int optimizeBlockwise(
         pipe::Body& body,
         pipe::Body::Link& link,
         const StyleFeatures& targetStyle,
@@ -325,35 +313,17 @@ namespace tune::internal
         std::random_device rd;
         std::mt19937 rng(rd());
 
-        // Initialize all dials to neutral
         Theta theta;
         initNeutral(theta);
         writeDials(link, theta);
 
         float initialLoss = evaluateLoss(body, targetStyle);
-        std::cerr << "[GEOS] Initial loss (all neutral): " << initialLoss << std::endl;
-
-        // Sanity check: evaluate twice - should be identical
-        float check1 = evaluateLoss(body, targetStyle);
-        float check2 = evaluateLoss(body, targetStyle);
-        std::cerr << "[SANITY] Same dials, two evals: " << check1 << " vs " << check2 << std::endl;
-
-        // Check base image integrity
-        View base1 = body.view();
-        cv::Scalar sum1 = cv::sum(base1);
-        View base2 = body.view();
-        cv::Scalar sum2 = cv::sum(base2);
-        std::cerr << "[SANITY] After-link image sum: " << sum1[0] << " vs " << sum2[0] << std::endl;
-
-        // Check raw data before links
-        cv::Scalar rawSum1 = cv::sum(body.data().view());
-        cv::Scalar rawSum2 = cv::sum(body.data().view());
-        std::cerr << "[SANITY] Pre-link raw sum: " << rawSum1[0] << " vs " << rawSum2[0] << std::endl;
+        std::cerr << "[GEOS-BLOCKWISE] Initial loss: " << initialLoss << std::endl;
 
         int totalIter = config.geos_max_iter;
         int iterCount = 0;
 
-        // Phase 1: Block A (ColorCorrection + ToneMapping = 8 dials)
+        // Phase 1: Block A (8 dials)
         int phase1Iter = static_cast<int>(totalIter * PHASE1_RATIO);
         std::cerr << "\n[GEOS] === Phase 1: Block A (8 dials) ===" << std::endl;
         float lossAfterA = optimizeBlock(
@@ -364,15 +334,7 @@ namespace tune::internal
             Progress::Phase::HUGE,
             targetLaplacianVar, progress, rng);
 
-        std::cerr << "[GEOS] After Phase 1: loss=" << lossAfterA << std::endl;
-
-        if (lossAfterA < CONVERGE_THRESHOLD)
-        {
-            std::cerr << "[GEOS] Converged after Phase 1" << std::endl;
-            return iterCount;
-        }
-
-        // Phase 2: Block B (GlobalColor = 3 dials)
+        // Phase 2: Block B (3 dials)
         int phase2Iter = static_cast<int>(totalIter * PHASE2_RATIO);
         std::cerr << "\n[GEOS] === Phase 2: Block B (3 dials) ===" << std::endl;
         float lossAfterB = optimizeBlock(
@@ -383,35 +345,119 @@ namespace tune::internal
             Progress::Phase::MIDS,
             targetLaplacianVar, progress, rng);
 
-        std::cerr << "[GEOS] After Phase 2: loss=" << lossAfterB << std::endl;
-
-        if (lossAfterB < CONVERGE_THRESHOLD)
-        {
-            std::cerr << "[GEOS] Converged after Phase 2" << std::endl;
-            return iterCount;
-        }
-
-        // Phase 3: Joint A+B (11 dials) - final polish
+        // Phase 3: Joint A+B (11 dials)
         int phase3Iter = static_cast<int>(totalIter * PHASE3_RATIO);
         std::cerr << "\n[GEOS] === Phase 3: Joint A+B (11 dials) ===" << std::endl;
-        float finalLoss = optimizeBlock(
+        float lossAfterAB = optimizeBlock(
             body, link, targetStyle, theta,
-            0, BLOCK_AB_SIZE,  // Start at 0, size 11
+            0, BLOCK_AB_SIZE,
             BLOCK_11D, phase3Iter,
             iterCount, totalIter,
             Progress::Phase::TINY,
             targetLaplacianVar, progress, rng);
 
-        std::cerr << "\n[GEOS] === FINAL ===" << std::endl;
+        // Always run Phase 4 for selective color polish
+        // (even if converged - per-hue adjustments may help saturation)
+
+        // Phase 4: Block C - SelectiveColour (24 dials)
+        int phase4Iter = static_cast<int>(totalIter * PHASE4_RATIO);
+        std::cerr << "\n[GEOS] === Phase 4: Block C - SelectiveColour (24 dials) ===" << std::endl;
+        float finalLoss = optimizeBlock(
+            body, link, targetStyle, theta,
+            BLOCK_C_START, BLOCK_C_SIZE,
+            BLOCK_24D, phase4Iter,
+            iterCount, totalIter,
+            Progress::Phase::TINY,  // Fine-tuning phase
+            targetLaplacianVar, progress, rng);
+
+        std::cerr << "\n[GEOS-BLOCKWISE] === FINAL ===" << std::endl;
         std::cerr << "[GEOS] Final loss: " << finalLoss << std::endl;
         std::cerr << "[GEOS] Theta[0..10]: ";
         for (int i = 0; i < BLOCK_AB_SIZE; i++)
-        {
             std::cerr << theta[i] << " ";
-        }
         std::cerr << std::endl;
 
         return iterCount;
+    }
+
+    // ============================================================
+    // FULL_35D mode: all dials simultaneously
+    // ============================================================
+    int optimizeFull35D(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        const Config& config,
+        Callback progress)
+    {
+        std::random_device rd;
+        std::mt19937 rng(rd());
+
+        Theta theta;
+        initNeutral(theta);
+        writeDials(link, theta);
+
+        float initialLoss = evaluateLoss(body, targetStyle);
+        std::cerr << "[GEOS-FULL35D] Initial loss: " << initialLoss << std::endl;
+
+        int totalIter = config.geos_max_iter;
+        int iterCount = 0;
+
+        // Single phase: all 35 dials
+        std::cerr << "\n[GEOS] === Full 35D optimization ===" << std::endl;
+        float finalLoss = optimizeBlock(
+            body, link, targetStyle, theta,
+            0, GEOS_DIAL_COUNT,  // All 35 dials
+            BLOCK_35D, totalIter,
+            iterCount, totalIter,
+            Progress::Phase::HUGE,  // Single long phase
+            targetLaplacianVar, progress, rng);
+
+        std::cerr << "\n[GEOS-FULL35D] === FINAL ===" << std::endl;
+        std::cerr << "[GEOS] Final loss: " << finalLoss << std::endl;
+        std::cerr << "[GEOS] Theta[0..10]: ";
+        for (int i = 0; i < BLOCK_AB_SIZE; i++)
+            std::cerr << theta[i] << " ";
+        std::cerr << std::endl;
+        std::cerr << "[GEOS] Theta[11..34] (selective): ";
+        for (int i = BLOCK_C_START; i < GEOS_DIAL_COUNT; i++)
+            std::cerr << theta[i] << " ";
+        std::cerr << std::endl;
+
+        return iterCount;
+    }
+
+    // ============================================================
+    // Entry point: dispatch based on config.geos_mode
+    // ============================================================
+    int optimizeGeos(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        const Config& config,
+        Callback progress)
+    {
+        // Sanity checks
+        float check1 = evaluateLoss(body, targetStyle);
+        float check2 = evaluateLoss(body, targetStyle);
+        std::cerr << "[SANITY] Same dials, two evals: " << check1 << " vs " << check2 << std::endl;
+
+        if (std::abs(check1 - check2) > 0.001f)
+        {
+            std::cerr << "[WARNING] Non-deterministic loss evaluation detected!" << std::endl;
+        }
+
+        // Dispatch based on mode
+        if (config.geos_mode == GeosMode::FULL_35D)
+        {
+            return optimizeFull35D(body, link, targetStyle, targetLaplacianVar, config, progress);
+        }
+        else
+        {
+            return optimizeBlockwise(body, link, targetStyle, targetLaplacianVar, config, progress);
+        }
     }
 
 } // namespace tune::internal

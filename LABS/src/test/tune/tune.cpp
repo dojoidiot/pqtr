@@ -10,7 +10,10 @@
 //   6. optimized.png  - Final output (after GEOS optimization)
 //   7. diff_optimized.png - Visual difference (head vs optimized)
 //
-// Usage: make -f Makefile.tune test
+// Usage:
+//   make -f Makefile.tune test              # Default: blockwise mode
+//   ./tmp/tune/bin/tune --mode blockwise    # Explicit blockwise (4-phase)
+//   ./tmp/tune/bin/tune --mode full35d      # Full 35D simultaneous
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -20,13 +23,31 @@
 #include <data.hpp>
 #include <iostream>
 #include <iomanip>
+#include <cstring>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 constexpr int SOCIAL_SIZE = 1080;
 const std::string OUTPUT_DIR = "tmp/var/tune/";
 
-int main()
+tune::GeosMode parseMode(int argc, char* argv[])
+{
+    for (int i = 1; i < argc - 1; i++)
+    {
+        if (std::strcmp(argv[i], "--mode") == 0)
+        {
+            if (std::strcmp(argv[i+1], "full35d") == 0 ||
+                std::strcmp(argv[i+1], "full") == 0 ||
+                std::strcmp(argv[i+1], "35d") == 0)
+            {
+                return tune::GeosMode::FULL_35D;
+            }
+        }
+    }
+    return tune::GeosMode::BLOCKWISE;  // Default
+}
+
+int main(int argc, char* argv[])
 {
     const std::string rawPath = "var/pics/DSC00202.ARW";
 
@@ -230,10 +251,14 @@ int main()
         std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
                   << metrics.spectral << std::endl;
 
+        tune::GeosMode mode = parseMode(argc, argv);
+        std::cout << "  Mode: " << (mode == tune::GeosMode::FULL_35D ? "FULL_35D" : "BLOCKWISE") << std::endl;
+
         tune::Config config;
         config.skip_edge = true;  // Only run GEOS for now
         config.geos_max_iter = 500;
         config.geos_multi_starts = 5;
+        config.geos_mode = mode;
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
         tune::Result result = tuneTask->run(body, link, config,

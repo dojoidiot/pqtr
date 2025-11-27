@@ -53,6 +53,13 @@ namespace tune
     // Config - Optimization parameters
     // ============================================================
 
+    // GEOS optimization strategy
+    enum class GeosMode
+    {
+        BLOCKWISE,  // 4-phase: A(8) → B(3) → AB(11) → C(24) selective
+        FULL_35D    // Single-phase: all 35 dials simultaneously
+    };
+
     struct Config
     {
         bool skip_geos = false;        // Skip color/tone optimization
@@ -61,6 +68,7 @@ namespace tune
         int geos_multi_starts = 5;     // Number of random initializations
         float geos_threshold = 0.01f;  // Stop when spectral loss below this
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
+        GeosMode geos_mode = GeosMode::BLOCKWISE;  // Optimization strategy
     };
 
     // ============================================================

@@ -1,12 +1,17 @@
 // geos.hpp
-// Internal: Block-wise SPSA optimizer for color/tone dials
+// Internal: SPSA optimizer for color/tone dials
 // Not a public header - used only within tune module
 //
-// Block Strategy:
+// Two modes (selected via Config::geos_mode):
+//
+// BLOCKWISE (4-phase):
 //   Phase 1: Block A (8 dials) - ColorCorrection + ToneMapping
 //   Phase 2: Block B (3 dials) - GlobalColor
-//   Phase 3: Joint A+B (11 dials) - final polish
-//   (SelectiveColour 24 dials skipped - likely noise)
+//   Phase 3: Joint A+B (11 dials) - refinement
+//   Phase 4: Block C (24 dials) - SelectiveColour polish
+//
+// FULL_35D (1-phase):
+//   All 35 dials optimized simultaneously
 
 #pragma once
 
@@ -15,10 +20,13 @@
 
 namespace tune::internal
 {
-    // Total dials (for storage, though we only optimize 11)
+    // Total dials
     constexpr int GEOS_DIAL_COUNT = 35;
 
-    // Block definitions
+    // ============================================================
+    // Block definitions (for BLOCKWISE mode)
+    // ============================================================
+
     // Block A: ColorCorrection (3) + ToneMapping (5) = 8 dials
     constexpr int BLOCK_A_START = 0;
     constexpr int BLOCK_A_SIZE = 8;
@@ -30,7 +38,14 @@ namespace tune::internal
     // Joint A+B = 11 dials
     constexpr int BLOCK_AB_SIZE = 11;
 
-    // SPSA hyperparameters - tuned for lower dimensions
+    // Block C: SelectiveColour (24) = 24 dials
+    constexpr int BLOCK_C_START = 11;
+    constexpr int BLOCK_C_SIZE = 24;
+
+    // ============================================================
+    // SPSA hyperparameters
+    // ============================================================
+
     struct PhaseParams
     {
         float a0;     // Initial learning rate
@@ -41,23 +56,32 @@ namespace tune::internal
     };
 
     // Block-specific parameters (lower dims = can be more aggressive)
-    // 8D block: moderate exploration
-    constexpr PhaseParams BLOCK_8D = { 0.15f, 0.06f, 0.602f, 0.101f, 30.0f };
-    // 3D block: can explore more aggressively
-    constexpr PhaseParams BLOCK_3D = { 0.20f, 0.08f, 0.602f, 0.101f, 20.0f };
-    // 11D joint: careful refinement
+    constexpr PhaseParams BLOCK_8D  = { 0.15f, 0.06f, 0.602f, 0.101f, 30.0f };
+    constexpr PhaseParams BLOCK_3D  = { 0.20f, 0.08f, 0.602f, 0.101f, 20.0f };
     constexpr PhaseParams BLOCK_11D = { 0.08f, 0.03f, 0.602f, 0.101f, 50.0f };
+    constexpr PhaseParams BLOCK_24D = { 0.05f, 0.02f, 0.602f, 0.101f, 80.0f };  // Selective: careful
+    constexpr PhaseParams BLOCK_35D = { 0.03f, 0.015f, 0.602f, 0.101f, 100.0f }; // Full: very careful
 
-    // Iterations per phase (configurable via config.geos_max_iter)
-    // Split: 40% Block A, 20% Block B, 40% Joint
-    constexpr float PHASE1_RATIO = 0.40f;
-    constexpr float PHASE2_RATIO = 0.20f;
-    constexpr float PHASE3_RATIO = 0.40f;
+    // ============================================================
+    // Iteration split (BLOCKWISE mode)
+    // ============================================================
+    // Phase 1 (A):    30% - establish base exposure/tone
+    // Phase 2 (B):    15% - color saturation
+    // Phase 3 (A+B):  30% - joint refinement
+    // Phase 4 (C):    25% - selective color polish
+    constexpr float PHASE1_RATIO = 0.30f;
+    constexpr float PHASE2_RATIO = 0.15f;
+    constexpr float PHASE3_RATIO = 0.30f;
+    constexpr float PHASE4_RATIO = 0.25f;
 
     // Convergence threshold (stop if loss below this)
     constexpr float CONVERGE_THRESHOLD = 0.01f;  // 1%
 
-    // Run block-wise SPSA optimization
+    // ============================================================
+    // Optimizer entry point
+    // ============================================================
+
+    // Run SPSA optimization (mode selected via config.geos_mode)
     // Returns number of iterations performed
     int optimizeGeos(
         pipe::Body& body,

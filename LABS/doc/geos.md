@@ -245,6 +245,111 @@ The geodesic loss function satisfies:
 
 ---
 
+---
+
+## Block-Wise Optimization (v2)
+
+The original 35D simultaneous SPSA struggled with gradient variance. Block-wise optimization exploits the dial structure for faster convergence.
+
+### Dial Layout
+
+```
+Index   Dial                    Block
+─────────────────────────────────────
+[0]     exposure                │
+[1]     temperature             │ Block A (8)
+[2]     tint                    │ ColorCorrection +
+[3]     contrast                │ ToneMapping
+[4]     highlights              │
+[5]     shadows                 │
+[6]     black                   │
+[7]     white                   │
+─────────────────────────────────────
+[8]     vibrance                │
+[9]     saturation              │ Block B (3)
+[10]    colourDensity           │ GlobalColor
+─────────────────────────────────────
+[11-13] red H/S/L               │
+[14-16] orange H/S/L            │
+[17-19] yellow H/S/L            │ Block C (24)
+[20-22] green H/S/L             │ SelectiveColour
+[23-25] cyan H/S/L              │
+[26-28] blue H/S/L              │
+[29-31] purple H/S/L            │
+[32-34] magenta H/S/L           │
+```
+
+### Four-Phase Strategy (BLOCKWISE mode)
+
+| Phase | Block | Dials | Ratio | Purpose |
+|-------|-------|-------|-------|---------|
+| 1 | A | 8 | 30% | Establish base exposure/tone |
+| 2 | B | 3 | 15% | Color saturation |
+| 3 | A+B | 11 | 30% | Joint refinement |
+| 4 | C | 24 | 25% | Per-hue polish |
+
+**Rationale:** Exposure/contrast affect everything downstream. Optimize these first, then layer in saturation, then refine jointly. Per-hue adjustments are fine-tuning after globals converge.
+
+### Mode Selection
+
+```cpp
+tune::Config config;
+config.geos_mode = tune::GeosMode::BLOCKWISE;  // 4-phase (default)
+config.geos_mode = tune::GeosMode::FULL_35D;   // All 35 simultaneously
+```
+
+**BLOCKWISE** converges faster (typically <300 iterations to 1% loss).
+**FULL_35D** works but needs more iterations due to gradient variance.
+
+---
+
+## Limitations: Camera Color Response
+
+### The Saturation Gap
+
+Testing revealed a fundamental limitation: the optimizer converges to ~0.87% geodesic loss but the output still looks less saturated than the camera preview.
+
+**Comparison (DSC00202.ARW):**
+
+| Aspect | Camera Preview (Target) | Optimized Output |
+|--------|------------------------|------------------|
+| Greens | Vibrant, punchy | Muted, cyan-shifted |
+| Log/ground | Warm brown | Pinkish cast |
+| Overall | Bright, contrasty | Darker |
+
+### Why Phase 4 (SelectiveColour) Didn't Help
+
+Phase 4 ran 125 iterations with 24 HSL dials but loss stayed flat at 0.87%. The per-hue linear adjustments couldn't bridge the gap.
+
+**Root cause:** The camera's JPEG engine applies transformations our dials can't replicate:
+
+1. **Nonlinear color response** - The camera "pops" certain hues with a nonlinear curve, not just linear saturation boost
+2. **Tone curve affecting color** - Camera S-curve increases perceived saturation in midtones
+3. **Possibly a 3D LUT** - Input→output color mapping isn't separable by channel
+
+### What We Can Tune vs What We Can't
+
+| Tunable | Not Tunable (Yet) |
+|---------|-------------------|
+| Exposure compensation | Nonlinear color response curves |
+| White balance | Camera-specific color science |
+| Global saturation/vibrance | Per-hue nonlinear boosts |
+| Linear HSL per channel | 3D LUT transformations |
+| Tone curve shape | Camera's proprietary rendering |
+
+### Future Directions
+
+To close the saturation gap:
+
+1. **Parametric color grading curve** - Add a dial-controlled curve that affects saturation nonlinearly (like Lightroom's tone curve)
+2. **Better RAW color matrix** - Estimate the camera's color rendering more accurately in the decoder
+3. **Per-hue saturation curves** - Instead of linear HSL shift, allow nonlinear saturation boost per hue range
+4. **Learn camera profiles** - Train on camera JPEG vs RAW pairs to extract the implicit color transformation
+
+The geodesic loss successfully matches the statistical fingerprint, but statistical similarity doesn't guarantee perceptual match when the target uses nonlinear transformations our linear dials can't express.
+
+---
+
 ## See Also
 
 - [edge.md](./edge.md) - Edge: Frequency loss (sharpness)
