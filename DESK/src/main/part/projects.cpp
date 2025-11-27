@@ -140,6 +140,9 @@ static bool dial_is_set(const char* key, float value) {
     return value != 0.5f;
 }
 
+// Hot dial highlight color (cyan/blue)
+static const ImVec4 HOT_DIAL_COLOR = ImVec4(0.4f, 0.8f, 1.0f, 1.0f);
+
 // Render dials for a module, returns true if any dial was clicked
 static bool render_module_dials(const Module& mod, const DialDef* dials, int count,
                                 State& state, int link_idx, int mod_idx) {
@@ -159,15 +162,21 @@ static bool render_module_dials(const Module& mod, const DialDef* dials, int cou
             ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf |
                                        ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
-            // Highlight if this dial is hot
-            if (state.selection.link == link_idx &&
-                state.selection.is_hot(mod_idx, d)) {
+            // Check if this dial is hot
+            bool is_hot = state.selection.link == link_idx &&
+                          state.selection.is_hot(mod_idx, d);
+            if (is_hot) {
                 flags |= ImGuiTreeNodeFlags_Selected;
+                ImGui::PushStyleColor(ImGuiCol_Text, HOT_DIAL_COLOR);
             }
 
             char label[64];
             snprintf(label, sizeof(label), "%s: %.2f", dials[d].name, value);
             ImGui::TreeNodeEx(label, flags);
+
+            if (is_hot) {
+                ImGui::PopStyleColor();
+            }
 
             // Clicking tree leaf makes dial hot
             if (ImGui::IsItemClicked()) {
@@ -208,16 +217,26 @@ static bool render_selective_color(const Module& mod, State& state, int link_idx
 
         ImGui::PushID(c);
 
+        // Auto-expand if hot dial is in this color
+        bool color_is_hot = state.selection.link == link_idx &&
+                            state.selection.hot &&
+                            state.selection.hot_module == MOD_SELECTIVE_COLOR &&
+                            state.selection.hot_dial == c;
+        if (color_is_hot) ImGui::SetNextItemOpen(true);
+
         if (ImGui::TreeNode(color_names[c])) {
             if (has_hue) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (state.selection.link == link_idx &&
-                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 0)) {
+                bool is_hot = state.selection.link == link_idx &&
+                              state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 0);
+                if (is_hot) {
                     flags |= ImGuiTreeNodeFlags_Selected;
+                    ImGui::PushStyleColor(ImGuiCol_Text, HOT_DIAL_COLOR);
                 }
                 char label[32];
                 snprintf(label, sizeof(label), "Hue: %.2f", hue_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (is_hot) ImGui::PopStyleColor();
                 if (ImGui::IsItemClicked()) {
                     state.selection.link = link_idx;
                     state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 0);
@@ -227,13 +246,16 @@ static bool render_selective_color(const Module& mod, State& state, int link_idx
             }
             if (has_sat) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (state.selection.link == link_idx &&
-                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 1)) {
+                bool is_hot = state.selection.link == link_idx &&
+                              state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 1);
+                if (is_hot) {
                     flags |= ImGuiTreeNodeFlags_Selected;
+                    ImGui::PushStyleColor(ImGuiCol_Text, HOT_DIAL_COLOR);
                 }
                 char label[32];
                 snprintf(label, sizeof(label), "Sat: %.2f", sat_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (is_hot) ImGui::PopStyleColor();
                 if (ImGui::IsItemClicked()) {
                     state.selection.link = link_idx;
                     state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 1);
@@ -243,13 +265,16 @@ static bool render_selective_color(const Module& mod, State& state, int link_idx
             }
             if (has_lum) {
                 ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
-                if (state.selection.link == link_idx &&
-                    state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 2)) {
+                bool is_hot = state.selection.link == link_idx &&
+                              state.selection.is_hot(MOD_SELECTIVE_COLOR, c, 2);
+                if (is_hot) {
                     flags |= ImGuiTreeNodeFlags_Selected;
+                    ImGui::PushStyleColor(ImGuiCol_Text, HOT_DIAL_COLOR);
                 }
                 char label[32];
                 snprintf(label, sizeof(label), "Lum: %.2f", lum_it->second);
                 ImGui::TreeNodeEx(label, flags);
+                if (is_hot) ImGui::PopStyleColor();
                 if (ImGui::IsItemClicked()) {
                     state.selection.link = link_idx;
                     state.selection.set_hot(MOD_SELECTIVE_COLOR, c, 2);
@@ -284,14 +309,32 @@ bool render_pipe_panel(State& state) {
 
     Project& proj = state.current_project();
 
-    // Add link button
-    if (ImGui::SmallButton("+##add_link")) {
+    // Title row: project name left, buttons right
+    ImGui::Text("%s", proj.name.c_str());
+
+    // Right-align + and Load buttons
+    float button_width = ImGui::CalcTextSize("+ Load").x + ImGui::GetStyle().ItemSpacing.x * 3 + ImGui::GetStyle().FramePadding.x * 4;
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - button_width + ImGui::GetStyle().ItemSpacing.x);
+
+    if (ImGui::SmallButton("+")) {
         proj.links.push_back(Link("Link " + std::to_string(proj.links.size() + 1)));
+        state.selection.link = static_cast<int>(proj.links.size()) - 1;
         save_pipe_json(proj);
         state.needs_reprocess = true;
     }
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip("Add Link");
+    }
+
+    ImGui::SameLine();
+
+    if (ImGui::SmallButton("Load")) {
+        proj.links.push_back(Link("Preset " + std::to_string(proj.links.size() + 1)));
+        state.selection.link = static_cast<int>(proj.links.size()) - 1;
+        open_link_load_dialog(state);
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Load Link Preset");
     }
 
     ImGui::Separator();
@@ -325,11 +368,58 @@ bool render_pipe_panel(State& state) {
             state.panels.link_editor = true;
         }
 
+        // Right-align buttons: Edit, Save, X
+        float btn_width = ImGui::CalcTextSize("Edit Save X").x + ImGui::GetStyle().ItemSpacing.x * 4 + ImGui::GetStyle().FramePadding.x * 6;
+        ImGui::SameLine(ImGui::GetContentRegionAvail().x - btn_width + ImGui::GetCursorPosX());
+
+        // Edit button
+        if (ImGui::SmallButton("Edit")) {
+            link.editing_name = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Rename link");
+        }
+
+        // Save button
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Save")) {
+            state.selection.link = l;
+            open_link_save_dialog(state);
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Save link as preset");
+        }
+
+        // Remove button (X)
+        ImGui::SameLine();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.6f, 0.2f, 0.2f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.8f, 0.3f, 0.3f, 1.0f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.9f, 0.1f, 0.1f, 1.0f));
+        if (ImGui::SmallButton("X")) {
+            ImGui::PopStyleColor(3);
+            proj.links.erase(proj.links.begin() + l);
+            save_pipe_json(proj);
+            if (state.selection.link == l) {
+                state.selection.link = -1;
+            } else if (state.selection.link > l) {
+                state.selection.link--;
+            }
+            state.needs_reprocess = true;
+            ImGui::PopID();
+            if (link_open) ImGui::TreePop();
+            continue;
+        }
+        ImGui::PopStyleColor(3);
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Remove link");
+        }
+
         // Context menu
         if (ImGui::BeginPopupContextItem()) {
             if (ImGui::MenuItem("Rename")) {
                 link.editing_name = true;
             }
+            ImGui::Separator();
             if (ImGui::MenuItem("Remove")) {
                 proj.links.erase(proj.links.begin() + l);
                 save_pipe_json(proj);
@@ -351,19 +441,32 @@ bool render_pipe_panel(State& state) {
             strncpy(name_buf, link.name.c_str(), sizeof(name_buf) - 1);
             ImGui::SetNextItemWidth(120);
             if (ImGui::InputText("##rename", name_buf, sizeof(name_buf),
-                                 ImGuiInputTextFlags_EnterReturnsTrue)) {
+                                 ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll)) {
                 link.name = name_buf;
                 link.editing_name = false;
                 save_pipe_json(proj);
             }
+            // Escape cancels edit
+            if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+                link.editing_name = false;
+            }
+            // Click outside cancels edit
             if (!ImGui::IsItemActive() && ImGui::IsMouseClicked(0)) {
                 link.editing_name = false;
             }
         }
 
         if (link_open) {
+            // Helper: check if hot dial is in this module for this link
+            auto is_hot_module = [&](int mod_id) {
+                return state.selection.link == l &&
+                       state.selection.hot &&
+                       state.selection.hot_module == mod_id;
+            };
+
             // Geometric
             if (module_has_settings(link.geometric)) {
+                if (is_hot_module(MOD_GEOMETRIC)) ImGui::SetNextItemOpen(true);
                 bool geo_open = ImGui::TreeNode("Geometric");
                 // Click on module name navigates (shows dials) but doesn't make hot
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
@@ -381,6 +484,7 @@ bool render_pipe_panel(State& state) {
 
             // Color Correction
             if (module_has_settings(link.color_correction)) {
+                if (is_hot_module(MOD_COLOR_CORRECTION)) ImGui::SetNextItemOpen(true);
                 bool cc_open = ImGui::TreeNode("Color Correction");
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     state.selection.link = l;
@@ -397,6 +501,7 @@ bool render_pipe_panel(State& state) {
 
             // Tone Mapping
             if (module_has_settings(link.tone_mapping)) {
+                if (is_hot_module(MOD_TONE_MAPPING)) ImGui::SetNextItemOpen(true);
                 bool tone_open = ImGui::TreeNode("Tone Mapping");
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     state.selection.link = l;
@@ -413,6 +518,7 @@ bool render_pipe_panel(State& state) {
 
             // Global Color
             if (module_has_settings(link.global_color)) {
+                if (is_hot_module(MOD_GLOBAL_COLOR)) ImGui::SetNextItemOpen(true);
                 bool gc_open = ImGui::TreeNode("Global Color");
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     state.selection.link = l;
@@ -429,6 +535,7 @@ bool render_pipe_panel(State& state) {
 
             // Selective Color
             if (module_has_settings(link.selective_color)) {
+                if (is_hot_module(MOD_SELECTIVE_COLOR)) ImGui::SetNextItemOpen(true);
                 bool sc_open = ImGui::TreeNode("Selective Color");
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     state.selection.link = l;
@@ -446,6 +553,7 @@ bool render_pipe_panel(State& state) {
 
             // Detail
             if (module_has_settings(link.detail)) {
+                if (is_hot_module(MOD_DETAIL)) ImGui::SetNextItemOpen(true);
                 bool dtl_open = ImGui::TreeNode("Detail");
                 if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
                     state.selection.link = l;

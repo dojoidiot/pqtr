@@ -1,0 +1,99 @@
+{
+  "version": "1.0",
+  "decoder": "sony_arw2",
+  "links": [
+    {
+      "name": "Link 1",
+      "modules": {
+        "geometric": {
+          "crop": {
+            "top": 0,
+            "right": 0,
+            "bottom": 0,
+            "left": 0
+          },
+          "zoom": { "scale": 0.5 },
+          "rotation": { "tilt_angle": 0.5 }
+        },
+        "color_correction": {
+          "white_balance": {
+            "temperature": 0.5,
+            "tint": 0.5
+          },
+          "exposure": { "value": 0.5 }
+        },
+        "tone_mapping": {
+          "contrast": { "value": 0.5 },
+          "curve_adjustment": {
+            "highlights": 0.5,
+            "shadows": 0.5
+          },
+          "clipping_point": {
+            "black": 0.15,
+            "white": 0.85
+          }
+        },
+        "global_color": {
+          "vibrance": 0.5,
+          "saturation": 0.5,
+          "color_density": 0.5
+        },
+        "selective_color": {
+          "red": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "orange": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "yellow": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "green": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "cyan": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "blue": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "purple": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          },
+          "magenta": {
+            "hue": 0.5,
+            "saturation": 0.5,
+            "luminance": 0.5
+          }
+        },
+        "detail": {
+          "sharpen": {
+            "amount": 0,
+            "radius": 0.4
+          },
+          "denoise": {
+            "luminance": 0,
+            "chroma": 0
+          }
+        }
+      }
+    }
+  ],
+  "tail": {
+    "output": "DSC01559.png"
+  }
+}

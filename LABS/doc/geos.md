@@ -122,15 +122,15 @@ See [tune.md](./tune.md) for the complete three-role tuning model.
 
 ### Why SPSA?
 
-Traditional gradient descent requires computing partial derivatives for each of the 45 dials. This means 45+ evaluations per iteration.
+Traditional gradient descent requires computing partial derivatives for each of the 35 dials. This means 35+ evaluations per iteration.
 
-**SPSA (Simultaneous Perturbation Stochastic Approximation)** estimates the gradient of all 45 parameters with only **2 evaluations** per iteration.
+**SPSA (Simultaneous Perturbation Stochastic Approximation)** estimates the gradient of all 35 parameters with only **2 evaluations** per iteration.
 
 ### The Algorithm
 
 At iteration $k$:
 
-1. **Generate perturbation:** $\Delta_k \in \{-1, +1\}^{45}$ (Bernoulli random)
+1. **Generate perturbation:** $\Delta_k \in \{-1, +1\}^{35}$ (Bernoulli random)
 
 2. **Evaluate loss at two points:**
    - $L^+ = \mathcal{L}(\theta_k + c_k \Delta_k)$
@@ -142,25 +142,57 @@ At iteration $k$:
 4. **Update parameters:**
    $$\theta_{k+1} = \theta_k - a_k \hat{g}_k$$
 
-### Hyperparameters
+---
 
-Based on high-dimensional optimization research:
+## Coarse-to-Fine Phases: HUGE → MIDS → TINY
 
-| Parameter | Value | Purpose |
-|-----------|-------|---------|
-| $a_0$ | 0.16 | Initial learning rate |
-| $c_0$ | 0.05 | Initial perturbation size |
-| $\alpha$ | 0.602 | Learning rate decay |
-| $\gamma$ | 0.101 | Perturbation decay |
-| $A$ | 100 | Stability constant |
+SPSA optimization proceeds through three phases, each with different hyperparameters:
 
-**Decay schedules:**
-- $a_k = a_0 / (k + 1 + A)^\alpha$
-- $c_k = c_0 / (k + 1)^\gamma$
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     GEOS PHASE PROGRESSION                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  HUGE ──────────► MIDS ──────────► TINY                         │
+│  (explore)        (refine)         (converge)                   │
+│                                                                  │
+│  Large steps      Medium steps     Small steps                  │
+│  Find basin       Approach min     Precise lock                 │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Phase Parameters
+
+| Phase | $a_0$ | $c_0$ | $A$ | Purpose |
+|-------|-------|-------|-----|---------|
+| **HUGE** | 0.50 | 0.15 | 50 | Aggressive exploration, escape local minima |
+| **MIDS** | 0.16 | 0.05 | 100 | Moderate refinement within basin |
+| **TINY** | 0.05 | 0.01 | 100 | Precise convergence to minimum |
+
+All phases use: $\alpha = 0.602$, $\gamma = 0.101$
+
+### Phase Transitions
+
+**HUGE → MIDS:** Triggered when optimization stalls (loss improvement < 0.001 over 30 iterations). This indicates the algorithm has found a basin and should stop exploring.
+
+**MIDS → TINY:** Triggered when loss falls below 0.02 (2%). At this point, large steps risk overshooting; fine-tuning begins.
+
+### Decay Schedules
+
+Within each phase, gains decay from the phase start iteration:
+- $a_k = a_0 / (k_{phase} + 1 + A)^\alpha$
+- $c_k = c_0 / (k_{phase} + 1)^\gamma$
+
+The phase-local iteration counter $k_{phase}$ resets at each phase transition, giving fresh momentum.
 
 ### Multi-Start Strategy
 
-To avoid local minima, run SPSA from multiple random initializations (typically 5) and keep the best result.
+To avoid local minima, run SPSA from multiple initializations (default: 5) and keep the best result:
+- Start 0: Neutral (all dials at 0.5)
+- Starts 1-4: Random values in [0.2, 0.8]
+
+Total iterations are divided evenly across starts.
 
 ---
 

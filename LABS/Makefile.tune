@@ -1,5 +1,7 @@
 # Tune Makefile
-# Builds bin/tune executable
+# Builds tune test harness
+#
+# Usage: make -f Makefile.tune
 
 # Compiler
 CXX = g++
@@ -13,39 +15,36 @@ OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/imgcodecs/include
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
-# Include and library flags
-INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part
-LDFLAGS = -L$(OPENCV_LIB)
-LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) -I./inc
+
+# Library flags
+LDFLAGS = -L$(OPENCV_LIB) -L./lib
+LIBS = ./lib/labs.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 
 # Directories
-SRC_DIR = src/main
+SRC_DIR = src/test/tune
 TMP_DIR = tmp/tune
 BIN_DIR = $(TMP_DIR)/bin
 OBJ_DIR = $(TMP_DIR)/obj
+OUT_DIR = tmp/var/tune
 
-# Source files
-TUNE_SRC = $(SRC_DIR)/tune.cpp
+# Source and target
+SRC = $(SRC_DIR)/tune.cpp
+OBJ = $(OBJ_DIR)/tune.o
+BIN = $(BIN_DIR)/tune
 
-# Object files
-TUNE_OBJ = $(OBJ_DIR)/tune.o
-
-# Target executable
-TUNE_BIN = $(BIN_DIR)/tune
-
-# Test configuration
-TEST_SOURCE = var/pics/DSC00144.ARW
-TEST_TARGET = var/pics/DSC00144.JPG
-TEST_OUTPUT = tmp/var/tune/DSC00144.json
+# Test input
+TEST_RAW = var/pics/DSC00202.ARW
 
 .PHONY: all clean test
 
-all: $(TUNE_BIN)
+all: $(BIN)
 
-$(TUNE_BIN): $(TUNE_OBJ) | $(BIN_DIR)
+$(BIN): $(OBJ) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-$(OBJ_DIR)/tune.o: $(TUNE_SRC) | $(OBJ_DIR)
+$(OBJ): $(SRC) | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(BIN_DIR):
@@ -57,7 +56,7 @@ $(OBJ_DIR):
 clean:
 	rm -rf $(TMP_DIR)
 
-test: $(TUNE_BIN)
-	@mkdir -p tmp/var/tune
-	@echo "Running tune on $(TEST_SOURCE) to match $(TEST_TARGET)..."
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TUNE_BIN) $(TEST_SOURCE) $(TEST_TARGET) --output $(TEST_OUTPUT)
+test: $(BIN)
+	@mkdir -p $(OUT_DIR)
+	@echo "Running tune test..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BIN)

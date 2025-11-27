@@ -71,6 +71,12 @@ namespace tune
     {
         enum class Stage { GEOS, EDGE } stage;
 
+        // GEOS coarse-to-fine phases (only meaningful when stage == GEOS)
+        // HUGE: Large perturbations, explore parameter space
+        // MIDS: Medium perturbations, refine within basin
+        // TINY: Small perturbations, precise convergence
+        enum class Phase { HUGE, MIDS, TINY } phase;
+
         int iteration;
         int max_iterations;
 

@@ -136,7 +136,11 @@ public:
 
     View view(int max_dim) override
     {
-        View linear = m_working.view();
+        // Clone to prevent link processing from corrupting the original working data
+        // (cv::UMat shares data on copy; link ops may modify in-place)
+        View linear;
+        m_working.view().copyTo(linear);
+
         for (auto& link : m_links)
             linear = link->run(linear);
 

@@ -10,7 +10,7 @@ namespace desk {
 void apply_theme();
 
 // Panel transparency level (0.0 - 1.0)
-constexpr float PANEL_ALPHA = 0.85f;
+constexpr float PANEL_ALPHA = 1.0f;
 
 // Panel dimensions (initial sizes, user can resize)
 constexpr float WORKSPACE_PANEL_WIDTH = 220.0f;

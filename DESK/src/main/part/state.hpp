@@ -189,6 +189,14 @@ struct State {
     // Panel visibility
     PanelVisibility panels;
 
+    // Panel size fractions (relative to window, updated when user resizes)
+    struct PanelSizes {
+        float pipe_w = 0.15f, pipe_h = 0.45f;
+        float info_w = 0.15f, info_h = 0.35f;
+        float editor_w = 0.40f, editor_h = 0.35f;
+        float embedded_w = 0.26f, embedded_h = 0.455f;
+    } panel_sizes;
+
     // Image textures
     Texture texture;           // Main rendered image
     Texture embedded_texture;  // Embedded camera preview

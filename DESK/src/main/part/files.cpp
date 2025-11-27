@@ -241,6 +241,157 @@ bool load_pipe_json(Project& project) {
     return true;
 }
 
+// Helper: Write link modules to stream (shared by save_pipe_json and save_link_json)
+static void write_link_modules(std::ostringstream& ss, const Link& link, const std::string& indent) {
+    // Geometric
+    ss << indent << "\"geometric\": {\n";
+    ss << indent << "  \"crop\": {\n";
+    ss << indent << "    \"top\": " << link.geometric.dials.at("crop_top") << ",\n";
+    ss << indent << "    \"right\": " << link.geometric.dials.at("crop_right") << ",\n";
+    ss << indent << "    \"bottom\": " << link.geometric.dials.at("crop_bottom") << ",\n";
+    ss << indent << "    \"left\": " << link.geometric.dials.at("crop_left") << "\n";
+    ss << indent << "  },\n";
+    ss << indent << "  \"zoom\": { \"scale\": " << link.geometric.dials.at("scale") << " },\n";
+    ss << indent << "  \"rotation\": { \"tilt_angle\": " << link.geometric.dials.at("tilt_angle") << " }\n";
+    ss << indent << "},\n";
+
+    // Color correction
+    ss << indent << "\"color_correction\": {\n";
+    ss << indent << "  \"white_balance\": {\n";
+    ss << indent << "    \"temperature\": " << link.color_correction.dials.at("temperature") << ",\n";
+    ss << indent << "    \"tint\": " << link.color_correction.dials.at("tint") << "\n";
+    ss << indent << "  },\n";
+    ss << indent << "  \"exposure\": { \"value\": " << link.color_correction.dials.at("exposure") << " }\n";
+    ss << indent << "},\n";
+
+    // Tone mapping
+    ss << indent << "\"tone_mapping\": {\n";
+    ss << indent << "  \"contrast\": { \"value\": " << link.tone_mapping.dials.at("contrast") << " },\n";
+    ss << indent << "  \"curve_adjustment\": {\n";
+    ss << indent << "    \"highlights\": " << link.tone_mapping.dials.at("highlights") << ",\n";
+    ss << indent << "    \"shadows\": " << link.tone_mapping.dials.at("shadows") << "\n";
+    ss << indent << "  },\n";
+    ss << indent << "  \"clipping_point\": {\n";
+    ss << indent << "    \"black\": " << link.tone_mapping.dials.at("black") << ",\n";
+    ss << indent << "    \"white\": " << link.tone_mapping.dials.at("white") << "\n";
+    ss << indent << "  }\n";
+    ss << indent << "},\n";
+
+    // Global color
+    ss << indent << "\"global_color\": {\n";
+    ss << indent << "  \"vibrance\": " << link.global_color.dials.at("vibrance") << ",\n";
+    ss << indent << "  \"saturation\": " << link.global_color.dials.at("saturation") << ",\n";
+    ss << indent << "  \"color_density\": " << link.global_color.dials.at("color_density") << "\n";
+    ss << indent << "},\n";
+
+    // Selective color
+    ss << indent << "\"selective_color\": {\n";
+    const char* colors[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+    for (int c = 0; c < 8; c++) {
+        std::string color = colors[c];
+        ss << indent << "  \"" << color << "\": {\n";
+        ss << indent << "    \"hue\": " << link.selective_color.dials.at(color + "_hue") << ",\n";
+        ss << indent << "    \"saturation\": " << link.selective_color.dials.at(color + "_saturation") << ",\n";
+        ss << indent << "    \"luminance\": " << link.selective_color.dials.at(color + "_luminance") << "\n";
+        ss << indent << "  }" << (c < 7 ? "," : "") << "\n";
+    }
+    ss << indent << "},\n";
+
+    // Detail
+    ss << indent << "\"detail\": {\n";
+    ss << indent << "  \"sharpen\": {\n";
+    ss << indent << "    \"amount\": " << link.detail.dials.at("sharpen_amount") << ",\n";
+    ss << indent << "    \"radius\": " << link.detail.dials.at("sharpen_radius") << "\n";
+    ss << indent << "  },\n";
+    ss << indent << "  \"denoise\": {\n";
+    ss << indent << "    \"luminance\": " << link.detail.dials.at("denoise_luminance") << ",\n";
+    ss << indent << "    \"chroma\": " << link.detail.dials.at("denoise_chroma") << "\n";
+    ss << indent << "  }\n";
+    ss << indent << "}\n";
+}
+
+bool save_link_json(const Link& link, const fs::path& path) {
+    std::ostringstream ss;
+    ss << "{\n";
+    ss << "  \"version\": \"1.0\",\n";
+    ss << "  \"name\": \"" << link.name << "\",\n";
+    ss << "  \"modules\": {\n";
+    write_link_modules(ss, link, "    ");
+    ss << "  }\n";
+    ss << "}\n";
+    return json::write_file(path, ss.str());
+}
+
+bool load_link_json(Link& link, const fs::path& path) {
+    std::string content = json::read_file(path);
+    if (content.empty()) return false;
+
+    // Get name
+    std::string name = json::extract_string(content, "name");
+    if (!name.empty()) {
+        link.name = name;
+    }
+
+    // Parse modules
+    if (content.find("\"geometric\"") != std::string::npos) {
+        link.geometric.dials["crop_top"] = json::extract_float(content, "top", 0.0f);
+        link.geometric.dials["crop_right"] = json::extract_float(content, "right", 0.0f);
+        link.geometric.dials["crop_bottom"] = json::extract_float(content, "bottom", 0.0f);
+        link.geometric.dials["crop_left"] = json::extract_float(content, "left", 0.0f);
+        link.geometric.dials["scale"] = json::extract_float(content, "scale", 0.5f);
+        link.geometric.dials["tilt_angle"] = json::extract_float(content, "tilt_angle", 0.5f);
+    }
+
+    if (content.find("\"color_correction\"") != std::string::npos) {
+        link.color_correction.dials["temperature"] = json::extract_float(content, "temperature", 0.5f);
+        link.color_correction.dials["tint"] = json::extract_float(content, "tint", 0.5f);
+        link.color_correction.dials["exposure"] = json::extract_float(content, "value", 0.5f);
+    }
+
+    if (content.find("\"tone_mapping\"") != std::string::npos) {
+        link.tone_mapping.dials["contrast"] = json::extract_float(content, "contrast", 0.5f);
+        link.tone_mapping.dials["highlights"] = json::extract_float(content, "highlights", 0.5f);
+        link.tone_mapping.dials["shadows"] = json::extract_float(content, "shadows", 0.5f);
+        link.tone_mapping.dials["black"] = json::extract_float(content, "black", 0.15f);
+        link.tone_mapping.dials["white"] = json::extract_float(content, "white", 0.85f);
+    }
+
+    if (content.find("\"global_color\"") != std::string::npos) {
+        link.global_color.dials["vibrance"] = json::extract_float(content, "vibrance", 0.5f);
+        link.global_color.dials["saturation"] = json::extract_float(content, "saturation", 0.5f);
+        link.global_color.dials["color_density"] = json::extract_float(content, "color_density", 0.5f);
+    }
+
+    if (content.find("\"detail\"") != std::string::npos) {
+        link.detail.dials["sharpen_amount"] = json::extract_float(content, "amount", 0.0f);
+        link.detail.dials["sharpen_radius"] = json::extract_float(content, "radius", 0.4f);
+        link.detail.dials["denoise_luminance"] = json::extract_float(content, "luminance", 0.0f);
+        link.detail.dials["denoise_chroma"] = json::extract_float(content, "chroma", 0.0f);
+    }
+
+    if (content.find("\"selective_color\"") != std::string::npos) {
+        const char* colors[] = {"red", "orange", "yellow", "green", "cyan", "blue", "purple", "magenta"};
+        for (const char* color : colors) {
+            // Look for each color section and extract its values
+            std::string color_section = std::string("\"") + color + "\"";
+            size_t pos = content.find(color_section);
+            if (pos != std::string::npos) {
+                // Find the section for this color
+                size_t brace_start = content.find('{', pos);
+                size_t brace_end = content.find('}', brace_start);
+                if (brace_start != std::string::npos && brace_end != std::string::npos) {
+                    std::string color_json = content.substr(brace_start, brace_end - brace_start + 1);
+                    link.selective_color.dials[std::string(color) + "_hue"] = json::extract_float(color_json, "hue", 0.5f);
+                    link.selective_color.dials[std::string(color) + "_saturation"] = json::extract_float(color_json, "saturation", 0.5f);
+                    link.selective_color.dials[std::string(color) + "_luminance"] = json::extract_float(color_json, "luminance", 0.5f);
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
 bool save_pipe_json(const Project& project) {
     std::ostringstream ss;
     ss << "{\n";
@@ -731,6 +882,35 @@ void open_raw_file_dialog(const State& state) {
         "ChooseRawDlg",
         "Select RAW File",
         ".ARW,.arw",
+        config
+    );
+}
+
+void open_link_save_dialog(const State& state) {
+    IGFD::FileDialogConfig config;
+    config.path = state.project_folder.string();
+    // Suggest filename based on current link name if available
+    if (state.has_project() && state.selection.link >= 0) {
+        const auto& proj = state.current_project();
+        if (state.selection.link < static_cast<int>(proj.links.size())) {
+            config.fileName = proj.links[state.selection.link].name + ".link.json";
+        }
+    }
+    ImGuiFileDialog::Instance()->OpenDialog(
+        "SaveLinkDlg",
+        "Save Link Preset",
+        ".link.json",
+        config
+    );
+}
+
+void open_link_load_dialog(const State& state) {
+    IGFD::FileDialogConfig config;
+    config.path = state.project_folder.string();
+    ImGuiFileDialog::Instance()->OpenDialog(
+        "LoadLinkDlg",
+        "Load Link Preset",
+        ".link.json,.json",
         config
     );
 }

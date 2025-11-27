@@ -60,9 +60,6 @@ void render_work_area(State& state) {
     float scale_y = avail.y / img_h;
     float scale = (scale_x < scale_y) ? scale_x : scale_y;
 
-    // Never upscale beyond 1:1
-    if (scale > 1.0f) scale = 1.0f;
-
     float display_w = img_w * scale;
     float display_h = img_h * scale;
 

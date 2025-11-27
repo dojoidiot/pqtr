@@ -15,16 +15,18 @@ namespace mods
     // Input:  CV_32FC3 scene-linear sRGB
     // Output: CV_32FC3 tone-mapped linear (before gamma)
     //
-    // 5 Dials (all 0.0-1.0, default 0.5):
-    //   contrast:    0.5-2.0 global contrast (0.5 = 1.0 neutral)
-    //   highlights:  -1.0 to +1.0 shoulder adjustment (0.5 = 0 neutral)
-    //   shadows:     -1.0 to +1.0 toe adjustment (0.5 = 0 neutral)
-    //   white_point: 1.0-16.0 scene white level (0.5 = 4.0)
-    //   black_point: 0.0-0.1 scene black level (0.5 = 0.01)
+    // 5 Dials (all 0.0-1.0, ALL NEUTRAL AT 0.5):
+    //   contrast:    0.5-2.0 global contrast (0.5 = 1.0, neutral)
+    //   highlights:  -1.0 to +1.0 shoulder adjustment (0.5 = 0, neutral)
+    //   shadows:     -1.0 to +1.0 toe adjustment (0.5 = 0, neutral)
+    //   white_point: Reinhard compression (0.5 = bypass/neutral, <0.5 = aggressive, >0.5 = mild)
+    //   black_point: Shadow lift/crush (0.5 = 0/neutral, <0.5 = crush, >0.5 = lift)
+    //
+    // At dial 0.5 for all parameters, tone_map is a pass-through (no effect).
     //
     // Algorithm:
-    //   1. Apply black point lift
-    //   2. Apply extended Reinhard with white point
+    //   1. Apply black point adjustment (lift or crush)
+    //   2. Apply extended Reinhard with white point (bypassed at 0.5)
     //   3. Apply shadows curve (toe)
     //   4. Apply highlights curve (shoulder)
     //   5. Apply contrast
@@ -57,6 +59,8 @@ namespace mods
         black_point_dial = std::max(0.0f, std::min(1.0f, black_point_dial));
 
         // Convert dials to working values
+        // All dials are neutral at 0.5 (no effect on image)
+
         // Contrast: exponential 0.5-2.0 (dial 0.5 = 1.0)
         float contrast = 0.5f * std::exp(contrast_dial * 1.386f);
 
@@ -64,46 +68,70 @@ namespace mods
         float highlights = (highlights_dial - 0.5f) * 2.0f;
         float shadows = (shadows_dial - 0.5f) * 2.0f;
 
-        // White point: exponential 1.0-16.0 (dial 0.5 = 4.0)
-        float white_point = std::exp(white_point_dial * 2.773f);
+        // White point: controls Reinhard compression strength
+        // dial 0.0 → W=2.0 (aggressive compression)
+        // dial 0.5 → bypass Reinhard (neutral, pass-through)
+        // dial 1.0 → W=4.0 (mild compression for HDR recovery)
+        bool bypass_reinhard = (white_point_dial > 0.45f && white_point_dial < 0.55f);
+        float white_point = 2.0f + white_point_dial * 4.0f;  // 2.0 to 6.0
 
-        // Black point: linear 0.0-0.1 (dial 0.5 = 0.05)
-        float black_point = black_point_dial * 0.1f;
+        // Black point: lifts shadows (dial 0.5 = 0, neutral)
+        // dial 0.0 → -0.05 (crush blacks)
+        // dial 0.5 → 0 (neutral)
+        // dial 1.0 → +0.05 (lift blacks)
+        float black_point = (black_point_dial - 0.5f) * 0.1f;
 
         try
         {
             cv::UMat working;
 
-            // Step 1: Lift shadows (subtract black point, rescale)
-            if (black_point > 0.001f)
+            // Step 1: Black point adjustment (lift or crush shadows)
+            // Positive: lift blacks, Negative: crush blacks, Zero: neutral
+            if (std::abs(black_point) > 0.001f)
             {
-                cv::subtract(input, black_point, working);
-                cv::max(working, 0.0f, working);
-                float scale = 1.0f / (1.0f - black_point);
-                cv::multiply(working, scale, working);
+                if (black_point > 0)
+                {
+                    // Lift: subtract black point, rescale to maintain white
+                    cv::subtract(input, black_point, working);
+                    cv::max(working, 0.0f, working);
+                    float scale = 1.0f / (1.0f - black_point);
+                    cv::multiply(working, scale, working);
+                }
+                else
+                {
+                    // Crush: add headroom at bottom, compress range
+                    float abs_bp = std::abs(black_point);
+                    float scale = 1.0f - abs_bp;
+                    cv::multiply(input, scale, working);
+                    cv::add(working, abs_bp, working);
+                }
             }
             else
             {
                 input.copyTo(working);
             }
 
-            // Step 2: Extended Reinhard tone compression
+            // Step 2: Extended Reinhard tone compression (bypass at neutral)
             // L_out = L * (1 + L/W²) / (1 + L)
-            float w2 = white_point * white_point;
+            if (!bypass_reinhard)
+            {
+                float w2 = white_point * white_point;
 
-            cv::UMat L_squared;
-            cv::multiply(working, working, L_squared);
+                cv::UMat L_squared;
+                cv::multiply(working, working, L_squared);
 
-            cv::UMat term2;
-            cv::divide(L_squared, w2, term2);
+                cv::UMat term2;
+                cv::divide(L_squared, w2, term2);
 
-            cv::UMat numerator;
-            cv::add(working, term2, numerator);
+                cv::UMat numerator;
+                cv::add(working, term2, numerator);
 
-            cv::UMat denominator;
-            cv::add(working, 1.0f, denominator);
+                cv::UMat denominator;
+                cv::add(working, 1.0f, denominator);
 
-            cv::divide(numerator, denominator, working);
+                cv::divide(numerator, denominator, working);
+            }
+            // else: bypass Reinhard, keep working as-is
 
             // Step 3: Shadow curve adjustment (toe)
             // Lift dark values when shadows > 0, crush when < 0

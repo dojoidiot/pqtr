@@ -205,8 +205,8 @@ constexpr float INFO_WIDTH_FRAC = 0.15f;     // 15% of width
 constexpr float INFO_HEIGHT_FRAC = 0.35f;    // 35% of height
 constexpr float EDITOR_WIDTH_FRAC = 0.40f;   // 40% of width
 constexpr float EDITOR_HEIGHT_FRAC = 0.35f;  // 35% of height
-constexpr float EMBEDDED_WIDTH_FRAC = 0.20f; // 20% of width
-constexpr float EMBEDDED_HEIGHT_FRAC = 0.35f;// 35% of height
+constexpr float EMBEDDED_WIDTH_FRAC = 0.26f; // 26% of width
+constexpr float EMBEDDED_HEIGHT_FRAC = 0.455f;// 45.5% of height
 
 bool render_floating_panels(desk::State& state, int display_w, int display_h) {
     bool selection_changed = false;
@@ -217,41 +217,47 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
 
     // Pipe Panel (Links/Modules/Dials tree) - TOP LEFT
     if (state.panels.pipe) {
-        std::string pipe_title = "Pipe";
-        if (state.has_project()) {
-            pipe_title = "Pipe: " + state.current_project().name;
-        }
-
-        // Size relative to window
-        ImVec2 size(display_w * PIPE_WIDTH_FRAC, content_h * PIPE_HEIGHT_FRAC);
-        if (size.x < 180) size.x = 180;
-        if (size.y < 200) size.y = 200;
+        ImVec2 size(display_w * state.panel_sizes.pipe_w, content_h * state.panel_sizes.pipe_h);
+        if (size.x < 150) size.x = 150;
+        if (size.y < 150) size.y = 150;
 
         ImVec2 pos(PANEL_MARGIN, content_y + PANEL_MARGIN);
 
-        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin(pipe_title.c_str(), &state.panels.pipe,
-                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+        ImGui::Begin("Pipe", &state.panels.pipe,
+                     ImGuiWindowFlags_NoCollapse);
         selection_changed |= desk::render_pipe_panel(state);
+
+        // Update fractions if user resized
+        ImVec2 win_size = ImGui::GetWindowSize();
+        state.panel_sizes.pipe_w = win_size.x / display_w;
+        state.panel_sizes.pipe_h = win_size.y / content_h;
+
         ImGui::End();
     }
 
     // Info Panel - BOTTOM LEFT
     if (state.panels.info) {
-        ImVec2 size(display_w * INFO_WIDTH_FRAC, content_h * INFO_HEIGHT_FRAC);
-        if (size.x < 180) size.x = 180;
-        if (size.y < 150) size.y = 150;
+        ImVec2 size(display_w * state.panel_sizes.info_w, content_h * state.panel_sizes.info_h);
+        if (size.x < 150) size.x = 150;
+        if (size.y < 100) size.y = 100;
 
         ImVec2 pos(PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
 
-        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
         ImGui::Begin("RAW Info", &state.panels.info,
-                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                     ImGuiWindowFlags_NoCollapse);
         desk::render_info_panel(state);
+
+        // Update fractions if user resized
+        ImVec2 win_size = ImGui::GetWindowSize();
+        state.panel_sizes.info_w = win_size.x / display_w;
+        state.panel_sizes.info_h = win_size.y / content_h;
+
         ImGui::End();
     }
 
@@ -265,18 +271,24 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             }
         }
 
-        ImVec2 size(display_w * EDITOR_WIDTH_FRAC, content_h * EDITOR_HEIGHT_FRAC);
-        if (size.x < 400) size.x = 400;
-        if (size.y < 200) size.y = 200;
+        ImVec2 size(display_w * state.panel_sizes.editor_w, content_h * state.panel_sizes.editor_h);
+        if (size.x < 300) size.x = 300;
+        if (size.y < 150) size.y = 150;
 
         ImVec2 pos(display_w - size.x - PANEL_MARGIN, display_h - size.y - PANEL_MARGIN);
 
-        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
         ImGui::Begin(editor_title.c_str(), &state.panels.link_editor,
-                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                     ImGuiWindowFlags_NoCollapse);
         selection_changed |= desk::render_module_menus(state);
+
+        // Update fractions if user resized
+        ImVec2 win_size = ImGui::GetWindowSize();
+        state.panel_sizes.editor_w = win_size.x / display_w;
+        state.panel_sizes.editor_h = win_size.y / content_h;
+
         ImGui::End();
     }
 
@@ -287,17 +299,17 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
             emb_title = "Embedded: " + state.current_project().name;
         }
 
-        ImVec2 size(display_w * EMBEDDED_WIDTH_FRAC, content_h * EMBEDDED_HEIGHT_FRAC);
+        ImVec2 size(display_w * state.panel_sizes.embedded_w, content_h * state.panel_sizes.embedded_h);
         if (size.x < 200) size.x = 200;
         if (size.y < 150) size.y = 150;
 
         ImVec2 pos(display_w - size.x - PANEL_MARGIN, content_y + PANEL_MARGIN);
 
-        ImGui::SetNextWindowPos(pos, ImGuiCond_Always);
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
         ImGui::Begin(emb_title.c_str(), &state.panels.embedded,
-                     ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize);
+                     ImGuiWindowFlags_NoCollapse);
 
         // Display embedded image scaled to fit
         ImVec2 avail = ImGui::GetContentRegionAvail();
@@ -319,6 +331,11 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
         ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + offset_x, ImGui::GetCursorPosY() + offset_y));
 
         ImGui::Image((ImTextureID)(intptr_t)state.embedded_texture.id, ImVec2(disp_w, disp_h));
+
+        // Update fractions if user resized
+        ImVec2 win_size = ImGui::GetWindowSize();
+        state.panel_sizes.embedded_w = win_size.x / display_w;
+        state.panel_sizes.embedded_h = win_size.y / content_h;
 
         ImGui::End();
     }
@@ -375,7 +392,54 @@ void process_file_dialogs(desk::State& state) {
         if (ImGuiFileDialog::Instance()->IsOk()) {
             std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
             desk::create_project(state, path);
+            // Get the name of the imported file
+            std::string name = fs::path(path).stem().string();
             desk::scan_projects(state);  // Refresh project list
+            // Select the newly imported project
+            for (int i = 0; i < static_cast<int>(state.projects.size()); i++) {
+                if (state.projects[i].name == name) {
+                    state.selection.project = i;
+                    state.selection.link = -1;
+                    state.is_working = true;
+                    break;
+                }
+            }
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    // Save link preset dialog
+    if (ImGuiFileDialog::Instance()->Display("SaveLinkDlg",
+        ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
+
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
+            if (state.has_project() && state.selection.link >= 0) {
+                desk::Project& proj = state.current_project();
+                if (state.selection.link < static_cast<int>(proj.links.size())) {
+                    desk::save_link_json(proj.links[state.selection.link], path);
+                    state.status_message = "Saved link preset";
+                }
+            }
+        }
+        ImGuiFileDialog::Instance()->Close();
+    }
+
+    // Load link preset dialog
+    if (ImGuiFileDialog::Instance()->Display("LoadLinkDlg",
+        ImGuiWindowFlags_NoCollapse, ImVec2(600, 400))) {
+
+        if (ImGuiFileDialog::Instance()->IsOk()) {
+            std::string path = ImGuiFileDialog::Instance()->GetFilePathName();
+            if (state.has_project() && state.selection.link >= 0) {
+                desk::Project& proj = state.current_project();
+                if (state.selection.link < static_cast<int>(proj.links.size())) {
+                    desk::load_link_json(proj.links[state.selection.link], path);
+                    desk::save_pipe_json(proj);
+                    state.needs_reprocess = true;
+                    state.status_message = "Loaded link preset";
+                }
+            }
         }
         ImGuiFileDialog::Instance()->Close();
     }
@@ -542,7 +606,7 @@ int main(int argc, char** argv) {
         // Render frame
         ImGui::Render();
         glViewport(0, 0, display_w, display_h);
-        glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClearColor(0.3f, 0.3f, 0.3f, 1.0f);  // Neutral gray background
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 

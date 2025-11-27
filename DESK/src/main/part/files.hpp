@@ -27,6 +27,10 @@ bool save_desk_json(const Project& project);
 bool load_pipe_json(Project& project);
 bool save_pipe_json(const Project& project);
 
+// Load/save link.json (single link preset file)
+bool load_link_json(Link& link, const std::filesystem::path& path);
+bool save_link_json(const Link& link, const std::filesystem::path& path);
+
 // ============================================================
 // Project Operations
 // ============================================================
@@ -73,5 +77,11 @@ void open_folder_dialog();
 
 // Open RAW file selection dialog (starts in raw_source_folder)
 void open_raw_file_dialog(const State& state);
+
+// Open link save dialog (save current link as preset)
+void open_link_save_dialog(const State& state);
+
+// Open link load dialog (load preset into current link)
+void open_link_load_dialog(const State& state);
 
 } // namespace desk

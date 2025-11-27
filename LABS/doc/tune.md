@@ -80,12 +80,12 @@ The complete tune workflow transforms scene-referred RAW into camera-matched out
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### R&D Test Harness
+### Test Harness
 
-The `tune_rnd` test validates this workflow:
+The `tune` test validates this workflow:
 
 ```bash
-make -f Makefile.tune_rnd test
+make -f Makefile.tune test
 ```
 
 **Outputs** (`tmp/var/tune/`):
@@ -167,9 +167,24 @@ Optimizes 35 dials using spectral loss (geodesic distance on hypersphere).
 |--------|-------|
 | **Dials** | 35 (color correction, tone mapping, global color, selective color) |
 | **Algorithm** | SPSA (Simultaneous Perturbation Stochastic Approximation) |
+| **Phases** | HUGE → MIDS → TINY (coarse-to-fine) |
 | **Loss** | Spectral (geodesic) - content-invariant |
 | **Time** | ~60 seconds |
 | **Multi-start** | 5 random initializations |
+
+### Coarse-to-Fine Phases
+
+GEOS proceeds through three phases with progressively smaller step sizes:
+
+| Phase | Perturbation | Learning Rate | Purpose |
+|-------|--------------|---------------|---------|
+| **HUGE** | 0.15 | 0.50 | Explore parameter space, find basin |
+| **MIDS** | 0.05 | 0.16 | Refine within basin |
+| **TINY** | 0.01 | 0.05 | Precise convergence |
+
+**Transitions:**
+- HUGE → MIDS: When loss stops improving (stall detected)
+- MIDS → TINY: When loss < 2%
 
 ---
 
@@ -335,6 +350,9 @@ namespace tune {
     struct Progress {
         enum class Stage { GEOS, EDGE } stage;
 
+        // GEOS coarse-to-fine phases (only meaningful when stage == GEOS)
+        enum class Phase { HUGE, MIDS, TINY } phase;
+
         int iteration;
         int max_iterations;
 
@@ -499,7 +517,12 @@ tune::Result result = task->run(body, link, config,
     [&gui](const tune::Progress& p) {
         if (p.stage == tune::Progress::Stage::GEOS) {
             gui.updateDomeCompass(p.dome.x(), p.dome.y());
-            gui.setStatusText("Color/Tone: " + std::to_string(int(p.dome.r * 100)) + "% remaining");
+
+            // Show current phase
+            const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
+            std::string phase = phaseNames[static_cast<int>(p.phase)];
+            gui.setStatusText("Color/Tone [" + phase + "]: " +
+                std::to_string(int(p.dome.r * 100)) + "% remaining");
         } else {
             gui.updateSharpnessSlider(p.edge.ratio);
             gui.setStatusText("Sharpness: " + formatRatio(p.edge.ratio));
