@@ -1,12 +1,17 @@
 // tune.cpp
 // Main tune Task implementation
 // Delegates to diff, geos, and edge modules
+//
+// LUT-based luminance curve pre-pass:
+// The Link now contains a LutCurve module that can estimate
+// the tone curve from base->target and apply it automatically.
 
 #include <tune.hpp>
 #include "diff.hpp"
 #include "geos.hpp"
 #include "edge.hpp"
 #include <opencv2/imgproc.hpp>
+#include <iostream>
 
 namespace tune
 {
@@ -89,18 +94,29 @@ namespace tune
             result.geos_iterations = 0;
             result.edge_evaluations = 0;
 
-            // Initial loss measurement
+            // Stage 1: LUT Curve Estimation (from raw base to target)
+            // Estimate per-channel curves before any dial adjustments
+            if (!link.lutCurve().isEstimated())
+            {
+                View baseView = body.view();
+                if (link.lutCurve().estimate(baseView, m_targetImage))
+                {
+                    std::cout << "[tune] LUT curve estimated" << std::endl;
+                }
+            }
+
+            // Initial loss measurement (with LUT applied)
             View candidate = body.view();
             result.loss = diff(candidate);
 
-            // Stage 1: GEOS (Color/Tone)
+            // Stage 2: GEOS (Color/Tone) - fine-tune after LUT
             if (!config.skip_geos)
             {
                 result.geos_iterations = optimizeGeos(
                     body, link, m_targetStyle, m_targetLaplacianVar, config, progress);
             }
 
-            // Stage 2: Edge (Sharpness)
+            // Stage 3: Edge (Sharpness)
             if (!config.skip_edge)
             {
                 result.edge_evaluations = optimizeEdge(

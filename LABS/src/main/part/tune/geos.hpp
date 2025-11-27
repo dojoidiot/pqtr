@@ -5,13 +5,13 @@
 // Two modes (selected via Config::geos_mode):
 //
 // BLOCKWISE (4-phase):
-//   Phase 1: Block A (8 dials) - ColorCorrection + ToneMapping
+//   Phase 1: Block A (10 dials) - ColorCorrection + ToneMapping
 //   Phase 2: Block B (3 dials) - GlobalColor
-//   Phase 3: Joint A+B (11 dials) - refinement
+//   Phase 3: Joint A+B (13 dials) - refinement
 //   Phase 4: Block C (24 dials) - SelectiveColour polish
 //
-// FULL_35D (1-phase):
-//   All 35 dials optimized simultaneously
+// FULL_37D (1-phase):
+//   All 37 dials optimized simultaneously
 
 #pragma once
 
@@ -21,25 +21,25 @@
 namespace tune::internal
 {
     // Total dials
-    constexpr int GEOS_DIAL_COUNT = 35;
+    constexpr int GEOS_DIAL_COUNT = 37;
 
     // ============================================================
     // Block definitions (for BLOCKWISE mode)
     // ============================================================
 
-    // Block A: ColorCorrection (3) + ToneMapping (5) = 8 dials
+    // Block A: ColorCorrection (3) + ToneMapping (7) = 10 dials
     constexpr int BLOCK_A_START = 0;
-    constexpr int BLOCK_A_SIZE = 8;
+    constexpr int BLOCK_A_SIZE = 10;
 
     // Block B: GlobalColor (3) = 3 dials
-    constexpr int BLOCK_B_START = 8;
+    constexpr int BLOCK_B_START = 10;
     constexpr int BLOCK_B_SIZE = 3;
 
-    // Joint A+B = 11 dials
-    constexpr int BLOCK_AB_SIZE = 11;
+    // Joint A+B = 13 dials
+    constexpr int BLOCK_AB_SIZE = 13;
 
     // Block C: SelectiveColour (24) = 24 dials
-    constexpr int BLOCK_C_START = 11;
+    constexpr int BLOCK_C_START = 13;
     constexpr int BLOCK_C_SIZE = 24;
 
     // ============================================================
@@ -56,11 +56,11 @@ namespace tune::internal
     };
 
     // Block-specific parameters (lower dims = can be more aggressive)
-    constexpr PhaseParams BLOCK_8D  = { 0.15f, 0.06f, 0.602f, 0.101f, 30.0f };
     constexpr PhaseParams BLOCK_3D  = { 0.20f, 0.08f, 0.602f, 0.101f, 20.0f };
-    constexpr PhaseParams BLOCK_11D = { 0.08f, 0.03f, 0.602f, 0.101f, 50.0f };
+    constexpr PhaseParams BLOCK_10D = { 0.12f, 0.05f, 0.602f, 0.101f, 35.0f };
+    constexpr PhaseParams BLOCK_13D = { 0.07f, 0.025f, 0.602f, 0.101f, 55.0f };
     constexpr PhaseParams BLOCK_24D = { 0.05f, 0.02f, 0.602f, 0.101f, 80.0f };  // Selective: careful
-    constexpr PhaseParams BLOCK_35D = { 0.03f, 0.015f, 0.602f, 0.101f, 100.0f }; // Full: very careful
+    constexpr PhaseParams BLOCK_37D = { 0.025f, 0.012f, 0.602f, 0.101f, 110.0f }; // Full: very careful
 
     // ============================================================
     // Iteration split (BLOCKWISE mode)

@@ -54,24 +54,28 @@ namespace mods
         float tint);
 
     //--------------------------------------------------------------------------
-    // Tone Mapping (5 dials)
+    // Tone Mapping (7 dials)
     //--------------------------------------------------------------------------
 
     // Tone Mapping - HDR → SDR compression
-    // Filmic curve with 5 dials for complete control
+    // Filmic curve with 7 dials for complete control
     //
     // All dials: 0.0-1.0, default 0.5 (neutral)
-    //   contrast:    Global curve contrast (0.5→1.0 neutral)
-    //   highlights:  Shoulder adjustment (0.5→0 neutral)
-    //   shadows:     Toe adjustment (0.5→0 neutral)
-    //   white_point: Scene white level (0.5→4.0)
-    //   black_point: Scene black level (0.5→0.05)
+    //   contrast:       Global curve contrast (0.5→1.0 neutral)
+    //   highlights:     Shoulder adjustment (0.5→0 neutral)
+    //   shadows:        Toe adjustment (0.5→0 neutral)
+    //   toe_pivot:      Where shadow region ends (0.5→0.3 luminance)
+    //   shoulder_pivot: Where highlight region begins (0.5→0.7 luminance)
+    //   white_point:    Scene white level (0.5→bypass)
+    //   black_point:    Scene black level (0.5→0 neutral)
     bool tone_map(
         const cv::UMat &input,
         cv::UMat &output,
         float contrast = 0.5f,
         float highlights = 0.5f,
         float shadows = 0.5f,
+        float toe_pivot = 0.5f,
+        float shoulder_pivot = 0.5f,
         float white_point = 0.5f,
         float black_point = 0.5f);
 
@@ -141,6 +145,28 @@ namespace mods
         const cv::UMat &input,
         cv::UMat &output,
         const cv::Matx33f &matrix);
+
+    //--------------------------------------------------------------------------
+    // LUT-based Luminance Curve (for vibe transfer)
+    //--------------------------------------------------------------------------
+
+    // Apply a 1D LUT to remap luminance
+    // lut: array of normalized (0-1) output values for input range 0-255
+    // lut_size: number of entries in the LUT (typically 32)
+    bool lut_curve(
+        const cv::UMat &input,
+        cv::UMat &output,
+        const float* lut,
+        int lut_size);
+
+    // Estimate the luminance transfer curve from base to target
+    // Fills lut with the mapping that transforms base luminance to target luminance
+    // Used as a pre-pass before dial optimization
+    bool estimate_lut(
+        const cv::UMat& base,
+        const cv::UMat& target,
+        float* lut,
+        int lut_size);
 
 } // namespace mods
 } // namespace pipe

@@ -48,7 +48,8 @@ MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/global_color.cpp \
             $(SRC_DIR)/part/pipe/mods/selective_color.cpp \
             $(SRC_DIR)/part/pipe/mods/geometric.cpp \
-            $(SRC_DIR)/part/pipe/mods/detail.cpp
+            $(SRC_DIR)/part/pipe/mods/detail.cpp \
+            $(SRC_DIR)/part/pipe/mods/lut_curve.cpp
 
 # Tune sources (optimization + loss metrics + serialization)
 TUNE_SRCS = $(SRC_DIR)/part/tune/tune.cpp \
@@ -69,7 +70,8 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/global_color.o \
             $(OBJ_DIR)/mods/selective_color.o \
             $(OBJ_DIR)/mods/geometric.o \
-            $(OBJ_DIR)/mods/detail.o
+            $(OBJ_DIR)/mods/detail.o \
+            $(OBJ_DIR)/mods/lut_curve.o
 
 TUNE_OBJS = $(OBJ_DIR)/tune/tune.o \
             $(OBJ_DIR)/tune/diff.o \

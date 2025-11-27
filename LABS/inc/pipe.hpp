@@ -45,7 +45,7 @@ namespace pipe
     };
 
     // ============================================================
-    // BODY - Processing pipeline with 6 golden modules (45 dials)
+    // BODY - Processing pipeline with 6 golden modules (47 dials)
     // ============================================================
 
     class Body
@@ -151,7 +151,32 @@ namespace pipe
                 virtual WhiteBalance& whiteBalance() = 0;
             };
 
-            // Module 3: Tone Mapping (5 dials) - LINEAR_RGB
+            // Module 2.5: LUT Curve (pre-pass luminance adjustment) - LINEAR_RGB
+            // This is NOT a dial-based module - it stores a LUT array
+            // Used by tune to apply estimated luminance curve from target
+            class LutCurve
+            {
+            public:
+                virtual ~LutCurve() = default;
+                static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
+                static constexpr int LUT_SIZE = 32;
+
+                // Get/set the LUT array (LUT_SIZE floats, identity = linear ramp)
+                virtual const float* lut() const = 0;
+                virtual void setLut(const float* values) = 0;
+
+                // Estimate LUT from base image to target image
+                // Returns true if estimation succeeded
+                virtual bool estimate(View base, View target) = 0;
+
+                // Reset to identity (no-op curve)
+                virtual void reset() = 0;
+
+                // Check if LUT is non-identity (has been estimated)
+                virtual bool isEstimated() const = 0;
+            };
+
+            // Module 3: Tone Mapping (7 dials) - LINEAR_RGB
             class ToneMapping
             {
             public:
@@ -179,8 +204,18 @@ namespace pipe
                         virtual void set(float value) = 0;
                     };
 
+                    class Pivot : public Task
+                    {
+                    public:
+                        virtual ~Pivot() = default;
+                        virtual float get() = 0;
+                        virtual void set(float value) = 0;
+                    };
+
                     virtual Region& highlights() = 0;
                     virtual Region& shadows() = 0;
+                    virtual Pivot& toePivot() = 0;
+                    virtual Pivot& shoulderPivot() = 0;
                 };
 
                 class ClippingPoint
@@ -313,6 +348,7 @@ namespace pipe
             virtual Name name() = 0;
             virtual Geometric& geometric() = 0;
             virtual ColorCorrection& colorCorrection() = 0;
+            virtual LutCurve& lutCurve() = 0;
             virtual ToneMapping& toneMapping() = 0;
             virtual GlobalColor& globalColor() = 0;
             virtual SelectiveColour& selectiveColour() = 0;

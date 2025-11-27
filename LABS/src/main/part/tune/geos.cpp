@@ -3,7 +3,7 @@
 //
 // Two modes:
 //   BLOCKWISE: 4-phase stepwise optimization
-//   FULL_35D:  All 35 dials simultaneously
+//   FULL_37D:  All 37 dials simultaneously
 //
 // Algorithm: Simultaneous Perturbation Stochastic Approximation
 // See doc/geos.md for theory
@@ -18,29 +18,31 @@
 namespace tune::internal
 {
     // ============================================================
-    // Dial mapping: 35 dials <-> theta vector [0,1]^35
+    // Dial mapping: 37 dials <-> theta vector [0,1]^37
     // ============================================================
     //
     // Index layout:
     //   [0]     exposure           |
-    //   [1]     temperature        | Block A (8)
-    //   [2]     tint               |
-    //   [3]     contrast           |
+    //   [1]     temperature        | Block A (10)
+    //   [2]     tint               | ColorCorrection (3) +
+    //   [3]     contrast           | ToneMapping (7)
     //   [4]     highlights         |
     //   [5]     shadows            |
-    //   [6]     black              |
-    //   [7]     white              |
-    //   [8]     vibrance           |
-    //   [9]     saturation         | Block B (3)
-    //   [10]    colourDensity      |
-    //   [11-13] red H/S/L          |
-    //   [14-16] orange H/S/L       |
-    //   [17-19] yellow H/S/L       | Block C (24)
-    //   [20-22] green H/S/L        | SelectiveColour
-    //   [23-25] cyan H/S/L         |
-    //   [26-28] blue H/S/L         |
-    //   [29-31] purple H/S/L       |
-    //   [32-34] magenta H/S/L      |
+    //   [6]     toe_pivot          |
+    //   [7]     shoulder_pivot     |
+    //   [8]     black              |
+    //   [9]     white              |
+    //   [10]    vibrance           |
+    //   [11]    saturation         | Block B (3)
+    //   [12]    colourDensity      |
+    //   [13-15] red H/S/L          |
+    //   [16-18] orange H/S/L       |
+    //   [19-21] yellow H/S/L       | Block C (24)
+    //   [22-24] green H/S/L        | SelectiveColour
+    //   [25-27] cyan H/S/L         |
+    //   [28-30] blue H/S/L         |
+    //   [31-33] purple H/S/L       |
+    //   [34-36] magenta H/S/L      |
 
     using Theta = std::array<float, GEOS_DIAL_COUNT>;
 
@@ -52,17 +54,19 @@ namespace tune::internal
         theta[1] = link.colorCorrection().whiteBalance().temperature();
         theta[2] = link.colorCorrection().whiteBalance().tint();
 
-        // ToneMapping (5)
+        // ToneMapping (7)
         theta[3] = link.toneMapping().contrast().get();
         theta[4] = link.toneMapping().curveAdjustment().highlights().get();
         theta[5] = link.toneMapping().curveAdjustment().shadows().get();
-        theta[6] = link.toneMapping().clippingPoint().black().get();
-        theta[7] = link.toneMapping().clippingPoint().white().get();
+        theta[6] = link.toneMapping().curveAdjustment().toePivot().get();
+        theta[7] = link.toneMapping().curveAdjustment().shoulderPivot().get();
+        theta[8] = link.toneMapping().clippingPoint().black().get();
+        theta[9] = link.toneMapping().clippingPoint().white().get();
 
         // GlobalColor (3)
-        theta[8] = link.globalColor().vibrance().get();
-        theta[9] = link.globalColor().saturation().get();
-        theta[10] = link.globalColor().colourDensity().get();
+        theta[10] = link.globalColor().vibrance().get();
+        theta[11] = link.globalColor().saturation().get();
+        theta[12] = link.globalColor().colourDensity().get();
 
         // SelectiveColour (24)
         auto readHSL = [&](pipe::Body::Link::SelectiveColour::HslAdjust& hsl, int base) {
@@ -71,14 +75,14 @@ namespace tune::internal
             theta[base + 2] = hsl.luminance();
         };
 
-        readHSL(link.selectiveColour().red(), 11);
-        readHSL(link.selectiveColour().orange(), 14);
-        readHSL(link.selectiveColour().yellow(), 17);
-        readHSL(link.selectiveColour().green(), 20);
-        readHSL(link.selectiveColour().cyan(), 23);
-        readHSL(link.selectiveColour().blue(), 26);
-        readHSL(link.selectiveColour().purple(), 29);
-        readHSL(link.selectiveColour().magenta(), 32);
+        readHSL(link.selectiveColour().red(), 13);
+        readHSL(link.selectiveColour().orange(), 16);
+        readHSL(link.selectiveColour().yellow(), 19);
+        readHSL(link.selectiveColour().green(), 22);
+        readHSL(link.selectiveColour().cyan(), 25);
+        readHSL(link.selectiveColour().blue(), 28);
+        readHSL(link.selectiveColour().purple(), 31);
+        readHSL(link.selectiveColour().magenta(), 34);
     }
 
     // Write theta values to link dials
@@ -89,17 +93,19 @@ namespace tune::internal
         link.colorCorrection().whiteBalance().temperature(theta[1]);
         link.colorCorrection().whiteBalance().tint(theta[2]);
 
-        // ToneMapping (5)
+        // ToneMapping (7)
         link.toneMapping().contrast().set(theta[3]);
         link.toneMapping().curveAdjustment().highlights().set(theta[4]);
         link.toneMapping().curveAdjustment().shadows().set(theta[5]);
-        link.toneMapping().clippingPoint().black().set(theta[6]);
-        link.toneMapping().clippingPoint().white().set(theta[7]);
+        link.toneMapping().curveAdjustment().toePivot().set(theta[6]);
+        link.toneMapping().curveAdjustment().shoulderPivot().set(theta[7]);
+        link.toneMapping().clippingPoint().black().set(theta[8]);
+        link.toneMapping().clippingPoint().white().set(theta[9]);
 
         // GlobalColor (3)
-        link.globalColor().vibrance().set(theta[8]);
-        link.globalColor().saturation().set(theta[9]);
-        link.globalColor().colourDensity().set(theta[10]);
+        link.globalColor().vibrance().set(theta[10]);
+        link.globalColor().saturation().set(theta[11]);
+        link.globalColor().colourDensity().set(theta[12]);
 
         // SelectiveColour (24)
         auto writeHSL = [&](pipe::Body::Link::SelectiveColour::HslAdjust& hsl, int base) {
@@ -108,14 +114,14 @@ namespace tune::internal
             hsl.luminance(theta[base + 2]);
         };
 
-        writeHSL(link.selectiveColour().red(), 11);
-        writeHSL(link.selectiveColour().orange(), 14);
-        writeHSL(link.selectiveColour().yellow(), 17);
-        writeHSL(link.selectiveColour().green(), 20);
-        writeHSL(link.selectiveColour().cyan(), 23);
-        writeHSL(link.selectiveColour().blue(), 26);
-        writeHSL(link.selectiveColour().purple(), 29);
-        writeHSL(link.selectiveColour().magenta(), 32);
+        writeHSL(link.selectiveColour().red(), 13);
+        writeHSL(link.selectiveColour().orange(), 16);
+        writeHSL(link.selectiveColour().yellow(), 19);
+        writeHSL(link.selectiveColour().green(), 22);
+        writeHSL(link.selectiveColour().cyan(), 25);
+        writeHSL(link.selectiveColour().blue(), 28);
+        writeHSL(link.selectiveColour().purple(), 31);
+        writeHSL(link.selectiveColour().magenta(), 34);
     }
 
     // Initialize theta to neutral (0.5 for all dials)
@@ -323,13 +329,13 @@ namespace tune::internal
         int totalIter = config.geos_max_iter;
         int iterCount = 0;
 
-        // Phase 1: Block A (8 dials)
+        // Phase 1: Block A (10 dials)
         int phase1Iter = static_cast<int>(totalIter * PHASE1_RATIO);
-        std::cerr << "\n[GEOS] === Phase 1: Block A (8 dials) ===" << std::endl;
+        std::cerr << "\n[GEOS] === Phase 1: Block A (10 dials) ===" << std::endl;
         float lossAfterA = optimizeBlock(
             body, link, targetStyle, theta,
             BLOCK_A_START, BLOCK_A_SIZE,
-            BLOCK_8D, phase1Iter,
+            BLOCK_10D, phase1Iter,
             iterCount, totalIter,
             Progress::Phase::HUGE,
             targetLaplacianVar, progress, rng);
@@ -345,13 +351,13 @@ namespace tune::internal
             Progress::Phase::MIDS,
             targetLaplacianVar, progress, rng);
 
-        // Phase 3: Joint A+B (11 dials)
+        // Phase 3: Joint A+B (13 dials)
         int phase3Iter = static_cast<int>(totalIter * PHASE3_RATIO);
-        std::cerr << "\n[GEOS] === Phase 3: Joint A+B (11 dials) ===" << std::endl;
+        std::cerr << "\n[GEOS] === Phase 3: Joint A+B (13 dials) ===" << std::endl;
         float lossAfterAB = optimizeBlock(
             body, link, targetStyle, theta,
             0, BLOCK_AB_SIZE,
-            BLOCK_11D, phase3Iter,
+            BLOCK_13D, phase3Iter,
             iterCount, totalIter,
             Progress::Phase::TINY,
             targetLaplacianVar, progress, rng);
@@ -372,7 +378,7 @@ namespace tune::internal
 
         std::cerr << "\n[GEOS-BLOCKWISE] === FINAL ===" << std::endl;
         std::cerr << "[GEOS] Final loss: " << finalLoss << std::endl;
-        std::cerr << "[GEOS] Theta[0..10]: ";
+        std::cerr << "[GEOS] Theta[0..12]: ";
         for (int i = 0; i < BLOCK_AB_SIZE; i++)
             std::cerr << theta[i] << " ";
         std::cerr << std::endl;
@@ -381,9 +387,9 @@ namespace tune::internal
     }
 
     // ============================================================
-    // FULL_35D mode: all dials simultaneously
+    // FULL_37D mode: all dials simultaneously
     // ============================================================
-    int optimizeFull35D(
+    int optimizeFull37D(
         pipe::Body& body,
         pipe::Body::Link& link,
         const StyleFeatures& targetStyle,
@@ -399,28 +405,28 @@ namespace tune::internal
         writeDials(link, theta);
 
         float initialLoss = evaluateLoss(body, targetStyle);
-        std::cerr << "[GEOS-FULL35D] Initial loss: " << initialLoss << std::endl;
+        std::cerr << "[GEOS-FULL37D] Initial loss: " << initialLoss << std::endl;
 
         int totalIter = config.geos_max_iter;
         int iterCount = 0;
 
-        // Single phase: all 35 dials
-        std::cerr << "\n[GEOS] === Full 35D optimization ===" << std::endl;
+        // Single phase: all 37 dials
+        std::cerr << "\n[GEOS] === Full 37D optimization ===" << std::endl;
         float finalLoss = optimizeBlock(
             body, link, targetStyle, theta,
-            0, GEOS_DIAL_COUNT,  // All 35 dials
-            BLOCK_35D, totalIter,
+            0, GEOS_DIAL_COUNT,  // All 37 dials
+            BLOCK_37D, totalIter,
             iterCount, totalIter,
             Progress::Phase::HUGE,  // Single long phase
             targetLaplacianVar, progress, rng);
 
-        std::cerr << "\n[GEOS-FULL35D] === FINAL ===" << std::endl;
+        std::cerr << "\n[GEOS-FULL37D] === FINAL ===" << std::endl;
         std::cerr << "[GEOS] Final loss: " << finalLoss << std::endl;
-        std::cerr << "[GEOS] Theta[0..10]: ";
+        std::cerr << "[GEOS] Theta[0..12]: ";
         for (int i = 0; i < BLOCK_AB_SIZE; i++)
             std::cerr << theta[i] << " ";
         std::cerr << std::endl;
-        std::cerr << "[GEOS] Theta[11..34] (selective): ";
+        std::cerr << "[GEOS] Theta[13..36] (selective): ";
         for (int i = BLOCK_C_START; i < GEOS_DIAL_COUNT; i++)
             std::cerr << theta[i] << " ";
         std::cerr << std::endl;
@@ -452,7 +458,7 @@ namespace tune::internal
         // Dispatch based on mode
         if (config.geos_mode == GeosMode::FULL_35D)
         {
-            return optimizeFull35D(body, link, targetStyle, targetLaplacianVar, config, progress);
+            return optimizeFull37D(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
         else
         {

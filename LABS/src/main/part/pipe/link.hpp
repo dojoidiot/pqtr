@@ -14,6 +14,7 @@ namespace pipe::internal
     // Forward declarations for module implementations
     class GeometricImpl;
     class ColorCorrectionImpl;
+    class LutCurveImpl;
     class ToneMappingImpl;
     class GlobalColorImpl;
     class SelectiveColourImpl;
@@ -30,6 +31,7 @@ namespace pipe::internal
         Name name() override;
         Geometric& geometric() override;
         ColorCorrection& colorCorrection() override;
+        LutCurve& lutCurve() override;
         ToneMapping& toneMapping() override;
         GlobalColor& globalColor() override;
         SelectiveColour& selectiveColour() override;
@@ -41,6 +43,7 @@ namespace pipe::internal
         Name m_name;
         std::unique_ptr<GeometricImpl> m_geometric;
         std::unique_ptr<ColorCorrectionImpl> m_colorCorrection;
+        std::unique_ptr<LutCurveImpl> m_lutCurve;
         std::unique_ptr<ToneMappingImpl> m_toneMapping;
         std::unique_ptr<GlobalColorImpl> m_globalColor;
         std::unique_ptr<SelectiveColourImpl> m_selectiveColour;

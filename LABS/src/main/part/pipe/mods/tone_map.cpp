@@ -1,6 +1,6 @@
 // tone_map.cpp
 // Tone Mapping Module - Filmic HDR to SDR compression
-// Part of Tone Mapping module (5 dials)
+// Part of Tone Mapping module (7 dials)
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -15,20 +15,22 @@ namespace mods
     // Input:  CV_32FC3 scene-linear sRGB
     // Output: CV_32FC3 tone-mapped linear (before gamma)
     //
-    // 5 Dials (all 0.0-1.0, ALL NEUTRAL AT 0.5):
-    //   contrast:    0.5-2.0 global contrast (0.5 = 1.0, neutral)
-    //   highlights:  -1.0 to +1.0 shoulder adjustment (0.5 = 0, neutral)
-    //   shadows:     -1.0 to +1.0 toe adjustment (0.5 = 0, neutral)
-    //   white_point: Reinhard compression (0.5 = bypass/neutral, <0.5 = aggressive, >0.5 = mild)
-    //   black_point: Shadow lift/crush (0.5 = 0/neutral, <0.5 = crush, >0.5 = lift)
+    // 7 Dials (all 0.0-1.0, ALL NEUTRAL AT 0.5):
+    //   contrast:       0.5-2.0 global contrast (0.5 = 1.0, neutral)
+    //   highlights:     -1.0 to +1.0 shoulder adjustment (0.5 = 0, neutral)
+    //   shadows:        -1.0 to +1.0 toe adjustment (0.5 = 0, neutral)
+    //   toe_pivot:      where shadow region ends (0.5 = 0.3 luminance)
+    //   shoulder_pivot: where highlight region begins (0.5 = 0.7 luminance)
+    //   white_point:    Reinhard compression (0.5 = bypass/neutral)
+    //   black_point:    Shadow lift/crush (0.5 = 0/neutral)
     //
     // At dial 0.5 for all parameters, tone_map is a pass-through (no effect).
     //
     // Algorithm:
     //   1. Apply black point adjustment (lift or crush)
     //   2. Apply extended Reinhard with white point (bypassed at 0.5)
-    //   3. Apply shadows curve (toe)
-    //   4. Apply highlights curve (shoulder)
+    //   3. Apply shadows curve with smooth mask (toe)
+    //   4. Apply highlights curve with smooth mask (shoulder)
     //   5. Apply contrast
     bool tone_map(
         const cv::UMat &input,
@@ -36,6 +38,8 @@ namespace mods
         float contrast_dial,
         float highlights_dial,
         float shadows_dial,
+        float toe_pivot_dial,
+        float shoulder_pivot_dial,
         float white_point_dial,
         float black_point_dial)
     {
@@ -55,6 +59,8 @@ namespace mods
         contrast_dial = std::max(0.0f, std::min(1.0f, contrast_dial));
         highlights_dial = std::max(0.0f, std::min(1.0f, highlights_dial));
         shadows_dial = std::max(0.0f, std::min(1.0f, shadows_dial));
+        toe_pivot_dial = std::max(0.0f, std::min(1.0f, toe_pivot_dial));
+        shoulder_pivot_dial = std::max(0.0f, std::min(1.0f, shoulder_pivot_dial));
         white_point_dial = std::max(0.0f, std::min(1.0f, white_point_dial));
         black_point_dial = std::max(0.0f, std::min(1.0f, black_point_dial));
 
@@ -67,6 +73,14 @@ namespace mods
         // Highlights/Shadows: linear -1 to +1 (dial 0.5 = 0)
         float highlights = (highlights_dial - 0.5f) * 2.0f;
         float shadows = (shadows_dial - 0.5f) * 2.0f;
+
+        // Pivot points: dial 0.5 = default positions (0.3 for toe, 0.7 for shoulder)
+        // Range: toe 0.1-0.5, shoulder 0.5-0.9
+        float toe_pivot = 0.1f + toe_pivot_dial * 0.4f;        // 0.1 to 0.5
+        float shoulder_pivot = 0.5f + shoulder_pivot_dial * 0.4f;  // 0.5 to 0.9
+
+        // Smooth mask steepness (how fast transition happens)
+        const float mask_steepness = 12.0f;
 
         // White point: controls Reinhard compression strength
         // dial 0.0 → W=2.0 (aggressive compression)
@@ -133,14 +147,22 @@ namespace mods
             }
             // else: bypass Reinhard, keep working as-is
 
-            // Step 3: Shadow curve adjustment (toe)
+            // Step 3: Shadow curve adjustment (toe) with smooth mask
             // Lift dark values when shadows > 0, crush when < 0
             if (std::abs(shadows) > 0.01f)
             {
-                // Soft toe curve: blend linear with power curve
+                // Smooth sigmoid mask: weight = 1 / (1 + exp(k * (L - pivot)))
+                // High weight for L < pivot, smooth falloff above
+                cv::UMat shifted;
+                cv::subtract(working, toe_pivot, shifted);
+                cv::multiply(shifted, mask_steepness, shifted);
+
+                // Compute sigmoid: 1 / (1 + exp(x))
+                cv::UMat exp_val;
+                cv::exp(shifted, exp_val);
                 cv::UMat shadow_mask;
-                cv::threshold(working, shadow_mask, 0.5f, 1.0f, cv::THRESH_BINARY_INV);
-                shadow_mask.convertTo(shadow_mask, CV_32FC3);
+                cv::add(exp_val, 1.0f, shadow_mask);
+                cv::divide(1.0f, shadow_mask, shadow_mask);
 
                 // Power adjustment for shadows region
                 float shadow_gamma = 1.0f - shadows * 0.5f;  // 0.5-1.5 range
@@ -151,7 +173,7 @@ namespace mods
                 cv::add(working, 0.001f, lifted);
                 cv::pow(lifted, shadow_gamma, shadow_adjusted);
 
-                // Blend based on shadow mask
+                // Blend based on smooth shadow mask
                 cv::UMat inv_mask;
                 cv::subtract(1.0f, shadow_mask, inv_mask);
 
@@ -161,14 +183,22 @@ namespace mods
                 cv::add(shadow_part, keep_part, working);
             }
 
-            // Step 4: Highlight curve adjustment (shoulder)
+            // Step 4: Highlight curve adjustment (shoulder) with smooth mask
             // Compress highlights when < 0, expand when > 0
             if (std::abs(highlights) > 0.01f)
             {
-                // Soft shoulder curve
+                // Smooth sigmoid mask: weight = 1 / (1 + exp(-k * (L - pivot)))
+                // High weight for L > pivot, smooth falloff below
+                cv::UMat shifted;
+                cv::subtract(working, shoulder_pivot, shifted);
+                cv::multiply(shifted, -mask_steepness, shifted);
+
+                // Compute sigmoid: 1 / (1 + exp(x))
+                cv::UMat exp_val;
+                cv::exp(shifted, exp_val);
                 cv::UMat highlight_mask;
-                cv::threshold(working, highlight_mask, 0.5f, 1.0f, cv::THRESH_BINARY);
-                highlight_mask.convertTo(highlight_mask, CV_32FC3);
+                cv::add(exp_val, 1.0f, highlight_mask);
+                cv::divide(1.0f, highlight_mask, highlight_mask);
 
                 // Inverse power for highlights (expand/compress upper values)
                 float highlight_gamma = 1.0f + highlights * 0.5f;  // 0.5-1.5 range
@@ -182,7 +212,7 @@ namespace mods
                 cv::pow(inv_working, highlight_gamma, highlight_adjusted);
                 cv::subtract(1.0f, highlight_adjusted, highlight_adjusted);
 
-                // Blend based on highlight mask
+                // Blend based on smooth highlight mask
                 cv::UMat inv_mask;
                 cv::subtract(1.0f, highlight_mask, inv_mask);
 

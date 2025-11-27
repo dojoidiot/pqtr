@@ -129,6 +129,65 @@ public:
 };
 
 // ============================================================
+// LUT Curve Module (per-channel RGB pre-pass)
+// ============================================================
+
+class LutCurveImpl : public Body::Link::LutCurve
+{
+    static constexpr int SIZE = LUT_SIZE;
+    float m_lut[SIZE * 3];  // R, G, B channels
+    bool m_estimated = false;
+
+public:
+    LutCurveImpl()
+    {
+        reset();
+    }
+
+    const float* lut() const override { return m_lut; }
+
+    void setLut(const float* values) override
+    {
+        for (int i = 0; i < SIZE * 3; i++)
+            m_lut[i] = values[i];
+        m_estimated = true;
+    }
+
+    bool estimate(View base, View target) override
+    {
+        if (!mods::estimate_lut(base, target, m_lut, SIZE))
+            return false;
+        m_estimated = true;
+        return true;
+    }
+
+    void reset() override
+    {
+        // Initialize all 3 channels to identity
+        for (int ch = 0; ch < 3; ch++)
+        {
+            for (int i = 0; i < SIZE; i++)
+                m_lut[ch * SIZE + i] = static_cast<float>(i) / (SIZE - 1);
+        }
+        m_estimated = false;
+    }
+
+    bool isEstimated() const override { return m_estimated; }
+
+    bool apply(View& view)
+    {
+        if (!m_estimated)
+            return true;  // No-op if not estimated
+
+        View output;
+        if (!mods::lut_curve(view, output, m_lut, SIZE))
+            return false;
+        view = output;
+        return true;
+    }
+};
+
+// ============================================================
 // Tone Mapping Module
 // ============================================================
 
@@ -154,13 +213,29 @@ public:
     View run(View view) override { return view; }
 };
 
+class PivotImpl : public Body::Link::ToneMapping::CurveAdjustment::Pivot
+{
+    bool& m_active;
+    float m_value = 0.5f;
+public:
+    PivotImpl(bool& active) : m_active(active) {}
+    float get() override { return m_value; }
+    void set(float v) override { m_value = v; m_active = true; }
+    View run(View view) override { return view; }
+};
+
 class CurveAdjustmentImpl : public Body::Link::ToneMapping::CurveAdjustment
 {
     RegionImpl m_highlights, m_shadows;
+    PivotImpl m_toePivot, m_shoulderPivot;
 public:
-    CurveAdjustmentImpl(bool& active) : m_highlights(active), m_shadows(active) {}
+    CurveAdjustmentImpl(bool& active)
+        : m_highlights(active), m_shadows(active)
+        , m_toePivot(active), m_shoulderPivot(active) {}
     Region& highlights() override { return m_highlights; }
     Region& shadows() override { return m_shadows; }
+    Pivot& toePivot() override { return m_toePivot; }
+    Pivot& shoulderPivot() override { return m_shoulderPivot; }
 };
 
 class ShadeImpl : public Body::Link::ToneMapping::ClippingPoint::Shade
@@ -203,6 +278,8 @@ public:
                 m_contrast.get(),
                 m_curve.highlights().get(),
                 m_curve.shadows().get(),
+                m_curve.toePivot().get(),
+                m_curve.shoulderPivot().get(),
                 m_clip.white().get(),
                 m_clip.black().get()))
             return false;
@@ -393,6 +470,7 @@ LinkImpl::LinkImpl(Name name)
     : m_name(std::move(name))
     , m_geometric(std::make_unique<GeometricImpl>())
     , m_colorCorrection(std::make_unique<ColorCorrectionImpl>())
+    , m_lutCurve(std::make_unique<LutCurveImpl>())
     , m_toneMapping(std::make_unique<ToneMappingImpl>())
     , m_globalColor(std::make_unique<GlobalColorImpl>())
     , m_selectiveColour(std::make_unique<SelectiveColourImpl>())
@@ -405,6 +483,7 @@ LinkImpl::~LinkImpl() = default;
 Name LinkImpl::name() { return m_name; }
 Body::Link::Geometric& LinkImpl::geometric() { return *m_geometric; }
 Body::Link::ColorCorrection& LinkImpl::colorCorrection() { return *m_colorCorrection; }
+Body::Link::LutCurve& LinkImpl::lutCurve() { return *m_lutCurve; }
 Body::Link::ToneMapping& LinkImpl::toneMapping() { return *m_toneMapping; }
 Body::Link::GlobalColor& LinkImpl::globalColor() { return *m_globalColor; }
 Body::Link::SelectiveColour& LinkImpl::selectiveColour() { return *m_selectiveColour; }
@@ -414,6 +493,7 @@ View LinkImpl::run(View view)
 {
     if (m_geometric->isActive()) m_geometric->apply(view);
     if (m_colorCorrection->isActive()) m_colorCorrection->apply(view);
+    if (m_lutCurve->isEstimated()) m_lutCurve->apply(view);
     if (m_toneMapping->isActive()) m_toneMapping->apply(view);
     if (m_globalColor->isActive()) m_globalColor->apply(view);
     if (m_selectiveColour->isActive()) m_selectiveColour->apply(view);
