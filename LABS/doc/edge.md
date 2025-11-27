@@ -8,7 +8,7 @@ This document describes the theoretical foundation and algorithm for **sharpness
 
 Edge captures the "crispness" of an image - sharp edges vs soft/dreamy, noise reduction level, fine detail preservation. It does **not** capture color or tone (see [geos.md](./geos.md) for spectral color/tone metrics).
 
-The theory in this document underpins the **frequency loss** in [diff.md](./diff.md) and the **greedy optimizer** in [tune.md](./tune.md).
+The theory in this document underpins the **frequency loss** in [diff.md](./diff.md) and the **golden section optimizer** in [tune.md](./tune.md).
 
 ---
 
@@ -94,11 +94,11 @@ $$\mathcal{L}_{edge} = \frac{|\text{Var}_{candidate} - \text{Var}_{target}|}{\te
 
 ---
 
-## Greedy Optimization
+## Golden Section Optimization
 
-### Why Greedy?
+### Why Golden Section?
 
-With only 4 dials (sharpen amount, sharpen radius, denoise luminance, denoise chroma), exhaustive search is feasible. Greedy optimization is:
+With only 2 dials (sharpen amount, sharpen radius), golden section search is optimal:
 - Simple and reliable
 - No hyperparameters to tune
 - Deterministic results
@@ -109,12 +109,12 @@ With only 4 dials (sharpen amount, sharpen radius, denoise luminance, denoise ch
 For each detail dial in order:
 
 ```
-for dial in [sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma]:
+for dial in [sharpen_amount, sharpen_radius]:
     best_value = golden_section_search(
         dial,
         range=[0.0, 1.0],
         loss_fn=frequency_loss,
-        tolerance=0.01
+        tolerance=0.02
     )
     dial = best_value  # Fix and continue
 ```
@@ -127,37 +127,33 @@ Efficient 1D optimization:
 3. Narrow bracket based on which point has lower loss
 4. Repeat until $|b - a| < \text{tolerance}$
 
-**Evaluations per dial:** ~15 (log convergence)
+**Evaluations per dial:** ~10 (log convergence)
 
 ### Dial Order
 
-The order matters for greedy optimization:
-
 1. **Sharpen amount** - Primary sharpness control
 2. **Sharpen radius** - Refine sharpening character
-3. **Denoise luminance** - Balance sharpness vs noise
-4. **Denoise chroma** - Final color noise cleanup
 
-This order follows the processing pipeline and ensures each dial optimizes in context of previous dials.
+Denoise is skipped during optimization - the target image already has camera noise reduction applied, and adding more would make output softer than target.
 
 ---
 
-## The 4 Detail Dials
+## The 2 Optimized Dials
 
-| Dial | Range | Default | Effect |
+| Dial | Range | Typical | Effect |
 |------|-------|---------|--------|
-| `sharpen_amount` | 0-1 | 0.6 | Strength of unsharp mask |
+| `sharpen_amount` | 0-1 | 0.2 | Strength of unsharp mask |
 | `sharpen_radius` | 0-1 | 0.4 | Size of sharpening kernel (0.5-3px) |
-| `denoise_luma` | 0-1 | 0.3 | Luminance noise reduction |
-| `denoise_chroma` | 0-1 | 0.5 | Color noise reduction |
 
-### Dial Interactions
+### Luminance-Only Sharpening
 
-- **sharpen + denoise_luma:** Competing effects on edge energy
-- **radius + amount:** Larger radius needs less amount for same effect
-- **denoise_chroma:** Minimal impact on Laplacian (color-blind metric)
+Sharpening operates exclusively on the L channel in Lab color space:
+- Converts to Lab
+- Applies unsharp mask to L only
+- Preserves a/b channels unchanged
+- Converts back to RGB
 
-The greedy approach handles interactions implicitly by optimizing in sequence.
+This prevents sharpening from affecting color accuracy (spectral loss) while still matching sharpness characteristics.
 
 ---
 
@@ -184,11 +180,13 @@ But sensitive to:
 ### Integration with GeoS
 
 Edge optimization runs **after** GeoS color/tone optimization:
-1. GeoS optimizes 35 color/tone dials
-2. Edge optimizes 4 detail dials
-3. Total: 39 creative dials optimized
+1. GeoS estimates 17³ LUT + optimizes 17 color/tone dials
+2. Edge optimizes 2 sharpness dials (L-channel only)
+3. Total: 19 optimized dials + LUT
 
-The separation ensures sharpness optimization doesn't interfere with color matching.
+The separation ensures:
+- Sharpness optimization doesn't interfere with color matching
+- L-only sharpening preserves spectral accuracy achieved by GeoS
 
 ---
 
@@ -196,11 +194,12 @@ The separation ensures sharpness optimization doesn't interfere with color match
 
 | Metric | Value |
 |--------|-------|
-| Dials optimized | 4 |
-| Evaluations per dial | ~15 |
-| Total evaluations | ~60 |
-| Time per evaluation | ~30ms |
+| Dials optimized | 2 |
+| Evaluations per dial | ~10 |
+| Total evaluations | ~20 |
+| Time per evaluation | ~100ms |
 | **Total time** | **~2 seconds** |
+| **Final ratio** | ~1.0 (matched) |
 
 ---
 
@@ -212,8 +211,6 @@ namespace edge {
 struct EdgeResult {
     float sharpen_amount;
     float sharpen_radius;
-    float denoise_luma;
-    float denoise_chroma;
     float final_loss;
     int evaluations;
 };
@@ -223,7 +220,7 @@ struct EdgeConfig {
     int max_evaluations = 100;
 };
 
-// Optimize 4 detail dials
+// Optimize 2 detail dials (L-channel sharpening)
 EdgeResult optimize(
     const cv::UMat& source_linear,
     const cv::UMat& reference,

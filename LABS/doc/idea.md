@@ -51,7 +51,7 @@ float multi_scale_loss(const cv::UMat& candidate, const cv::UMat& reference) {
 
 - Adds ~3x compute per evaluation (still fast at ~6ms)
 - Weights (0.5, 0.3, 0.2) need tuning via real-world testing
-- May not significantly improve results for only 4 dials
+- May not significantly improve results for only 2 dials
 - Worth pursuing if single-scale shows limitations in practice
 
 ---

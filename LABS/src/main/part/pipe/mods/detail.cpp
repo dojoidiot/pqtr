@@ -11,26 +11,78 @@ namespace pipe
 {
 namespace mods
 {
-    // Apply unsharp mask sharpening
+    // Apply unsharp mask sharpening (luminance-only)
     // Input:  CV_32FC3 linear RGB
-    // Output: CV_32FC3 sharpened linear RGB
+    // Output: CV_32FC3 sharpened linear RGB (colors preserved)
+    //
+    // Sharpens only the luminance channel in Lab space to avoid
+    // color shifts and chromatic aberration amplification.
     static void apply_sharpen(cv::UMat& img, float amount, float radius)
     {
         if (amount < 0.01f) return;
 
-        // Create blurred version
-        cv::UMat blurred;
+        // Convert to gamma-encoded RGB for Lab conversion
+        cv::UMat clamped;
+        cv::max(img, 0.0f, clamped);
+        cv::min(clamped, 1.0f, clamped);
+
+        cv::UMat gamma_rgb;
+        cv::pow(clamped, 1.0f/2.2f, gamma_rgb);
+
+        // Convert to 8-bit BGR for Lab conversion
+        cv::UMat rgb8;
+        gamma_rgb.convertTo(rgb8, CV_8UC3, 255.0);
+
+        cv::UMat bgr8;
+        cv::cvtColor(rgb8, bgr8, cv::COLOR_RGB2BGR);
+
+        // Convert to Lab
+        cv::UMat lab;
+        cv::cvtColor(bgr8, lab, cv::COLOR_BGR2Lab);
+
+        // Split into L, a, b channels
+        std::vector<cv::UMat> channels(3);
+        cv::split(lab, channels);
+
+        // Apply unsharp mask to L channel only
+        cv::UMat L_float;
+        channels[0].convertTo(L_float, CV_32F);
+
+        cv::UMat L_blurred;
         int kernel_size = static_cast<int>(radius * 2) * 2 + 1;  // Ensure odd
         kernel_size = std::max(3, std::min(31, kernel_size));
-        cv::GaussianBlur(img, blurred, cv::Size(kernel_size, kernel_size), radius);
+        cv::GaussianBlur(L_float, L_blurred, cv::Size(kernel_size, kernel_size), radius);
 
-        // Unsharp mask: output = input + amount * (input - blurred)
-        cv::UMat diff;
-        cv::subtract(img, blurred, diff);
-        cv::scaleAdd(diff, amount, img, img);
+        // Unsharp mask: L_sharp = L + amount * (L - L_blurred)
+        cv::UMat L_diff;
+        cv::subtract(L_float, L_blurred, L_diff);
+        cv::scaleAdd(L_diff, amount, L_float, L_float);
 
-        // Clamp to valid range
-        cv::max(img, 0.0f, img);
+        // Clamp L to valid range [0, 255]
+        cv::max(L_float, 0.0f, L_float);
+        cv::min(L_float, 255.0f, L_float);
+
+        // Convert back to 8-bit
+        L_float.convertTo(channels[0], CV_8U);
+
+        // Merge channels (a and b unchanged)
+        cv::UMat lab_sharp;
+        cv::merge(channels, lab_sharp);
+
+        // Convert back to BGR
+        cv::UMat bgr_sharp;
+        cv::cvtColor(lab_sharp, bgr_sharp, cv::COLOR_Lab2BGR);
+
+        // Convert to RGB
+        cv::UMat rgb8_sharp;
+        cv::cvtColor(bgr_sharp, rgb8_sharp, cv::COLOR_BGR2RGB);
+
+        // Convert to float [0,1]
+        cv::UMat gamma_out;
+        rgb8_sharp.convertTo(gamma_out, CV_32FC3, 1.0/255.0);
+
+        // Remove gamma to get linear RGB
+        cv::pow(gamma_out, 2.2f, img);
     }
 
     // Apply bilateral filter denoise (approximation for speed)

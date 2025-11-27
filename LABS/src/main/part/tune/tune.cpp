@@ -96,7 +96,8 @@ namespace tune
 
             // Stage 1: LUT Curve Estimation (from raw base to target)
             // Estimate per-channel curves before any dial adjustments
-            if (!link.lutCurve().isEstimated())
+            // Skip if config.skip_lut is true (for true linear-only baseline)
+            if (!config.skip_lut && !link.lutCurve().isEstimated())
             {
                 View baseView = body.view();
                 if (link.lutCurve().estimate(baseView, m_targetImage))
@@ -112,8 +113,9 @@ namespace tune
             // Stage 2: GEOS (Color/Tone) - fine-tune after LUT
             if (!config.skip_geos)
             {
+                bool lutEstimated = link.lutCurve().isEstimated();
                 result.geos_iterations = optimizeGeos(
-                    body, link, m_targetStyle, m_targetLaplacianVar, config, progress);
+                    body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated);
             }
 
             // Stage 3: Edge (Sharpness)

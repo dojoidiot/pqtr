@@ -17,6 +17,7 @@ namespace pipe::internal
     class LutCurveImpl;
     class ToneMappingImpl;
     class GlobalColorImpl;
+    class SplitToneImpl;
     class SelectiveColourImpl;
     class DetailImpl;
 
@@ -34,6 +35,7 @@ namespace pipe::internal
         LutCurve& lutCurve() override;
         ToneMapping& toneMapping() override;
         GlobalColor& globalColor() override;
+        SplitTone& splitTone() override;
         SelectiveColour& selectiveColour() override;
         Detail& detail() override;
 
@@ -46,6 +48,7 @@ namespace pipe::internal
         std::unique_ptr<LutCurveImpl> m_lutCurve;
         std::unique_ptr<ToneMappingImpl> m_toneMapping;
         std::unique_ptr<GlobalColorImpl> m_globalColor;
+        std::unique_ptr<SplitToneImpl> m_splitTone;
         std::unique_ptr<SelectiveColourImpl> m_selectiveColour;
         std::unique_ptr<DetailImpl> m_detail;
     };

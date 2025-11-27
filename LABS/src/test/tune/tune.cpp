@@ -13,7 +13,8 @@
 // Usage:
 //   make -f Makefile.tune test              # Default: blockwise mode
 //   ./tmp/tune/bin/tune --mode blockwise    # Explicit blockwise (4-phase)
-//   ./tmp/tune/bin/tune --mode full35d      # Full 35D simultaneous
+//   ./tmp/tune/bin/tune --mode full35d      # Full 37D simultaneous
+//   ./tmp/tune/bin/tune --mode linear       # Linear-only (skip ToneMapping)
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -41,6 +42,11 @@ tune::GeosMode parseMode(int argc, char* argv[])
                 std::strcmp(argv[i+1], "35d") == 0)
             {
                 return tune::GeosMode::FULL_35D;
+            }
+            if (std::strcmp(argv[i+1], "linear") == 0 ||
+                std::strcmp(argv[i+1], "lin") == 0)
+            {
+                return tune::GeosMode::LINEAR_ONLY;
             }
         }
     }
@@ -252,13 +258,16 @@ int main(int argc, char* argv[])
                   << metrics.spectral << std::endl;
 
         tune::GeosMode mode = parseMode(argc, argv);
-        std::cout << "  Mode: " << (mode == tune::GeosMode::FULL_35D ? "FULL_35D" : "BLOCKWISE") << std::endl;
+        const char* modeName = (mode == tune::GeosMode::FULL_35D) ? "FULL_35D" :
+                               (mode == tune::GeosMode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
+        std::cout << "  Mode: " << modeName << std::endl;
 
         tune::Config config;
-        config.skip_edge = true;  // Only run GEOS for now
+        config.skip_edge = false;  // Enable edge/sharpness optimization
         config.geos_max_iter = 500;
         config.geos_multi_starts = 5;
         config.geos_mode = mode;
+        config.skip_lut = (mode == tune::GeosMode::LINEAR_ONLY);  // True linear baseline
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
         tune::Result result = tuneTask->run(body, link, config,
@@ -269,6 +278,14 @@ int main(int argc, char* argv[])
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
                               << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral
                               << "  r=" << std::setprecision(3) << p.dome.r
+                              << "     " << std::flush;
+                }
+                else if (p.stage == tune::Progress::Stage::EDGE)
+                {
+                    std::cout << "\r  [EDGE] "
+                              << std::setw(3) << p.iteration << "/" << p.max_iterations
+                              << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency
+                              << "  ratio=" << std::setprecision(3) << p.edge.ratio
                               << "     " << std::flush;
                 }
                 return true;  // Continue optimization

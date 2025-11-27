@@ -178,16 +178,16 @@ After exposure (dial=0.75, +2 EV, ×4):
 | Rotate -15° | 0/0/0/0 | 0 | 0.33 | Image rotated CCW |
 | Combo | 0.1/0.1/0.1/0.1 | 0.2 | 0.55 | Crop + zoom + slight rotation |
 
-#### Detail (4 dials)
+#### Detail (2 dials, L-channel only)
 
-| Test Case | Amount | Radius | Luma | Chroma | Expected Result |
-|-----------|--------|--------|------|--------|-----------------|
-| Neutral | 0 | 0 | 0 | 0 | Values unchanged |
-| Sharpen | 0.6 | 0.4 | 0 | 0 | Edges enhanced |
-| Strong sharpen | 1.0 | 0.5 | 0 | 0 | Visible edge halos |
-| Denoise luma | 0 | 0 | 0.5 | 0 | Luminance smoothed |
-| Denoise chroma | 0 | 0 | 0 | 0.5 | Color noise reduced |
-| Full default | 0.6 | 0.4 | 0.3 | 0.5 | Balanced sharpen + denoise |
+| Test Case | Amount | Radius | Expected Result |
+|-----------|--------|--------|-----------------|
+| Neutral | 0 | 0 | Values unchanged |
+| Sharpen | 0.6 | 0.4 | Edges enhanced (L-only) |
+| Strong sharpen | 1.0 | 0.5 | Visible edge halos |
+| Default | 0.4 | 0.5 | Balanced sharpening |
+
+**Note:** Sharpening operates on L-channel only in Lab color space to preserve color accuracy.
 
 ---
 
@@ -253,24 +253,25 @@ After exposure (dial=0.75, +2 EV, ×4):
 
 ## Tune Testing
 
-### Stage 1: SPSA Tests (Color/Tone - 35 dials)
+### Stage 1: SPSA Tests (Color/Tone - 17 dials + 17³ LUT)
 
 | Test Case | Input | Expected Result |
 |-----------|-------|-----------------|
+| LUT estimation | Source + target images | 17³ LUT captures nonlinear color |
 | Gradient estimation | Known loss surface | Gradient direction correct |
 | Bounds handling | Parameters near 0 or 1 | Values stay in [0, 1] |
 | Multi-start | 5 random starts | Best result selected |
-| Convergence | Style transfer task | Spectral loss < 0.05 within 500 iterations |
+| Convergence | Style transfer task | Spectral loss < 0.001 (0.1%) |
 | Hyperparameter decay | 100 iterations | a_k and c_k decrease correctly |
 
-### Stage 2: Edge Tests (Sharpness - 4 dials)
+### Stage 2: Edge Tests (Sharpness - 2 dials)
 
 | Test Case | Input | Expected Result |
 |-----------|-------|-----------------|
 | Golden section convergence | Single dial optimization | Finds minimum in <20 evals |
 | Sharp reference matching | Blurred source + sharp ref | Sharpen dials increase |
 | Soft reference matching | Sharp source + soft ref | Sharpen dials decrease |
-| Denoise matching | Noisy vs clean reference | Denoise dials adjust |
+| L-only sharpening | RGB comparison | Colors unchanged, edges sharpened |
 
 ### Style Transfer Tests (Full Pipeline)
 
@@ -286,22 +287,23 @@ After exposure (dial=0.75, +2 EV, ×4):
 
 | Role | Dials | Handled By | Test |
 |------|-------|------------|------|
-| Color/Tone | 35 | GeoS (SPSA) | Spectral loss decreases |
-| Sharpness | 4 | Edge (greedy) | Frequency loss decreases |
+| Color/Tone | 17 + LUT | GeoS (3D LUT + SPSA) | Spectral loss < 0.1% |
+| Sharpness | 2 | Edge (golden section) | Frequency loss < 1% |
 | Geometry | 6 | User | Not in style sidecars |
 
 ### Performance Tests
 
 | Test | Target |
 |------|--------|
-| SPSA stage (35 dials) | < 60 seconds |
-| Edge stage (4 dials) | < 5 seconds |
-| Full optimization | < 65 seconds |
+| LUT estimation | < 2 seconds |
+| SPSA stage (17 dials) | < 5 minutes |
+| Edge stage (2 dials) | < 5 seconds |
+| Full optimization | < 6 minutes |
 | Single pipe evaluation | < 33ms (30fps) |
 
 ### Validation Tests
 
-- [ ] Vibe output contains 39 dials (35 + 4)
+- [ ] Vibe output contains 19 dials (17 + 2) + 17³ LUT
 - [ ] Vibe output does NOT contain geometric dials
 - [ ] Vibe output loads correctly in pipe
 - [ ] Progress callback fires at expected intervals

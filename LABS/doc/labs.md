@@ -16,7 +16,7 @@ The `LABS` system consists of several independent programs (executables and libr
      ↓
 ┌─────────┐
 │  pipe   │  6-module creative grading pipeline
-└────┬────┘  Input: linear RGB, 45 dials → Output: display RGB
+└────┬────┘  Input: linear RGB, 25 dials → Output: display RGB
      │ display_rgb.png
      │
      ├──────────────────────────────────┐
@@ -24,8 +24,8 @@ The `LABS` system consists of several independent programs (executables and libr
      ↓                                  ↓
 ┌─────────┐                        ┌─────────┐
 │  diff   │  Spectral loss         │  tune   │  Two-stage optimizer
-└─────────┘  (color/tone) +        └─────────┘  SPSA (35 color dials)
-             Frequency loss                     + Edge (4 detail dials)
+└─────────┘  (color/tone) +        └─────────┘  3D LUT + SPSA (17 color dials)
+             Frequency loss                     + Edge (2 detail dials)
              (sharpness)                        User: 6 geometric dials
 ```
 
@@ -43,7 +43,7 @@ cv::UMat linear_rgb = loader.process("input.ARW");
 // 2. Grade with pipe (core processing pipeline)
 pqtr::Pipe pipeline;
 pqtr::Dials dials;
-dials.fill(0.5f);  // Defaults for all 45 dials
+dials.fill(0.5f);  // Defaults for all 25 dials
 cv::UMat display_rgb = pipeline.process(linear_rgb, dials);
 
 // 3. Save output
@@ -64,8 +64,8 @@ pqtr::Tune tuner(pipeline, diff_tool);
 pqtr::TuneResult result = tuner.optimize(source_linear, reference);
 
 // Result contains:
-// - geos_link: 35 color/tone dials as a pipe Link
-// - edge_link: 4 detail dials as a pipe Link
+// - geos_link: 17 color/tone dials + 17³ LUT as a pipe Link
+// - edge_link: 2 detail dials as a pipe Link
 // - Geometric dials NOT included (user responsibility)
 
 // 3. Save as style sidecars
@@ -85,8 +85,8 @@ cv::UMat styled = pipeline.process();
 ```
 
 **The three roles:**
-- **Color/Tone** (35 dials): Automated via SPSA + spectral loss (~60s)
-- **Sharpness** (4 dials): Automated via Edge + frequency loss (~2s)
+- **Color/Tone** (17 dials + 17³ LUT): Automated via 3D LUT + SPSA + spectral loss (~5min)
+- **Sharpness** (2 dials): Automated via Edge + frequency loss (~2s)
 - **Geometry** (6 dials): User-controlled per image
 
 ### Pattern 3: Real-Time Dial Tuning (`pipe` + `diff`)
@@ -137,19 +137,19 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 
 **`tune` Two-Stage Optimization**:
 
-*Stage 1: SPSA (Color/Tone)*
-- 35 dials optimized
+*Stage 1: 3D LUT + SPSA (Color/Tone)*
+- 17³ LUT estimated from image pairs
+- 17 dials optimized via SPSA
 - ~60ms per iteration (2 pipe evaluations + spectral diff)
-- 200-400 iterations typical
 - Multi-start (5×) for robustness
-- **Subtotal**: ~60 seconds
+- **Subtotal**: ~5 minutes
 
 *Stage 2: Edge (Sharpness)*
-- 4 dials optimized
-- Greedy search, ~15 evaluations per dial
+- 2 dials optimized (L-channel only sharpening)
+- Golden section search, ~10 evaluations per dial
 - **Subtotal**: ~2 seconds
 
-**Total tune time**: ~65 seconds for complete style transfer
+**Total tune time**: ~5 minutes for complete style transfer (0.05% spectral loss)
 
 ## Notes and Considerations
 

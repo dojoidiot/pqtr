@@ -60,8 +60,8 @@ Passive voice is acceptable for:
 - **Link** (named collection of modules in pipe)
 - **camera to web** (project scope statement)
 - **tune** (orchestrates geos + edge optimization)
-- **geos** (spectral optimizer: SPSA, 35 color/tone dials)
-- **edge** (frequency optimizer: greedy, 4 detail dials)
+- **geos** (spectral optimizer: SPSA, 17 color/tone dials + 17³ LUT)
+- **edge** (frequency optimizer: golden section, 2 sharpness dials)
 - **diff** (the comparison tool/metric)
 - **HEAD → BODY → TAIL** (pipeline stages)
 - **spectral loss** (geos: geodesic distance for color/tone)
@@ -112,8 +112,8 @@ Passive voice is acceptable for:
 4. Module test coverage (test cases per module)
 5. Tool test sections:
    - Diff: spectral loss tests, frequency loss tests
-   - GeoS: SPSA algorithm tests (color/tone, 35 dials)
-   - Edge: greedy optimizer tests (sharpness, 4 dials)
+   - GeoS: SPSA algorithm tests (color/tone, 17 dials + 17³ LUT)
+   - Edge: golden section optimizer tests (sharpness, 2 dials)
    - Tune: integration tests, style transfer tests
 6. Running tests (commands, visual inspection)
 
@@ -152,14 +152,16 @@ Passive voice is acceptable for:
 
 #### Items to Verify
 
-**Dial Counts**:
-- Geometric: 6 dials
-- Color Correction: 3 dials
-- Tone Mapping: 5 dials
-- Global Color: 3 dials
-- Selective Color: 24 dials
-- Detail + Output: 4 dials
-- **Total: 45 dials**
+**Dial Counts** (current implementation):
+- Geometric: 6 dials (user-controlled)
+- Color Correction: 3 dials (exposure, temp, tint)
+- Tone Mapping: 7 dials (contrast, highlights, shadows, toe pivot, shoulder pivot, white point, black point)
+- Global Color: 3 dials (vibrance, saturation, color density)
+- Split Tone: 4 dials (shadow hue/sat, highlight hue/sat)
+- Detail: 2 dials optimized (sharpen amount, sharpen radius)
+- **GEOS optimizes: 17 dials + 17³ LUT**
+- **EDGE optimizes: 2 dials**
+- **User controls: 6 geometry dials**
 
 **Color Spaces**:
 - `SCENE_LINEAR_RGB` (camera native)
@@ -193,8 +195,8 @@ Passive voice is acceptable for:
 ### Issue: Dial Count Mismatches
 
 **Problem**: Documentation shows different total than implementation
-**Example**: ❌ "46 dials total"
-**Fix**: ✅ "45 dials total" (verify against actual implementation)
+**Example**: ❌ "45 dials total"
+**Fix**: ✅ "17 GEOS dials + 17³ LUT + 2 EDGE dials + 6 geometry dials" (verify against actual implementation)
 
 ### Issue: Missing Cross-References
 

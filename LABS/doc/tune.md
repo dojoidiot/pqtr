@@ -14,32 +14,33 @@ Image style has three independent dimensions. Each requires different handling:
 
 | Role | Dials | Who/What | Metric | Time |
 |------|-------|----------|--------|------|
-| **Color/Tone** | 35 | SPSA optimizer | Spectral (geodesic) | ~60s |
-| **Sharpness** | 4 | Edge optimizer | Frequency (Laplacian) | ~2s |
+| **Color/Tone** | 17 + LUT | SPSA optimizer | Spectral (geodesic) | ~5min |
+| **Sharpness** | 2 | Edge optimizer | Frequency (Laplacian) | ~2s |
 | **Geometry** | 6 | User | Visual judgment | - |
 
-**Total: 45 dials = 35 + 4 + 6**
+**Total: 25 dials = 17 + 2 + 6** (plus 17³ LUT for nonlinear color)
 
 ### Role 1: Color/Tone (Automated)
 
 The "vibe" or "mood" of an image - warm/cool, saturated/muted, high-key/low-key, contrast, color harmony.
 
-**Dials (35):**
+**Dials (17):**
 - Color Correction: exposure, temperature, tint (3)
-- Tone Mapping: contrast, highlights, shadows, black point, white point (5)
+- Tone Mapping: contrast, highlights, shadows, toe pivot, shoulder pivot, white point, black point (7)
 - Global Color: vibrance, saturation, color density (3)
-- Selective Color: 8 colors × hue/saturation/luminance (24)
+- Split Tone: shadow hue/sat, highlight hue/sat (4)
+- **17³ 3D LUT** captures nonlinear camera color science
 
-**Method:** SPSA with spectral loss. Content-invariant - works across different scenes.
+**Method:** 3D LUT estimation + SPSA with spectral loss. Content-invariant.
 
 ### Role 2: Sharpness (Automated)
 
 The texture quality - crisp edges vs soft/dreamy, noise reduction level.
 
-**Dials (4):**
-- Detail: sharpen amount, sharpen radius, denoise luminance, denoise chroma
+**Dials (2):**
+- Detail: sharpen amount, sharpen radius
 
-**Method:** Edge optimizer with frequency-based loss. Matches sharpness characteristics.
+**Method:** Golden section search with Laplacian variance. Luminance-only sharpening preserves color accuracy.
 
 ### Role 3: Geometry (User-Controlled)
 
@@ -70,7 +71,7 @@ The complete tune workflow transforms scene-referred RAW into camera-matched out
 │              DIFF ──► metrics (spectral + frequency loss)       │
 │                │                                                │
 │                ▼                                                │
-│              TUNE ──► edit steps (35 color + 4 detail dials)    │
+│              TUNE ──► edit steps (17 color + 2 detail dials)    │
 │                │                                                │
 │                ▼                                                │
 │              BODY (with edit steps) ──► TAIL ──► tail.png       │
@@ -95,12 +96,13 @@ make -f Makefile.tune test
 - `diff.png` - Visual difference (head vs body)
 - `diff.json` - Loss metrics baseline
 
-**Example metrics** (no edit steps):
+**Example metrics:**
 ```json
-{
-  "spectral": 0.024843,    // 2.5% color/tone gap
-  "frequency": 0.814570    // 81% sharpness gap (expected - no sharpening)
-}
+// Baseline (no edit steps):
+{ "spectral": 0.024843, "frequency": 0.814570 }  // 2.5% color, 81% sharpness
+
+// After optimization (17 dials + LUT + edge):
+{ "spectral": 0.000511, "frequency": 0.007 }     // 0.05% color, <1% sharpness
 ```
 
 ---
@@ -131,7 +133,7 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 ### Full Optimization (Color + Sharpness)
 
 ```bash
-# Optimize all 39 creative dials
+# Optimize all 19 creative dials (17 color + 2 sharpness)
 # Outputs: style.geos.json + style.edge.json
 ./tune source.ARW reference.png --output style
 
@@ -159,17 +161,17 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 
 ## Stage 1: GeoS Color/Tone Optimizer
 
-Optimizes 35 dials using spectral loss (geodesic distance on hypersphere).
+Optimizes 17 dials + 17³ LUT using spectral loss (geodesic distance on hypersphere).
 
 **See [geos.md](./geos.md) for full theory and algorithm.**
 
 | Aspect | Value |
 |--------|-------|
-| **Dials** | 35 (color correction, tone mapping, global color, selective color) |
-| **Algorithm** | SPSA (Simultaneous Perturbation Stochastic Approximation) |
+| **Dials** | 17 (exposure, WB, tone mapping, global color, split tone) + 17³ LUT |
+| **Algorithm** | 3D LUT estimation + SPSA (Simultaneous Perturbation Stochastic Approximation) |
 | **Phases** | HUGE → MIDS → TINY (coarse-to-fine) |
 | **Loss** | Spectral (geodesic) - content-invariant |
-| **Time** | ~60 seconds |
+| **Time** | ~5 minutes |
 | **Multi-start** | 5 random initializations |
 
 ### Coarse-to-Fine Phases
@@ -190,14 +192,14 @@ GEOS proceeds through three phases with progressively smaller step sizes:
 
 ## Stage 2: Edge Sharpness Optimizer
 
-Optimizes 4 detail dials using frequency-based loss (Laplacian variance).
+Optimizes 2 detail dials using frequency-based loss (Laplacian variance).
 
 **See [edge.md](./edge.md) for full theory and algorithm.**
 
 | Aspect | Value |
 |--------|-------|
-| **Dials** | 4 (sharpen amount/radius, denoise luma/chroma) |
-| **Algorithm** | Greedy (golden section search per dial) |
+| **Dials** | 2 (sharpen amount, sharpen radius) |
+| **Algorithm** | Golden section search (L-channel only) |
 | **Loss** | Frequency (Laplacian variance) - content-invariant |
 | **Time** | ~2 seconds |
 
@@ -208,8 +210,8 @@ Optimizes 4 detail dials using frequency-based loss (Laplacian variance).
 Tune outputs two sidecar files, each in pipe Link format:
 
 ```
-<name>.geos.json   # 35 color/tone dials
-<name>.edge.json   # 4 detail dials
+<name>.geos.json   # 17 color/tone dials + 17³ LUT
+<name>.edge.json   # 2 detail dials
 ```
 
 These are standard pipe Links - they can be added directly to any pipe.json.
@@ -220,7 +222,7 @@ These are standard pipe Links - they can be added directly to any pipe.json.
 {
   "name": "geos",
   "meta": {
-    "loss": 0.0156,
+    "loss": 0.0005,
     "iterations": 342,
     "reference": "sunset_beach.png"
   },
@@ -231,24 +233,28 @@ These are standard pipe Links - they can be added directly to any pipe.json.
     },
     "tone_mapping": {
       "contrast": { "value": 0.72 },
-      "curve_adjustment": { "highlights": 0.45, "shadows": 0.55 },
-      "clipping_point": { "black": 0.15, "white": 0.85 }
+      "highlights": 0.45,
+      "shadows": 0.55,
+      "toe_pivot": 0.5,
+      "shoulder_pivot": 0.5,
+      "black_point": 0.35,
+      "white_point": 0.85
     },
     "global_color": {
       "vibrance": 0.55,
       "saturation": 0.68,
       "color_density": 0.52
     },
-    "selective_color": {
-      "red": { "hue": 0.52, "saturation": 0.55, "luminance": 0.5 },
-      "orange": { "hue": 0.5, "saturation": 0.6, "luminance": 0.5 },
-      "yellow": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "green": { "hue": 0.5, "saturation": 0.45, "luminance": 0.5 },
-      "cyan": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "blue": { "hue": 0.48, "saturation": 0.55, "luminance": 0.5 },
-      "purple": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "magenta": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 }
+    "split_tone": {
+      "shadow_hue": 0.5,
+      "shadow_sat": 0.5,
+      "highlight_hue": 0.5,
+      "highlight_sat": 0.5
     }
+  },
+  "lut3d": {
+    "grid": 17,
+    "data": "base64-encoded-58956-bytes..."
   }
 }
 ```
@@ -259,19 +265,19 @@ These are standard pipe Links - they can be added directly to any pipe.json.
 {
   "name": "edge",
   "meta": {
-    "loss": 0.0234,
+    "loss": 0.007,
     "reference": "sunset_beach.png"
   },
   "modules": {
     "detail": {
-      "sharpen": { "amount": 0.4, "radius": 0.5 },
-      "denoise": { "luminance": 0.3, "chroma": 0.5 }
+      "sharpen_amount": 0.4,
+      "sharpen_radius": 0.5
     }
   }
 }
 ```
 
-**Note:** Geometric dials are not included - they are user-controlled per image.
+**Note:** Geometric dials are not included - they are user-controlled per image. Sharpening operates on L-channel only to preserve color accuracy.
 
 ---
 
@@ -538,8 +544,8 @@ tune::Result result = task->run(body, link, config,
 
 | What | How | Time |
 |------|-----|------|
-| **Color/Tone** (35 dials) | SPSA + spectral loss | ~60s |
-| **Sharpness** (4 dials) | Greedy + frequency loss | ~2s |
+| **Color/Tone** (17 dials + LUT) | 3D LUT + SPSA + spectral loss | ~5min |
+| **Sharpness** (2 dials) | Golden section + frequency loss | ~2s |
 | **Geometry** (6 dials) | User sets manually | - |
 
 The user's responsibility is simple: **frame your shot**. The tool handles the rest.
@@ -554,8 +560,8 @@ The tune module is split into focused files:
 |------|---------|
 | `tune.cpp` | Task class + `make()` factory |
 | `diff.cpp` | Loss metrics (spectral, frequency) |
-| `geos.cpp` | SPSA optimizer for color/tone (stub) |
-| `edge.cpp` | Golden section for sharpness (stub) |
+| `geos.cpp` | 3D LUT estimation + SPSA optimizer for color/tone |
+| `edge.cpp` | Golden section for sharpness (L-channel only) |
 | `data.cpp` | Data ↔ JSON serialization |
 
 See [libs.md](./libs.md) for full source structure.
@@ -565,7 +571,7 @@ See [libs.md](./libs.md) for full source structure.
 ## See Also
 
 - [geos.md](./geos.md) - GeoS: Spectral loss theory + SPSA algorithm (color/tone)
-- [edge.md](./edge.md) - Edge: Frequency loss theory + greedy algorithm (sharpness)
+- [edge.md](./edge.md) - Edge: Frequency loss theory + golden section algorithm (sharpness)
 - [diff.md](./diff.md) - Loss metrics redirect
 - [data.md](./data.md) - Style sidecar format
 - [test.md](./test.md) - Test cases

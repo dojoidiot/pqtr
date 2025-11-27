@@ -15,7 +15,7 @@ The pipe uses a **PIMPL builder pattern** with three stages:
 ### Flow
 
 1. **HEAD**: `pipe->open()` decodes RAW → scene-linear RGB + metadata
-2. **BODY**: `body.add()` creates Links with 6 golden modules (45 dials)
+2. **BODY**: `body.add()` creates Links with processing modules
 3. **TAIL**: `tail.save()` applies gamma and outputs PNG
 
 ## Architecture
@@ -89,10 +89,10 @@ pipe::View display = body.view(512);    // Further scaled to 512px
 **Modules** (see [libs.md](./libs.md) for implementation details):
 - `geometric()` - 6 dials (Crop, Zoom, Rotation)
 - `colorCorrection()` - 3 dials (Exposure, WhiteBalance)
-- `toneMapping()` - 5 dials (Contrast, CurveAdjustment, ClippingPoint)
+- `toneMapping()` - 7 dials (Contrast, Highlights, Shadows, Toe/Shoulder Pivots, White/Black Points)
 - `globalColor()` - 3 dials (Vibrance, Saturation, ColourDensity)
-- `selectiveColour()` - 24 dials (8 colors × 3 HSL dials)
-- `detail()` - 4 dials (Sharpen, Denoise)
+- `splitTone()` - 4 dials (Shadow/Highlight Hue/Sat)
+- `detail()` - 2 optimized dials (Sharpen Amount/Radius, L-channel only)
 
 ### TAIL Stage
 
@@ -129,8 +129,8 @@ Each module contains sub-modules that work together. See [module documentation](
 
 ### 3. [Tone Mapping](./mods/tone_mapping.md)
 **Purpose**: HDR to SDR compression with perceptual contrast
-**Sub-Modules**: Contrast (1 dial), Curve Adjustment (2 dials), Clipping Point (2 dials)
-**Total**: 5 dials
+**Sub-Modules**: Contrast (1), Highlights (1), Shadows (1), Toe Pivot (1), Shoulder Pivot (1), White Point (1), Black Point (1)
+**Total**: 7 dials
 **Color Space**: LINEAR_RGB
 
 ### 4. [Global Color](./mods/global_color.md)
@@ -146,12 +146,19 @@ Each module contains sub-modules that work together. See [module documentation](
 **Color Space**: HLS (via gamma-encoded conversion)
 
 ### 6. [Detail + Output](./mods/detail_output.md)
-**Purpose**: Finalization with sharpening, noise reduction, output transform
-**Sub-Modules**: Sharpen (2 dials), Denoise (2 dials), Output Transform (automatic)
-**Total**: 4 dials
-**Color Space**: LINEAR_RGB (sharpen), LCH (denoise), SRGB (output)
+**Purpose**: Finalization with sharpening (L-channel only to preserve color)
+**Sub-Modules**: Sharpen Amount (1), Sharpen Radius (1)
+**Total**: 2 optimized dials
+**Color Space**: Lab (sharpen L channel only), SRGB (output)
 
-**Total Dials**: 6 + 3 + 5 + 3 + 24 + 4 = **45 dials**
+### 7. Split Tone
+**Purpose**: Shadow/highlight color tinting
+**Sub-Modules**: Shadow Hue (1), Shadow Sat (1), Highlight Hue (1), Highlight Sat (1)
+**Total**: 4 dials
+
+**GEOS optimizes**: 17 dials + 17³ 3D LUT
+**EDGE optimizes**: 2 sharpness dials
+**User controls**: 6 geometry dials
 
 ---
 
@@ -399,6 +406,6 @@ The pipe module is split into focused files:
 | `pipe.cpp` | HEAD/BODY/TAIL/Pipe classes |
 | `view.cpp` | Display conversion (linear → sRGB gamma) |
 | `link.cpp` | LinkImpl + module implementations (430 lines) |
-| `mods/*.cpp` | Processing kernels (45 dials) |
+| `mods/*.cpp` | Processing kernels (25 dials) |
 
 See [libs.md](./libs.md) for full source structure.

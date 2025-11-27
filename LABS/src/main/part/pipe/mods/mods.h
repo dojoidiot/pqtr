@@ -168,5 +168,45 @@ namespace mods
         float* lut,
         int lut_size);
 
+    //--------------------------------------------------------------------------
+    // 3D LUT (for full color transform capture)
+    //--------------------------------------------------------------------------
+
+    // Apply a 3D LUT with trilinear interpolation
+    // Maps input RGB tuples to output RGB tuples
+    // lut: array of grid_size³ × 3 floats (R,G,B for each cell)
+    // grid_size: dimension of cube (9 for social media quality)
+    bool lut3d_apply(
+        const cv::UMat& input,
+        cv::UMat& output,
+        const float* lut,
+        int grid_size);
+
+    // Estimate 3D LUT from base to target (deterministic, one-shot)
+    // Bins all pixels by input RGB, averages target RGB per cell
+    bool lut3d_estimate(
+        const cv::UMat& base,
+        const cv::UMat& target,
+        float* lut,
+        int grid_size);
+
+    //--------------------------------------------------------------------------
+    // Split Toning (shadow/highlight color grading) (4 dials)
+    //--------------------------------------------------------------------------
+
+    // Apply split toning - different color casts for shadows vs highlights
+    // All dials: 0.0-1.0, default 0.5 (neutral)
+    //   shadow_temp:    Shadow temperature (0=cool/blue, 0.5=neutral, 1=warm/yellow)
+    //   shadow_tint:    Shadow tint (0=green, 0.5=neutral, 1=magenta)
+    //   highlight_temp: Highlight temperature (same scale)
+    //   highlight_tint: Highlight tint (same scale)
+    bool split_tone(
+        const cv::UMat& input,
+        cv::UMat& output,
+        float shadow_temp = 0.5f,
+        float shadow_tint = 0.5f,
+        float highlight_temp = 0.5f,
+        float highlight_tint = 0.5f);
+
 } // namespace mods
 } // namespace pipe

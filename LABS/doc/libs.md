@@ -61,8 +61,8 @@ LIBS = $(LABS_DIR)/lib/labs.a
 | `view.hpp` | `src/main/part/pipe/` | Display conversion (linear → sRGB) |
 | `link.hpp` | `src/main/part/pipe/` | Module implementations + LinkImpl |
 | `diff.hpp` | `src/main/part/tune/` | Loss metric helpers |
-| `geos.hpp` | `src/main/part/tune/` | SPSA optimizer internals |
-| `edge.hpp` | `src/main/part/tune/` | Golden section internals |
+| `geos.hpp` | `src/main/part/tune/` | SPSA optimizer + 17³ LUT |
+| `edge.hpp` | `src/main/part/tune/` | Golden section for sharpness |
 | `sony.h` | `inc/RAWS/` | Sony ARW decoder |
 
 ---
@@ -99,7 +99,7 @@ pqtr::Hold<pipe::Head> head = pipe->open(std::move(sink));
 pipe::Data& data = head->data();
 pipe::View linear = data.view();  // CV_32FC3 scene-linear
 
-// BODY: Create Links with 6 golden modules (45 dials)
+// BODY: Create Links with 6 golden modules (25 dials)
 pipe::Body& body = head->body(1024);  // Work at 1024px
 pipe::Body::Link& link = body.add("style");
 
@@ -153,11 +153,13 @@ cv::UMat input, output;
 // Exposure (dial: 0.0-1.0, 0.5 = neutral)
 mods::exposure(input, output, 0.6f);
 
-// Tone mapping (5 dials)
+// Tone mapping (7 dials)
 mods::tone_map(input, output,
     0.5f,   // contrast
     0.5f,   // highlights
     0.5f,   // shadows
+    0.5f,   // toe_pivot
+    0.5f,   // shoulder_pivot
     0.5f,   // white_point
     0.5f);  // black_point
 ```
@@ -169,12 +171,13 @@ mods::tone_map(input, output,
 | `geometric()` | 6 | crop=0, zoom=0, tilt=0.5 |
 | `exposure()` | 1 | 0.5 |
 | `white_balance()` | 2 | temp=0.5, tint=0.5 |
-| `tone_map()` | 5 | all 0.5 |
+| `tone_map()` | 7 | all 0.5 |
 | `global_color()` | 3 | all 0.5 |
-| `selective_color()` | 24 | all 0.5 |
-| `detail()` | 4 | sharpen=0.6/0.4, denoise=0.3/0.5 |
+| `split_tone()` | 4 | all 0.5 |
+| `detail()` | 2 | sharpen amount/radius |
 
-**Total: 45 dials**
+**GEOS optimizes**: 17 dials + 17³ LUT
+**EDGE optimizes**: 2 dials (L-only sharpening)
 
 ---
 
@@ -244,12 +247,12 @@ src/main/part/
 │   ├── pipe.cpp      # HEAD/BODY/TAIL/Pipe
 │   ├── view.cpp      # Display conversion (linear → sRGB)
 │   ├── link.cpp      # Module implementations
-│   └── mods/         # Processing kernels (45 dials)
+│   └── mods/         # Processing kernels (25 dials)
 └── tune/
     ├── tune.cpp      # Task + factory
     ├── diff.cpp      # Loss metrics
-    ├── geos.cpp      # SPSA optimizer (stub)
-    ├── edge.cpp      # Golden section (stub)
+    ├── geos.cpp      # SPSA optimizer + 17³ LUT
+    ├── edge.cpp      # Golden section sharpness
     └── data.cpp      # Serialization
 ```
 

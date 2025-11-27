@@ -151,25 +151,28 @@ namespace pipe
                 virtual WhiteBalance& whiteBalance() = 0;
             };
 
-            // Module 2.5: LUT Curve (pre-pass luminance adjustment) - LINEAR_RGB
-            // This is NOT a dial-based module - it stores a LUT array
-            // Used by tune to apply estimated luminance curve from target
+            // Module 2.5: 3D LUT (full RGB→RGB transform capture) - LINEAR_RGB
+            // This is NOT a dial-based module - it stores a 3D LUT array
+            // Used by tune to capture any color transform from base to target
+            // 17³ grid = 4,913 cells × 3 channels = 14,739 parameters
+            // Higher resolution captures finer hue distinctions (especially foliage greens)
             class LutCurve
             {
             public:
                 virtual ~LutCurve() = default;
                 static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
-                static constexpr int LUT_SIZE = 32;
+                static constexpr int GRID_SIZE = 17;  // 17³ = 4,913 cells
+                static constexpr int LUT_SIZE = GRID_SIZE * GRID_SIZE * GRID_SIZE * 3;
 
-                // Get/set the LUT array (LUT_SIZE floats, identity = linear ramp)
+                // Get/set the 3D LUT array (GRID_SIZE³ × 3 floats)
                 virtual const float* lut() const = 0;
                 virtual void setLut(const float* values) = 0;
 
-                // Estimate LUT from base image to target image
+                // Estimate 3D LUT from base image to target image
                 // Returns true if estimation succeeded
                 virtual bool estimate(View base, View target) = 0;
 
-                // Reset to identity (no-op curve)
+                // Reset to identity (no-op transform)
                 virtual void reset() = 0;
 
                 // Check if LUT is non-identity (has been estimated)
@@ -276,6 +279,28 @@ namespace pipe
                 virtual ColourDensity& colourDensity() = 0;
             };
 
+            // Module 4.5: Split Toning (4 dials) - LINEAR_RGB
+            // Shadow/highlight color grading - different color casts for darks vs lights
+            class SplitTone
+            {
+            public:
+                virtual ~SplitTone() = default;
+                static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
+
+                class TempTint : public Task
+                {
+                public:
+                    virtual ~TempTint() = default;
+                    virtual float temperature() = 0;  // 0=cool, 0.5=neutral, 1=warm
+                    virtual void temperature(float value) = 0;
+                    virtual float tint() = 0;         // 0=green, 0.5=neutral, 1=magenta
+                    virtual void tint(float value) = 0;
+                };
+
+                virtual TempTint& shadows() = 0;
+                virtual TempTint& highlights() = 0;
+            };
+
             // Module 5: Selective Colour (24 dials) - LCH
             class SelectiveColour
             {
@@ -351,6 +376,7 @@ namespace pipe
             virtual LutCurve& lutCurve() = 0;
             virtual ToneMapping& toneMapping() = 0;
             virtual GlobalColor& globalColor() = 0;
+            virtual SplitTone& splitTone() = 0;
             virtual SelectiveColour& selectiveColour() = 0;
             virtual Detail& detail() = 0;
         };

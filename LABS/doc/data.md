@@ -241,19 +241,17 @@ The `tail` section specifies output configuration:
 ```json
 "detail": {
   "sharpen": {
-    "amount": 0.5,  // 0.0 = none, 1.0 = maximum
+    "amount": 0.5,  // 0.0 = none, 1.0 = maximum (L-channel only)
     "radius": 0.5   // 0.0 = 0.5px, 0.5 = 1.0px, 1.0 = 2.0px
-  },
-  "denoise": {
-    "luminance": 0.5,  // 0.0 = none, 1.0 = maximum
-    "chroma": 0.5
   }
 }
 ```
 
-**Total**: 4 dials
+**Total**: 2 dials (L-channel only sharpening preserves color accuracy)
 
-**Grand Total**: 6 + 3 + 5 + 3 + 24 + 4 = **45 dials**
+**Grand Total**: 6 + 3 + 7 + 3 + 4 + 2 = **25 dials**
+
+**Note:** The schema supports selective_color (24 dials) for future expansion, but current optimization uses the 17 core dials + 17³ LUT for color/tone and 2 dials for sharpness.
 
 ---
 

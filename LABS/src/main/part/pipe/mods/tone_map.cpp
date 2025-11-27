@@ -67,8 +67,9 @@ namespace mods
         // Convert dials to working values
         // All dials are neutral at 0.5 (no effect on image)
 
-        // Contrast: exponential 0.5-2.0 (dial 0.5 = 1.0)
-        float contrast = 0.5f * std::exp(contrast_dial * 1.386f);
+        // Contrast: exponential 0.5-3.0 (dial 0.5 = 1.0)
+        // Expanded upper range for stronger contrast boost
+        float contrast = 0.5f * std::exp(contrast_dial * 1.792f);
 
         // Highlights/Shadows: linear -1 to +1 (dial 0.5 = 0)
         float highlights = (highlights_dial - 0.5f) * 2.0f;
@@ -89,11 +90,12 @@ namespace mods
         bool bypass_reinhard = (white_point_dial > 0.45f && white_point_dial < 0.55f);
         float white_point = 2.0f + white_point_dial * 4.0f;  // 2.0 to 6.0
 
-        // Black point: lifts shadows (dial 0.5 = 0, neutral)
-        // dial 0.0 → -0.05 (crush blacks)
+        // Black point: lifts/crushes shadows (dial 0.5 = 0, neutral)
+        // dial 0.0 → -0.25 (crush blacks aggressively)
         // dial 0.5 → 0 (neutral)
-        // dial 1.0 → +0.05 (lift blacks)
-        float black_point = (black_point_dial - 0.5f) * 0.1f;
+        // dial 1.0 → +0.25 (lift blacks/fade)
+        // Expanded range to ±0.25 for deeper black crush capability
+        float black_point = (black_point_dial - 0.5f) * 0.5f;
 
         try
         {

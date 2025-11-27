@@ -56,17 +56,19 @@ namespace tune
     // GEOS optimization strategy
     enum class GeosMode
     {
-        BLOCKWISE,  // 4-phase: A(8) → B(3) → AB(11) → C(24) selective
-        FULL_35D    // Single-phase: all 35 dials simultaneously
+        BLOCKWISE,   // 4-phase: A(10) → B(3) → AB(13) → C(24) selective
+        FULL_35D,    // Single-phase: all 37 dials simultaneously
+        LINEAR_ONLY  // Linear ops only: skip ToneMapping (dials 3-9)
     };
 
     struct Config
     {
         bool skip_geos = false;        // Skip color/tone optimization
         bool skip_edge = false;        // Skip sharpness optimization
-        int geos_max_iter = 500;       // Max SPSA iterations
+        bool skip_lut = false;         // Skip LUT curve estimation (for true linear-only)
+        int geos_max_iter = 200;       // Max SPSA iterations (was 500, reduced with early-stop)
         int geos_multi_starts = 5;     // Number of random initializations
-        float geos_threshold = 0.01f;  // Stop when spectral loss below this
+        float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
         GeosMode geos_mode = GeosMode::BLOCKWISE;  // Optimization strategy
     };

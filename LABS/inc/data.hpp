@@ -3,6 +3,7 @@
 //
 // Provides serialization for all LABS data types:
 // - tune::Data (loss metrics)
+// - 3D LUT (17³ color transform)
 // - pipe::Link (edit steps) - future
 // - tune::Result (optimization results) - future
 //
@@ -11,10 +12,48 @@
 #pragma once
 
 #include <tune.hpp>
+#include <pipe.hpp>
 #include <string>
+#include <vector>
 
 namespace data
 {
+    // ============================================================
+    // Base64 Encoding/Decoding (for LUT storage)
+    // ============================================================
+
+    namespace base64
+    {
+        // Encode binary data to base64 string
+        std::string encode(const void* data, size_t size);
+
+        // Decode base64 string to binary data
+        std::vector<uint8_t> decode(const std::string& encoded);
+
+    } // namespace base64
+
+    // ============================================================
+    // 3D LUT Serialization
+    // ============================================================
+
+    namespace lut
+    {
+        // Serialize 3D LUT to JSON object string
+        // Format: {"grid": 17, "data": "base64..."}
+        std::string toJson(const float* lut, int gridSize);
+
+        // Deserialize 3D LUT from JSON object string
+        // Returns empty vector if parsing fails
+        std::vector<float> fromJson(const std::string& json, int& gridSize);
+
+        // Save LUT to file
+        bool save(const float* lut, int gridSize, const std::string& path);
+
+        // Load LUT from file (returns empty vector on failure)
+        std::vector<float> load(const std::string& path, int& gridSize);
+
+    } // namespace lut
+
     // ============================================================
     // Tune Data (Loss Metrics)
     // ============================================================

@@ -129,13 +129,14 @@ public:
 };
 
 // ============================================================
-// LUT Curve Module (per-channel RGB pre-pass)
+// 3D LUT Module (full RGB→RGB transform)
 // ============================================================
 
 class LutCurveImpl : public Body::Link::LutCurve
 {
-    static constexpr int SIZE = LUT_SIZE;
-    float m_lut[SIZE * 3];  // R, G, B channels
+    static constexpr int GRID = GRID_SIZE;  // 17 (from pipe.hpp)
+    static constexpr int TOTAL = GRID * GRID * GRID * 3;  // 14,739
+    float m_lut[TOTAL];
     bool m_estimated = false;
 
 public:
@@ -148,14 +149,14 @@ public:
 
     void setLut(const float* values) override
     {
-        for (int i = 0; i < SIZE * 3; i++)
+        for (int i = 0; i < TOTAL; i++)
             m_lut[i] = values[i];
         m_estimated = true;
     }
 
     bool estimate(View base, View target) override
     {
-        if (!mods::estimate_lut(base, target, m_lut, SIZE))
+        if (!mods::lut3d_estimate(base, target, m_lut, GRID))
             return false;
         m_estimated = true;
         return true;
@@ -163,11 +164,19 @@ public:
 
     void reset() override
     {
-        // Initialize all 3 channels to identity
-        for (int ch = 0; ch < 3; ch++)
+        // Initialize to identity: output RGB = input RGB
+        for (int ri = 0; ri < GRID; ri++)
         {
-            for (int i = 0; i < SIZE; i++)
-                m_lut[ch * SIZE + i] = static_cast<float>(i) / (SIZE - 1);
+            for (int gi = 0; gi < GRID; gi++)
+            {
+                for (int bi = 0; bi < GRID; bi++)
+                {
+                    int idx = ((ri * GRID + gi) * GRID + bi) * 3;
+                    m_lut[idx + 0] = static_cast<float>(ri) / (GRID - 1);  // R
+                    m_lut[idx + 1] = static_cast<float>(gi) / (GRID - 1);  // G
+                    m_lut[idx + 2] = static_cast<float>(bi) / (GRID - 1);  // B
+                }
+            }
         }
         m_estimated = false;
     }
@@ -180,7 +189,7 @@ public:
             return true;  // No-op if not estimated
 
         View output;
-        if (!mods::lut_curve(view, output, m_lut, SIZE))
+        if (!mods::lut3d_apply(view, output, m_lut, GRID))
             return false;
         view = output;
         return true;
@@ -350,6 +359,46 @@ public:
 };
 
 // ============================================================
+// Split Tone Module (shadow/highlight color grading)
+// ============================================================
+
+class TempTintImpl : public Body::Link::SplitTone::TempTint
+{
+    bool& m_active;
+    float m_temp = 0.5f, m_tint = 0.5f;
+public:
+    TempTintImpl(bool& active) : m_active(active) {}
+    float temperature() override { return m_temp; }
+    void temperature(float v) override { m_temp = v; m_active = true; }
+    float tint() override { return m_tint; }
+    void tint(float v) override { m_tint = v; m_active = true; }
+    View run(View view) override { return view; }
+};
+
+class SplitToneImpl : public Body::Link::SplitTone
+{
+    bool m_active = false;
+    TempTintImpl m_shadows{m_active};
+    TempTintImpl m_highlights{m_active};
+public:
+    TempTint& shadows() override { return m_shadows; }
+    TempTint& highlights() override { return m_highlights; }
+
+    bool isActive() const { return m_active; }
+
+    bool apply(View& view)
+    {
+        View output;
+        if (!mods::split_tone(view, output,
+                m_shadows.temperature(), m_shadows.tint(),
+                m_highlights.temperature(), m_highlights.tint()))
+            return false;
+        view = output;
+        return true;
+    }
+};
+
+// ============================================================
 // Selective Colour Module
 // ============================================================
 
@@ -473,6 +522,7 @@ LinkImpl::LinkImpl(Name name)
     , m_lutCurve(std::make_unique<LutCurveImpl>())
     , m_toneMapping(std::make_unique<ToneMappingImpl>())
     , m_globalColor(std::make_unique<GlobalColorImpl>())
+    , m_splitTone(std::make_unique<SplitToneImpl>())
     , m_selectiveColour(std::make_unique<SelectiveColourImpl>())
     , m_detail(std::make_unique<DetailImpl>())
 {
@@ -486,6 +536,7 @@ Body::Link::ColorCorrection& LinkImpl::colorCorrection() { return *m_colorCorrec
 Body::Link::LutCurve& LinkImpl::lutCurve() { return *m_lutCurve; }
 Body::Link::ToneMapping& LinkImpl::toneMapping() { return *m_toneMapping; }
 Body::Link::GlobalColor& LinkImpl::globalColor() { return *m_globalColor; }
+Body::Link::SplitTone& LinkImpl::splitTone() { return *m_splitTone; }
 Body::Link::SelectiveColour& LinkImpl::selectiveColour() { return *m_selectiveColour; }
 Body::Link::Detail& LinkImpl::detail() { return *m_detail; }
 
@@ -496,6 +547,7 @@ View LinkImpl::run(View view)
     if (m_lutCurve->isEstimated()) m_lutCurve->apply(view);
     if (m_toneMapping->isActive()) m_toneMapping->apply(view);
     if (m_globalColor->isActive()) m_globalColor->apply(view);
+    if (m_splitTone->isActive()) m_splitTone->apply(view);
     if (m_selectiveColour->isActive()) m_selectiveColour->apply(view);
     if (m_detail->isActive()) m_detail->apply(view);
     return view;
