@@ -13,6 +13,37 @@ These correspond to the two automated stages of tuning. See [tune.md](./tune.md)
 
 ---
 
+## Workflow
+
+The diff tool is used in the tune R&D workflow to measure the gap between scene-referred output and camera rendering:
+
+```
+RAW File
+    │
+    ▼
+┌─────────┐
+│  HEAD   │ ──► head.png (camera preview - TARGET)
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│  BODY   │ ──► body.png (scene-referred - CANDIDATE)
+│ (empty) │
+└────┬────┘
+     │
+     ▼
+┌─────────┐
+│  DIFF   │ ──► diff.json (loss metrics)
+│         │ ──► diff.png  (visual difference)
+└─────────┘
+```
+
+**Comparison**: `diff(body, head)` measures how far scene-referred output is from camera rendering.
+
+**Goal**: Tune finds edit steps that minimize this loss, so `tail.png` matches `head.png`.
+
+---
+
 ## Two Metrics for Two Properties
 
 | Metric | Measures | Used By | Content-Invariant |
@@ -146,73 +177,104 @@ Note: Visual diff shows pixel differences, not the metrics used for optimization
 
 ## API Interface
 
+### diff.hpp (Core API)
+
+PIMPL design enables caching of base image features for efficient repeated comparisons during tune optimization.
+
 ```cpp
-namespace pqtr {
+namespace diff {
 
-// Spectral features for color/tone
-struct SpectralFeatures {
-    float singular_values[3];  // σ₁, σ₂, σ₃
-    float mean_L, mean_C;      // Lightness, chroma means
-    float std_L, std_C;        // Lightness, chroma std dev
-    float skew_L;              // Lightness skew
-    float cov_LC;              // Lightness-chroma covariance
-    float cov_HC;              // Hue-chroma covariance
-    float psi[10];             // Normalized hypersphere projection
-};
+    // GPU-accelerated image matrix (BGR 8-bit).
+    // Reference-counted internally by OpenCV - shallow copy shares data.
+    // Returned Views are read-only references; do not modify.
+    using View = cv::UMat;
 
-// Combined metrics result
-struct DiffMetrics {
-    float spectral_loss;       // [0, 1] geodesic distance
-    float frequency_loss;      // [0, ∞) relative variance difference
-};
+    // Combined metrics result (value type)
+    struct Data {
+        float spectral = 0.0f;   // [0, 1] geodesic distance (0 = identical color/tone)
+        float frequency = 0.0f;  // [0, ∞) relative variance difference (0 = identical sharpness)
+    };
 
-class Diff {
-public:
-    // Compute both metrics
-    DiffMetrics compute(
-        const cv::UMat& candidate,
-        const cv::UMat& reference
-    );
+    // Task holds cached base image features for efficient repeated comparisons.
+    // Ownership: Hold<Task> owns the task; returned Views share underlying data.
+    // Created via diff::make(base), destroyed via RAII.
+    class Task {
+    public:
+        virtual ~Task() = default;
+        virtual View base() = 0;                             // access cached base (read-only)
+        virtual Data diff(View test) = 0;                    // compute metrics
+        virtual View view(View test, float scale = 5.0f) = 0; // compute diff image
+    };
 
-    // === Spectral (Color/Tone) ===
+    // Factory: create Task with base image (features cached for reuse)
+    pqtr::Hold<Task> make(View base);
 
-    SpectralFeatures extractStyle(const cv::UMat& image);
+} // namespace diff
+```
 
-    float spectralLoss(
-        const SpectralFeatures& a,
-        const SpectralFeatures& b
-    );
+### Ownership
 
-    float spectralLoss(
-        const cv::UMat& candidate,
-        const cv::UMat& reference
-    );
+| Type | Ownership | Notes |
+|------|-----------|-------|
+| `Hold<Task>` | Caller owns | RAII cleanup when Hold goes out of scope |
+| `View` | Shared | OpenCV reference-counted; shallow copy shares GPU buffer |
+| `Data` | Caller owns | Value type (two floats); safe to copy |
 
-    // === Frequency (Sharpness) ===
+**Contract**: Returned `View` objects are read-only references to internal data. Do not modify.
 
-    float laplacianVariance(const cv::UMat& image);
+### data.hpp (Serialization)
 
-    float frequencyLoss(
-        const cv::UMat& candidate,
-        const cv::UMat& reference
-    );
+Serialization is handled by the data layer (separation of concerns):
 
-    // === Visual Debugging ===
+```cpp
+namespace data::diff {
 
-    cv::UMat visualDiff(
-        const cv::UMat& candidate,
-        const cv::UMat& reference,
-        float scale = 5.0
-    );
+    std::string toJson(const ::diff::Data& d);
+    ::diff::Data fromJson(const std::string& json);
 
-private:
-    cv::UMat resizeProxy(const cv::UMat& image, int size = 512);
-    cv::UMat convertToSafeLCH(const cv::UMat& image);
-    void computeSVD(const cv::UMat& lch, float* singular_values);
-    void projectToHypersphere(SpectralFeatures& features);
-};
+    bool save(const ::diff::Data& d, const std::string& path);
+    ::diff::Data load(const std::string& path);
 
-} // namespace pqtr
+} // namespace data::diff
+```
+
+### Usage Example
+
+```cpp
+#include <diff.hpp>
+#include <data.hpp>
+
+// head = target (camera preview), body = candidate (scene-referred)
+diff::View head, body;
+// ... load images ...
+
+// Create diff task with head as base (features cached)
+pqtr::Hold<diff::Task> task = diff::make(head);
+
+// Access base image (read-only reference)
+diff::View base = task->base();
+
+// Compute metrics (base features reused for each call)
+diff::Data m = task->diff(body);
+std::cout << "Spectral: " << m.spectral << std::endl;   // e.g., 0.0248
+std::cout << "Frequency: " << m.frequency << std::endl; // e.g., 0.8146
+
+// Get diff image for visualization
+diff::View diffImg = task->view(body);
+cv::imwrite("diff.png", diffImg);
+
+// Save/load metrics (via data layer)
+data::diff::save(m, "diff.json");
+diff::Data loaded = data::diff::load("diff.json");
+```
+
+### JSON Format
+
+```json
+{
+  "spectral": 0.024843,
+  "frequency": 0.814570
+}
 ```
 
 ---

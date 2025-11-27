@@ -647,8 +647,7 @@ namespace sony
             cv::Mat preview_cpu = cv::imdecode(jpeg_data, cv::IMREAD_COLOR);
             if (!preview_cpu.empty())
             {
-                // Convert BGR (OpenCV default) to RGB
-                cv::cvtColor(preview_cpu, preview_cpu, cv::COLOR_BGR2RGB);
+                // Keep as BGR (OpenCV convention)
                 preview_cpu.copyTo(metadata.preview);
                 metadata.preview_width = preview_cpu.cols;
                 metadata.preview_height = preview_cpu.rows;

@@ -1,0 +1,62 @@
+# Tune R&D Makefile
+# Builds test harness for tune R&D
+#
+# Usage: make -f Makefile.tune_rnd
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# OpenCV paths
+OPENCV_ROOT = ./lib/opencv
+OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
+                 -I$(OPENCV_ROOT)/modules/core/include \
+                 -I$(OPENCV_ROOT)/modules/imgproc/include \
+                 -I$(OPENCV_ROOT)/modules/imgcodecs/include
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) -I./inc
+
+# Library flags
+LDFLAGS = -L$(OPENCV_LIB) -L./lib
+LIBS = ./lib/labs.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+
+# Directories
+SRC_DIR = src/test/tune
+TMP_DIR = tmp/tune
+BIN_DIR = $(TMP_DIR)/bin
+OBJ_DIR = $(TMP_DIR)/obj
+OUT_DIR = tmp/var/tune
+
+# Source and target
+SRC = $(SRC_DIR)/tune_rnd.cpp
+OBJ = $(OBJ_DIR)/tune_rnd.o
+BIN = $(BIN_DIR)/tune_rnd
+
+# Test input
+TEST_RAW = var/pics/DSC00202.ARW
+
+.PHONY: all clean test
+
+all: $(BIN)
+
+$(BIN): $(OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(OBJ): $(SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR)
+
+test: $(BIN)
+	@mkdir -p $(OUT_DIR)
+	@echo "Running tune R&D test..."
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BIN)

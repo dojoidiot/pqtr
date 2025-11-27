@@ -37,7 +37,7 @@ namespace raws {
         bool success;
         pipe::View data;          // Scene-linear RGB (CV_32FC3)
         pipe::Info dataInfo;      // Metadata
-        pipe::View preview;       // Embedded camera JPEG
+        pipe::View preview;       // Embedded camera JPEG (BGR, 8-bit)
         pipe::Info previewInfo;   // Preview metadata
     };
 

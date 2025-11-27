@@ -184,6 +184,18 @@ Links execute in the order they were added to the Body. Common patterns:
 - Multiple links with different modules active
 - Geometry typically in final link (composition)
 
+### Channel Order Convention
+
+All image data returned by `view()` methods uses **BGR channel order** (OpenCV convention):
+
+- `head->view().view()` - Embedded preview, BGR, 8-bit
+- `body.view()` - Display-ready output, BGR, 8-bit
+- `body.tail().view()` - Final output, BGR, 8-bit
+
+This ensures compatibility with `cv::imwrite()` and other OpenCV functions.
+
+**Internal processing** uses RGB order for color math, but conversion to BGR happens automatically when calling any `view()` method.
+
 ### Color Space Transitions
 
 The pipe automatically handles color space conversions:

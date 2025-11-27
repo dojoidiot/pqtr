@@ -52,6 +52,59 @@ The framing and composition - what's in the frame, how it's oriented.
 
 ---
 
+## End-to-End Workflow
+
+The complete tune workflow transforms scene-referred RAW into camera-matched output:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         TUNE WORKFLOW                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  RAW File ──► HEAD ──► head.png (camera preview = TARGET)       │
+│                │                                                │
+│                ▼                                                │
+│              BODY (empty) ──► body.png (scene-referred)         │
+│                │                                                │
+│                ▼                                                │
+│              DIFF ──► metrics (spectral + frequency loss)       │
+│                │                                                │
+│                ▼                                                │
+│              TUNE ──► edit steps (35 color + 4 detail dials)    │
+│                │                                                │
+│                ▼                                                │
+│              BODY (with edit steps) ──► TAIL ──► tail.png       │
+│                                                                 │
+│  Goal: tail.png matches head.png (loss → 0)                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### R&D Test Harness
+
+The `tune_rnd` test validates this workflow:
+
+```bash
+make -f Makefile.tune_rnd test
+```
+
+**Outputs** (`tmp/var/tune/`):
+- `head.png` - Camera preview (target)
+- `body.png` - Scene-referred (candidate, no edit steps)
+- `tail.png` - Final output (should match head after tuning)
+- `diff.png` - Visual difference (head vs body)
+- `diff.json` - Loss metrics baseline
+
+**Example metrics** (no edit steps):
+```json
+{
+  "spectral": 0.024843,    // 2.5% color/tone gap
+  "frequency": 0.814570    // 81% sharpness gap (expected - no sharpening)
+}
+```
+
+---
+
 ## Why This Separation?
 
 ### Different Metrics for Different Properties
