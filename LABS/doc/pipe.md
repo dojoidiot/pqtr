@@ -387,3 +387,18 @@ Target performance (from [README.md](../README.md) success criteria):
 - **Pipe throughput**: 30+ fps @ 1080p
 - **GPU acceleration**: All View processing uses cv::UMat
 - **Memory efficiency**: Direct UMat operations, no intermediate copies
+
+---
+
+## Internal Structure
+
+The pipe module is split into focused files:
+
+| File | Purpose |
+|------|---------|
+| `pipe.cpp` | HEAD/BODY/TAIL/Pipe classes |
+| `view.cpp` | Display conversion (linear → sRGB gamma) |
+| `link.cpp` | LinkImpl + module implementations (430 lines) |
+| `mods/*.cpp` | Processing kernels (45 dials) |
+
+See [libs.md](./libs.md) for full source structure.

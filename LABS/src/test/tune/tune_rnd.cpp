@@ -6,7 +6,7 @@
 //   2. body.png  - Body view (no edit steps, scene-referred)
 //   3. tail.png  - Final output from tail (should match head after tuning)
 //   4. diff.png  - Visual difference between head and body
-//   5. diff.json - Loss metrics (spectral + frequency)
+//   5. tune.json - Loss metrics (spectral + frequency)
 //
 // Usage: tune_rnd
 
@@ -14,7 +14,7 @@
 #include <sink.hpp>
 #include <hold.hpp>
 #include <pipe.hpp>
-#include <diff.hpp>
+#include <tune.hpp>
 #include <data.hpp>
 #include <iostream>
 #include <iomanip>
@@ -109,11 +109,11 @@ int main()
         headForDiff.copyTo(headUMat);
         bodyMat.copyTo(bodyUMat);
 
-        // Create diff task with head as base (cached)
-        pqtr::Hold<diff::Task> diffTask = diff::make(headUMat);
+        // Create tune task with head as target (features cached)
+        pqtr::Hold<tune::Task> tuneTask = tune::make(headUMat);
 
         // Compute metrics
-        diff::Data metrics = diffTask->diff(bodyUMat);
+        tune::Data metrics = tuneTask->diff(bodyUMat);
         std::cout << "  Spectral loss:  " << std::fixed << std::setprecision(4) << metrics.spectral
                   << " (" << std::setprecision(2) << (metrics.spectral * 100) << "%)" << std::endl;
         std::cout << "  Frequency loss: " << std::fixed << std::setprecision(4) << metrics.frequency
@@ -121,21 +121,21 @@ int main()
 
         // 5. Save diff image
         std::cout << "\n[5] Saving diff image..." << std::endl;
-        cv::UMat diffUMat = diffTask->view(bodyUMat);
+        cv::UMat diffUMat = tuneTask->view(bodyUMat);
         cv::Mat diffMat;
         diffUMat.copyTo(diffMat);
         std::string diffImgPath = OUTPUT_DIR + "diff.png";
         cv::imwrite(diffImgPath, diffMat);
         std::cout << "  Saved: " << diffImgPath << std::endl;
 
-        // 6. Save diff.json using data layer
-        std::cout << "\n[6] Saving diff.json..." << std::endl;
-        std::string diffJsonPath = OUTPUT_DIR + "diff.json";
-        if (!data::diff::save(metrics, diffJsonPath))
+        // 6. Save tune.json using data layer
+        std::cout << "\n[6] Saving tune.json..." << std::endl;
+        std::string tuneJsonPath = OUTPUT_DIR + "tune.json";
+        if (!data::tune::save(metrics, tuneJsonPath))
         {
-            throw std::runtime_error("Failed to save diff.json");
+            throw std::runtime_error("Failed to save tune.json");
         }
-        std::cout << "  Saved: " << diffJsonPath << std::endl;
+        std::cout << "  Saved: " << tuneJsonPath << std::endl;
 
         std::cout << "\n[OK] All outputs saved to " << OUTPUT_DIR << std::endl;
         return 0;

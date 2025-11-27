@@ -4,6 +4,7 @@
 # Exposes:
 #   - sony::Decoder (via RAWS library)
 #   - pipe::mods::* (processing modules)
+#   - tune::Task (optimization)
 #   - pqtr::Sink, pqtr::Tool, pqtr::Hold (infrastructure, header-only)
 
 # Compiler
@@ -22,7 +23,8 @@ OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
            -I./inc/RAWS \
-           -I./src/main/part/pipe
+           -I./src/main/part/pipe \
+           -I./src/main/part/tune
 
 # Directories
 SRC_DIR = src/main
@@ -33,8 +35,10 @@ LIB_DIR = lib
 # RAWS library (via wire.sh symlink)
 RAWS_A = $(LIB_DIR)/RAWS.a
 
-# Pipe sources (HEAD/TAIL)
-PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp
+# Pipe sources (HEAD/BODY/TAIL + internal)
+PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp \
+            $(SRC_DIR)/part/pipe/view.cpp \
+            $(SRC_DIR)/part/pipe/link.cpp
 
 # Module sources (processing)
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
@@ -46,14 +50,17 @@ MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/geometric.cpp \
             $(SRC_DIR)/part/pipe/mods/detail.cpp
 
-# Diff sources (loss metrics)
-DIFF_SRCS = $(SRC_DIR)/part/diff/diff.cpp
-
-# Data sources (serialization)
-DATA_SRCS = $(SRC_DIR)/part/data/data.cpp
+# Tune sources (optimization + loss metrics + serialization)
+TUNE_SRCS = $(SRC_DIR)/part/tune/tune.cpp \
+            $(SRC_DIR)/part/tune/diff.cpp \
+            $(SRC_DIR)/part/tune/geos.cpp \
+            $(SRC_DIR)/part/tune/edge.cpp \
+            $(SRC_DIR)/part/tune/data.cpp
 
 # Object files
-PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o
+PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o \
+            $(OBJ_DIR)/pipe/view.o \
+            $(OBJ_DIR)/pipe/link.o
 
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/exposure.o \
@@ -64,11 +71,13 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/geometric.o \
             $(OBJ_DIR)/mods/detail.o
 
-DIFF_OBJS = $(OBJ_DIR)/diff/diff.o
+TUNE_OBJS = $(OBJ_DIR)/tune/tune.o \
+            $(OBJ_DIR)/tune/diff.o \
+            $(OBJ_DIR)/tune/geos.o \
+            $(OBJ_DIR)/tune/edge.o \
+            $(OBJ_DIR)/tune/data.o
 
-DATA_OBJS = $(OBJ_DIR)/data/data.o
-
-ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS) $(DIFF_OBJS) $(DATA_OBJS)
+ALL_OBJS = $(PIPE_OBJS) $(MODS_OBJS) $(TUNE_OBJS)
 
 # Target static library
 LABS_A = $(LIB_DIR)/labs.a
@@ -86,19 +95,15 @@ $(LABS_A): $(ALL_OBJS) $(RAWS_A) | $(LIB_DIR)
 	@echo "Built: $@ (includes RAWS)"
 
 # Pipe objects
-$(OBJ_DIR)/pipe/pipe.o: $(SRC_DIR)/part/pipe/pipe.cpp | $(OBJ_DIR)/pipe
+$(OBJ_DIR)/pipe/%.o: $(SRC_DIR)/part/pipe/%.cpp | $(OBJ_DIR)/pipe
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Module objects
 $(OBJ_DIR)/mods/%.o: $(SRC_DIR)/part/pipe/mods/%.cpp | $(OBJ_DIR)/mods
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Diff objects
-$(OBJ_DIR)/diff/diff.o: $(SRC_DIR)/part/diff/diff.cpp | $(OBJ_DIR)/diff
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
-
-# Data objects
-$(OBJ_DIR)/data/data.o: $(SRC_DIR)/part/data/data.cpp | $(OBJ_DIR)/data
+# Tune objects
+$(OBJ_DIR)/tune/%.o: $(SRC_DIR)/part/tune/%.cpp | $(OBJ_DIR)/tune
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Directory creation
@@ -111,11 +116,8 @@ $(OBJ_DIR)/pipe:
 $(OBJ_DIR)/mods:
 	mkdir -p $(OBJ_DIR)/mods
 
-$(OBJ_DIR)/diff:
-	mkdir -p $(OBJ_DIR)/diff
-
-$(OBJ_DIR)/data:
-	mkdir -p $(OBJ_DIR)/data
+$(OBJ_DIR)/tune:
+	mkdir -p $(OBJ_DIR)/tune
 
 clean:
 	rm -rf $(TMP_DIR) $(LABS_A)

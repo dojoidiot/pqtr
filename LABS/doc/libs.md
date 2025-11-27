@@ -4,22 +4,21 @@
 
 ## Overview
 
-LABS exposes a single shared library (`labs.so`) with public headers. The raws decoder is compiled into `labs.so`. OpenCV is dynamically linked with an embedded rpath, so consumers only need to link against `labs.so`.
+LABS exposes a static library (`labs.a`) with public headers. The RAWS decoder is compiled into `labs.a`. OpenCV is dynamically linked at runtime, so consumers link against `labs.a` and set `LD_LIBRARY_PATH` for OpenCV.
 
 ---
 
 ## Library
 
-### labs.so
+### labs.a
 
-The monolithic shared library containing all LABS functionality.
+The static library containing all LABS functionality.
 
 | Aspect | Value |
 |--------|-------|
-| **Location** | `lib/labs.so` |
-| **Size** | ~96KB |
-| **Contents** | sony decoder, pipe modules |
-| **OpenCV** | Dynamic link with embedded rpath |
+| **Location** | `lib/labs.a` |
+| **Contents** | RAWS decoder, pipe modules, tune optimizer |
+| **OpenCV** | Runtime link via `LD_LIBRARY_PATH` |
 
 **Build:**
 ```bash
@@ -34,9 +33,11 @@ LABS_DIR = ../LABS
 INCLUDES = -I$(LABS_DIR)/inc \
            -I$(LABS_DIR)/src/main/part/pipe
 
-# Library
-LDFLAGS  = -L$(LABS_DIR)/lib -Wl,-rpath,$(LABS_DIR)/lib
-LIBS     = -llabs
+# Library (static)
+LIBS = $(LABS_DIR)/lib/labs.a
+
+# OpenCV (runtime)
+# LD_LIBRARY_PATH=$(LABS_DIR)/lib/opencv/build/lib ./your_app
 ```
 
 ---
@@ -45,26 +46,24 @@ LIBS     = -llabs
 
 | Header | Location | Namespace | Purpose |
 |--------|----------|-----------|---------|
-| `pipe.hpp` | `inc/` | `pipe` | HEAD/TAIL abstraction (decode, save) |
-| `mods.h` | `src/main/part/pipe/mods/` | `pipe::mods` | BODY processing modules (45 dials) |
+| `pipe.hpp` | `inc/` | `pipe` | HEAD/BODY/TAIL pipeline (PIMPL builder) |
+| `tune.hpp` | `inc/` | `tune` | Loss metrics + optimization (PIMPL) |
+| `data.hpp` | `inc/` | `tune` | Sidecar serialization (Data ↔ JSON) |
 | `hold.hpp` | `inc/` | `pqtr` | Owning smart pointer |
 | `sink.hpp` | `inc/` | `pqtr` | Chunked buffer for I/O |
 | `tool.hpp` | `inc/` | `pqtr` | File → Sink utilities |
-
-### Planned
-
-| Header | Namespace | Purpose |
-|--------|-----------|---------|
-| `data.hpp` | `data` | JSON I/O for pipe.json and style sidecars |
-| `geos.hpp` | `geos` | Spectral optimization (SPSA, 35 color/tone dials) |
-| `edge.hpp` | `edge` | Frequency optimization (greedy, 4 detail dials) |
-| `diff.hpp` | `diff` | Loss metrics (spectral, frequency) |
+| `mods.h` | `src/main/part/pipe/mods/` | `mods` | Low-level processing kernels |
 
 ### Internal (not public)
 
-| Header | Purpose |
-|--------|---------|
-| `sony.h` | Sony ARW decoder (internal to pipe) |
+| Header | Location | Purpose |
+|--------|----------|---------|
+| `view.hpp` | `src/main/part/pipe/` | Display conversion (linear → sRGB) |
+| `link.hpp` | `src/main/part/pipe/` | Module implementations + LinkImpl |
+| `diff.hpp` | `src/main/part/tune/` | Loss metric helpers |
+| `geos.hpp` | `src/main/part/tune/` | SPSA optimizer internals |
+| `edge.hpp` | `src/main/part/tune/` | Golden section internals |
+| `sony.h` | `inc/RAWS/` | Sony ARW decoder |
 
 ---
 
@@ -75,43 +74,76 @@ LIBS     = -llabs
 Chunked buffer for data I/O.
 
 ```cpp
-// Read file into sink
-pqtr::Sink* sink = pqtr::Tool::read("image.ARW");
+#include <tool.hpp>
 
-// Use with pipe
-pipe::Head head;
-pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
-
-delete sink;  // Caller owns
+// Read file into sink (caller owns via Hold)
+pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read("image.ARW"));
 ```
 
-### pipe (HEAD/TAIL)
+### pipe (HEAD → BODY → TAIL)
 
-Abstraction for RAW decoding and output transforms.
+PIMPL builder pattern for RAW processing.
 
 ```cpp
 #include <pipe.hpp>
+#include <tool.hpp>
 
 // Load RAW file
-pqtr::Sink* sink = pqtr::Tool::read("image.ARW");
+pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read("image.ARW"));
 
-// HEAD: Decode to scene-linear RGB
-pipe::Head head;
-pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
-// head.view = CV_32FC3 scene-linear sRGB
-// head.info = metadata map
+// Create pipe and decode (decoder auto-detected)
+pqtr::Hold<pipe::Pipe> pipe = pipe::make();
+pqtr::Hold<pipe::Head> head = pipe->open(std::move(sink));
 
-delete sink;
+// HEAD: Access decoded data
+pipe::Data& data = head->data();
+pipe::View linear = data.view();  // CV_32FC3 scene-linear
 
-// ... apply BODY processing via pipe::mods::* ...
+// BODY: Create Links with 6 golden modules (45 dials)
+pipe::Body& body = head->body(1024);  // Work at 1024px
+pipe::Body::Link& link = body.add("style");
 
-// TAIL: Save (gamma applied internally)
-pipe::save(head.view, "output.png");
+// Set dials (activates modules)
+link.colorCorrection().exposure().set(0.6f);
+link.toneMapping().contrast().set(0.55f);
+link.globalColor().vibrance().set(0.6f);
+
+// Get display-ready view (8-bit BGR, gamma encoded)
+pipe::View display = body.view();
+
+// TAIL: Export at full resolution
+body.tail().save("output.png", 1080);
 ```
 
-### pipe::mods
+### tune (diff + optimization)
 
-Processing modules. All operate on `cv::UMat` (CV_32FC3).
+PIMPL for loss measurement and style optimization.
+
+```cpp
+#include <tune.hpp>
+#include <pipe.hpp>
+
+// Create tune task with target image
+cv::UMat target = cv::imread("camera_jpeg.jpg");
+pqtr::Hold<tune::Task> task = tune::make(target);
+
+// Measure loss (no optimization)
+tune::Data loss = task->diff(body.view());
+// loss.spectral: [0,1] color/tone gap
+// loss.frequency: [0,∞) sharpness gap
+
+// Run optimization with progress callback
+tune::Result result = task->run(body, link, tune::Config(),
+    [](const tune::Progress& p) {
+        if (p.stage == tune::Progress::Stage::GEOS)
+            std::cout << "GEOS: " << p.dome.r << std::endl;
+        return true;  // false to abort
+    });
+```
+
+### mods (low-level kernels)
+
+Direct access to processing modules. All operate on `cv::UMat` (CV_32FC3).
 
 ```cpp
 #include <mods/mods.h>
@@ -119,24 +151,15 @@ Processing modules. All operate on `cv::UMat` (CV_32FC3).
 cv::UMat input, output;
 
 // Exposure (dial: 0.0-1.0, 0.5 = neutral)
-pipe::mods::exposure(input, output, 0.6f);
+mods::exposure(input, output, 0.6f);
 
 // Tone mapping (5 dials)
-pipe::mods::tone_map(input, output,
+mods::tone_map(input, output,
     0.5f,   // contrast
     0.5f,   // highlights
     0.5f,   // shadows
     0.5f,   // white_point
     0.5f);  // black_point
-
-// Geometric (6 dials)
-pipe::mods::geometric(input, output,
-    0.0f,   // crop_top
-    0.0f,   // crop_right
-    0.0f,   // crop_bottom
-    0.0f,   // crop_left
-    0.0f,   // zoom
-    0.5f);  // tilt_angle
 ```
 
 ### Module Summary
@@ -159,54 +182,75 @@ pipe::mods::geometric(input, output,
 
 ### OpenCV
 
-Dynamically linked with embedded rpath:
+Runtime linked via `LD_LIBRARY_PATH`:
 - `opencv_core`
 - `opencv_imgproc`
 - `opencv_imgcodecs`
 
 Located at `lib/opencv/build/lib/`.
 
-### raws
+### RAWS
 
-Sony decoder compiled directly into `labs.so` from `opt/raws/`.
+Sony decoder compiled into `labs.a` from `lib/RAWS.a`.
 
 ---
 
 ## Consumer Example (DESK)
 
 ```makefile
-# DESK Makefile additions
+# DESK Makefile
 LABS_DIR = ../LABS
 
-INCLUDES += -I$(LABS_DIR)/inc \
-            -I$(LABS_DIR)/src/main/part/pipe
+INCLUDES = -I$(LABS_DIR)/inc \
+           -I$(LABS_DIR)/src/main/part/pipe
 
-LDFLAGS  += -L$(LABS_DIR)/lib -Wl,-rpath,$(LABS_DIR)/lib
-LIBS     += -llabs
+LIBS = $(LABS_DIR)/lib/labs.a \
+       $(LABS_DIR)/lib/opencv/build/lib/libopencv_core.so \
+       $(LABS_DIR)/lib/opencv/build/lib/libopencv_imgproc.so \
+       $(LABS_DIR)/lib/opencv/build/lib/libopencv_imgcodecs.so
 ```
 
 ```cpp
 // DESK usage
 #include <tool.hpp>
 #include <pipe.hpp>
-#include <mods/mods.h>
 
 void processRaw(const std::string& rawPath) {
     // Load RAW
-    pqtr::Sink* sink = pqtr::Tool::read(rawPath);
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(rawPath));
 
-    // HEAD: Decode to scene-linear RGB
-    pipe::Head head;
-    pipe::open(*sink, pipe::decoder::SONY_ARW2, head);
-    delete sink;
+    // HEAD → BODY → TAIL
+    pqtr::Hold<pipe::Pipe> pipe = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipe->open(std::move(sink));
+    pipe::Body& body = head->body(1024);
 
-    // BODY: Apply processing modules
-    cv::UMat processed;
-    pipe::mods::tone_map(head.view, processed);
+    // Configure link
+    pipe::Body::Link& link = body.add("style");
+    link.colorCorrection().exposure().set(0.6f);
+    link.toneMapping().contrast().set(0.55f);
 
-    // TAIL: Save (gamma applied internally)
-    pipe::save(processed, "output.png");
+    // Export
+    body.tail().save("output.png", 1080);
 }
+```
+
+---
+
+## Source Structure
+
+```
+src/main/part/
+├── pipe/
+│   ├── pipe.cpp      # HEAD/BODY/TAIL/Pipe
+│   ├── view.cpp      # Display conversion (linear → sRGB)
+│   ├── link.cpp      # Module implementations
+│   └── mods/         # Processing kernels (45 dials)
+└── tune/
+    ├── tune.cpp      # Task + factory
+    ├── diff.cpp      # Loss metrics
+    ├── geos.cpp      # SPSA optimizer (stub)
+    ├── edge.cpp      # Golden section (stub)
+    └── data.cpp      # Serialization
 ```
 
 ---
@@ -218,4 +262,4 @@ void processRaw(const std::string& rawPath) {
 make -f Makefile.labs
 ```
 
-Output: `lib/labs.so` (~96KB)
+Output: `lib/labs.a`

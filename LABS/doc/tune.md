@@ -298,45 +298,215 @@ cv::UMat output = processPipe(rawFile, pipe);
 
 ## API Interface
 
+The tune module provides a unified PIMPL interface for both loss measurement and optimization.
+This consolidates what was previously separate "diff" functionality into a single coherent API.
+
+### tune.hpp
+
 ```cpp
-namespace pqtr {
+namespace tune {
 
-struct TuneResult {
-    float color_dials[35];     // SPSA-optimized
-    float detail_dials[4];     // Edge-optimized
-    float spsa_loss;           // Final spectral loss
-    float edge_loss;           // Final frequency loss
-    int spsa_iterations;
-    double computation_time;
-};
+    using View = cv::UMat;  // GPU-accelerated image (BGR 8-bit)
 
-struct TuneConfig {
-    bool skip_spsa = false;
-    bool skip_edge = false;
-    int spsa_max_iterations = 500;
-    int spsa_multi_starts = 5;
-};
+    // Loss metrics (spectral + frequency)
+    struct Data {
+        float spectral = 0.0f;   // [0,1] geodesic distance (0 = identical color/tone)
+        float frequency = 0.0f;  // [0,∞) relative variance diff (0 = identical sharpness)
+    };
 
-class Tune {
-public:
-    Tune(Pipe& pipe, Diff& diff);
+    // Optimization result
+    struct Result {
+        Data loss;              // Final loss values
+        int geos_iterations;    // SPSA iterations used
+        int edge_evaluations;   // Golden section evaluations
+    };
 
-    TuneResult optimize(
-        const cv::UMat& source_raw,
-        const cv::UMat& reference,
-        const TuneConfig& config = TuneConfig(),
-        ProgressCallback callback = nullptr
-    );
+    // Optimization configuration
+    struct Config {
+        bool skip_geos = false;
+        bool skip_edge = false;
+        int geos_max_iter = 500;
+        int geos_multi_starts = 5;
+        float geos_threshold = 0.01f;
+        float edge_tolerance = 0.01f;
+    };
 
-private:
-    // Stage 1: Color/tone
-    void optimizeSPSA(/*...*/);
+    // Progress feedback for GUI visualization
+    struct Progress {
+        enum class Stage { GEOS, EDGE } stage;
 
-    // Stage 2: Sharpness
-    void optimizeEdge(/*...*/);
-};
+        int iteration;
+        int max_iterations;
 
-} // namespace pqtr
+        Data loss;  // Current loss values
+
+        // GEOS: 2D dome compass (style space projection)
+        struct Dome {
+            float r;      // [0,1] radial distance from target (0 = converged)
+            float theta;  // [0,2π] semantic direction of error
+            float x() const { return r * std::cos(theta); }
+            float y() const { return r * std::sin(theta); }
+        } dome;
+
+        // EDGE: 1D sharpness slider
+        struct Edge {
+            float ratio;  // var_cand / var_ref: 1.0 = matched
+        } edge;
+    };
+
+    // Progress callback - return false to abort optimization
+    using Callback = std::function<bool(const Progress&)>;
+
+    // Task holds cached target features for efficient repeated comparisons.
+    // PIMPL design: created via tune::make(), destroyed via RAII.
+    class Task {
+    public:
+        virtual ~Task() = default;
+
+        // Access cached target image (read-only reference)
+        virtual View target() = 0;
+
+        // Compute loss metrics between candidate and cached target
+        virtual Data diff(View candidate) = 0;
+
+        // Compute visual diff image (amplified pixel difference)
+        virtual View view(View candidate, float scale = 5.0f) = 0;
+
+        // Run optimization - modifies link dials in-place
+        virtual Result run(pipe::Body& body, pipe::Body::Link& link,
+                          const Config& config = Config(),
+                          Callback progress = nullptr) = 0;
+    };
+
+    // Factory: create Task with target image (features cached for reuse)
+    pqtr::Hold<Task> make(View target);
+
+} // namespace tune
+```
+
+### Ownership
+
+| Type | Ownership | Notes |
+|------|-----------|-------|
+| `Hold<Task>` | Caller owns | RAII cleanup when Hold goes out of scope |
+| `View` | Shared | OpenCV reference-counted; shallow copy shares GPU buffer |
+| `Data` | Caller owns | Value type (two floats); safe to copy |
+| `Progress` | Transient | Valid only during callback; do not store references |
+
+### Usage Example
+
+```cpp
+#include <tune.hpp>
+#include <pipe.hpp>
+
+// Load target (camera preview) and create tune task
+cv::UMat target = loadImage("head.png");
+pqtr::Hold<tune::Task> task = tune::make(target);
+
+// Measure baseline loss
+cv::UMat candidate = body.view();
+tune::Data baseline = task->diff(candidate);
+std::cout << "Baseline spectral: " << baseline.spectral << std::endl;
+
+// Optimize with progress callback
+pipe::Body::Link& link = body.add("style");
+tune::Result result = task->run(body, link, tune::Config(),
+    [](const tune::Progress& p) {
+        if (p.stage == tune::Progress::Stage::GEOS) {
+            std::cout << "GEOS " << p.iteration << "/" << p.max_iterations
+                      << " r=" << p.dome.r << std::endl;
+        }
+        return true;  // Continue optimization
+    });
+
+// Link now has optimized dial values
+body.tail().save("output.png", 1080);
+```
+
+---
+
+## Progress Visualization
+
+The tune API provides rich feedback for GUI visualization during optimization.
+
+### Dome Compass (GEOS Stage)
+
+The 10D style hypersphere is projected to a 2D dome compass:
+
+```
+        N (target)
+        ·
+       /|\
+      / | \
+     /  |  \
+    ·───┼───·
+     \  |  /
+      \ | /
+       \|/
+        · (candidate moving toward N)
+```
+
+**Geometry:**
+- Target style vector ψ_ref is rotated to "north pole"
+- Candidate ψ_cand position shows distance and direction of style error
+- As optimization converges, the dot moves toward center
+
+**Computing dome coordinates:**
+```cpp
+// Given unit vectors ψ_ref and ψ_cand in R^10
+float dot = inner_product(psi_ref, psi_cand);
+float r = std::sqrt(1.0f - dot * dot);  // = √(spectral_loss)
+
+// Residual in tangent plane
+float residual[10];
+for (int i = 0; i < 10; i++)
+    residual[i] = psi_cand[i] - dot * psi_ref[i];
+
+// Project onto semantic axes (μ_L and μ_C from style vector)
+float x = residual[3];  // Brightness axis
+float y = residual[4];  // Color axis
+float theta = std::atan2(y, x);
+```
+
+**Semantic meaning of theta:**
+- 0, π: Brightness error (too bright / too dark)
+- π/2, 3π/2: Color error (too saturated / too muted)
+
+### Edge Slider (EDGE Stage)
+
+Sharpness is 1D - shown as a slider:
+
+```
+soft ◄──────────┼──────────► sharp
+                │
+                ▼ (moving toward 1.0)
+              target
+```
+
+**Computing edge.ratio:**
+```cpp
+edge.ratio = var_candidate / var_reference;
+```
+
+- `ratio < 1.0` → too soft (needs sharpening)
+- `ratio = 1.0` → matched
+- `ratio > 1.0` → too sharp (needs denoising)
+
+### GUI Integration
+
+```cpp
+tune::Result result = task->run(body, link, config,
+    [&gui](const tune::Progress& p) {
+        if (p.stage == tune::Progress::Stage::GEOS) {
+            gui.updateDomeCompass(p.dome.x(), p.dome.y());
+            gui.setStatusText("Color/Tone: " + std::to_string(int(p.dome.r * 100)) + "% remaining");
+        } else {
+            gui.updateSharpnessSlider(p.edge.ratio);
+            gui.setStatusText("Sharpness: " + formatRatio(p.edge.ratio));
+        }
+        gui.setProgress(p.iteration, p.max_iterations);
+        return !gui.cancelRequested();  // Return false to abort
+    });
 ```
 
 ---
@@ -353,10 +523,26 @@ The user's responsibility is simple: **frame your shot**. The tool handles the r
 
 ---
 
+## Internal Structure
+
+The tune module is split into focused files:
+
+| File | Purpose |
+|------|---------|
+| `tune.cpp` | Task class + `make()` factory |
+| `diff.cpp` | Loss metrics (spectral, frequency) |
+| `geos.cpp` | SPSA optimizer for color/tone (stub) |
+| `edge.cpp` | Golden section for sharpness (stub) |
+| `data.cpp` | Data ↔ JSON serialization |
+
+See [libs.md](./libs.md) for full source structure.
+
+---
+
 ## See Also
 
 - [geos.md](./geos.md) - GeoS: Spectral loss theory + SPSA algorithm (color/tone)
 - [edge.md](./edge.md) - Edge: Frequency loss theory + greedy algorithm (sharpness)
-- [diff.md](./diff.md) - Loss metrics implementation
+- [diff.md](./diff.md) - Loss metrics redirect
 - [data.md](./data.md) - Style sidecar format
 - [test.md](./test.md) - Test cases

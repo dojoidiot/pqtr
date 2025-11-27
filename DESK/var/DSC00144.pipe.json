@@ -23,7 +23,7 @@
           "exposure": { "value": 0.5 }
         },
         "tone_mapping": {
-          "contrast": { "value": 0.5 },
+          "contrast": { "value": 0.807453 },
           "curve_adjustment": {
             "highlights": 0.5,
             "shadows": 0.5
@@ -86,7 +86,7 @@
             "radius": 0.4
           },
           "denoise": {
-            "luminance": 0,
+            "luminance": 0.5,
             "chroma": 0
           }
         }

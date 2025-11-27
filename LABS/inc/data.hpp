@@ -2,7 +2,7 @@
 // Data persistence API for LABS
 //
 // Provides serialization for all LABS data types:
-// - diff::Data (diff results)
+// - tune::Data (loss metrics)
 // - pipe::Link (edit steps) - future
 // - tune::Result (optimization results) - future
 //
@@ -10,29 +10,29 @@
 
 #pragma once
 
-#include <diff.hpp>
+#include <tune.hpp>
 #include <string>
 
 namespace data
 {
     // ============================================================
-    // Diff Data
+    // Tune Data (Loss Metrics)
     // ============================================================
 
-    namespace diff
+    namespace tune
     {
         // Serialize to JSON string
-        std::string toJson(const ::diff::Data& d);
+        std::string toJson(const ::tune::Data& d);
 
         // Deserialize from JSON string
-        ::diff::Data fromJson(const std::string& json);
+        ::tune::Data fromJson(const std::string& json);
 
         // Save to file
-        bool save(const ::diff::Data& d, const std::string& path);
+        bool save(const ::tune::Data& d, const std::string& path);
 
         // Load from file
-        ::diff::Data load(const std::string& path);
+        ::tune::Data load(const std::string& path);
 
-    } // namespace diff
+    } // namespace tune
 
 } // namespace data
