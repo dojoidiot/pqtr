@@ -1,17 +1,37 @@
 # PQTR Master Makefile
 #
-# Builds all MAINs in dependency order.
+# Builds all projects in dependency order.
 # Run from repository root.
 #
 # Usage:
-#   make          # Build everything (wire + labs + desk)
-#   make labs     # Build LABS only
-#   make desk     # Build DESK (builds LABS first)
-#   make raws     # Build RAWS standalone test
-#   make clean    # Clean all projects
-#   make rewire   # Remove and recreate all symlinks
+#   make           # Build everything (wire + raws + labs + desk)
+#   make raws      # Build RAWS library
+#   make labs      # Build LABS library (builds RAWS first)
+#   make desk      # Build DESK app (builds LABS first)
+#   make test      # Run all tests
+#   make clean     # Clean all projects
+#   make rewire    # Remove and recreate all symlinks
 
-.PHONY: all wire rewire raws labs desk raws-test clean clean-wire
+.PHONY: all help wire rewire raws labs desk test test-raws test-labs clean
+
+help:
+	@echo "PQTR Build System"
+	@echo ""
+	@echo "Build targets:"
+	@echo "  all       Build everything (default)"
+	@echo "  raws      Build RAWS library"
+	@echo "  labs      Build LABS library"
+	@echo "  desk      Build DESK application"
+	@echo ""
+	@echo "Test targets:"
+	@echo "  test      Run all tests (RAWS + LABS)"
+	@echo "  test-raws Run RAWS decoder test"
+	@echo "  test-labs Run LABS test suite"
+	@echo ""
+	@echo "Other:"
+	@echo "  wire      Create symlinks between projects"
+	@echo "  rewire    Remove and recreate symlinks"
+	@echo "  clean     Clean all build artifacts"
 
 # Default: build everything
 all: desk
@@ -24,32 +44,52 @@ rewire:
 	@bash ./wire.sh --unwire
 	@bash ./wire.sh
 
+# ============================================================
+# Build targets
+# ============================================================
+
 # RAWS: decoder library (no dependencies)
 raws: wire
+	@echo ""
 	@echo "=== Building RAWS ==="
-	$(MAKE) -C RAWS -f Makefile.raws
+	$(MAKE) -C RAWS lib
 
-# LABS: core library (depends on RAWS library)
+# LABS: core library (depends on RAWS)
 labs: raws
+	@echo ""
 	@echo "=== Building LABS ==="
-	$(MAKE) -C LABS -f Makefile.labs
+	$(MAKE) -C LABS lib
 
-# DESK: GUI application (depends on LABS library)
+# DESK: GUI application (depends on LABS)
 desk: labs
+	@echo ""
 	@echo "=== Building DESK ==="
 	$(MAKE) -C DESK -f Makefile.desk
 
-# RAWS test binary (optional, for decoder development)
-raws-test: raws
-	@echo "=== Building RAWS test ==="
-	$(MAKE) -C RAWS -f Makefile.sony
+# ============================================================
+# Test targets
+# ============================================================
 
-# Clean all projects
+# Run all tests
+test: test-raws test-labs
+
+# RAWS test
+test-raws: raws
+	@echo ""
+	@echo "=== Testing RAWS ==="
+	$(MAKE) -C RAWS test
+
+# LABS tests
+test-labs: labs
+	@echo ""
+	@echo "=== Testing LABS ==="
+	$(MAKE) -C LABS test-all
+
+# ============================================================
+# Clean
+# ============================================================
+
 clean:
-	$(MAKE) -C RAWS -f Makefile.raws clean
-	$(MAKE) -C RAWS -f Makefile.sony clean
-	$(MAKE) -C LABS -f Makefile.labs clean
-	$(MAKE) -C DESK -f Makefile.desk clean
-
-clean-wire:
-	@bash ./wire.sh --unwire
+	$(MAKE) -C RAWS clean 2>/dev/null || true
+	$(MAKE) -C LABS clean 2>/dev/null || true
+	$(MAKE) -C DESK -f Makefile.desk clean 2>/dev/null || true

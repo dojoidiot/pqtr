@@ -53,50 +53,37 @@ The framing and composition - what's in the frame, how it's oriented.
 
 ---
 
-## Two-Phase Workflow
+## End-to-End Workflow
 
-The workflow separates optimization from application:
+The complete tune workflow transforms scene-referred RAW into camera-matched output:
 
 ```
-PHASE 1: OPTIMIZE (tune tool)
-  tune photo.ARW --output edit.json
-  │
-  ├── Load RAW → HEAD (decode + color science)
-  ├── Extract camera preview as target
-  ├── Create BODY with Link
-  ├── Run SPSA optimizer → find optimal dials
-  └── Save Link → edit.json
-
-PHASE 2: APPLY (labs tool)
-  labs photo.ARW --output tail.png --edit edit.json
-  │
-  ├── Load RAW → HEAD (decode + color science)
-  ├── Load edit.json → add Link to BODY
-  ├── Run BODY → TAIL
-  └── Save → tail.png
-```
-
-**Goal:** tail.png matches camera preview (loss → 0)
-
-### CLI Usage
-
-**Optimizer:**
-```bash
-tune photo.ARW --output edit.json              # Default: blockwise mode
-tune photo.ARW --output edit.json --mode full  # Full 35D simultaneous
-tune photo.ARW --output edit.json --mode linear # Linear-only (skip LUT)
-```
-
-**Runner:**
-```bash
-labs photo.ARW --output photo.png                     # Baseline (no edits)
-labs photo.ARW --output photo.png --edit edit.json    # With optimized settings
-labs photo.ARW --output thumb.png --edit edit.json --size 1080  # Social size
+┌─────────────────────────────────────────────────────────────────┐
+│                         TUNE WORKFLOW                          │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  RAW File ──► HEAD ──► head.png (camera preview = TARGET)       │
+│                │                                                │
+│                ▼                                                │
+│              BODY (empty) ──► body.png (scene-referred)         │
+│                │                                                │
+│                ▼                                                │
+│              DIFF ──► metrics (spectral + frequency loss)       │
+│                │                                                │
+│                ▼                                                │
+│              TUNE ──► edit steps (17 color + 2 detail dials)    │
+│                │                                                │
+│                ▼                                                │
+│              BODY (with edit steps) ──► TAIL ──► tail.png       │
+│                                                                 │
+│  Goal: tail.png matches head.png (loss → 0)                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ### Test Harness
 
-The test demonstrates both phases:
+The `tune` test validates this workflow:
 
 ```bash
 make -f Makefile.tune test
@@ -104,10 +91,10 @@ make -f Makefile.tune test
 
 **Outputs** (`tmp/var/tune/`):
 - `head.png` - Camera preview (target)
-- `body.png` - Baseline (no edits)
-- `edit.json` - Optimized Link settings from Phase 1
-- `tail.png` - Final output from Phase 2 (with edit.json)
-- `diff.png` - Visual difference (head vs tail)
+- `body.png` - Scene-referred (candidate, no edit steps)
+- `tail.png` - Final output (should match head after tuning)
+- `diff.png` - Visual difference (head vs body)
+- `diff.json` - Loss metrics baseline
 
 **Example metrics:**
 ```json

@@ -123,7 +123,7 @@ RAWS (RAW decoder library)
   │             │
   │             └──[lib]──► DESK (links labs.a)
   │
-  └──[standalone]──► RAWS test binary (make raws-test)
+  └──[test]──► RAWS test binary (make test-raws)
 ```
 
 ### Layer Separation
@@ -166,10 +166,18 @@ WIRE <FROM> <type> <INTO>
 ## Building
 
 ```bash
-make          # Wire + build LABS + build DESK
-make labs     # Build LABS only (wires first)
-make desk     # Build DESK (builds LABS first)
-make raws     # Build RAWS standalone test binary
-make clean    # Clean all projects
-make rewire   # Remove and recreate all symlinks
+make           # Build everything (wire + raws + labs + desk)
+make raws      # Build RAWS library
+make labs      # Build LABS library (builds RAWS first)
+make desk      # Build DESK app (builds LABS first)
+make clean     # Clean all projects
+make rewire    # Remove and recreate all symlinks
+```
+
+## Testing
+
+```bash
+make test       # Run all tests (RAWS + LABS)
+make test-raws  # Run RAWS decoder test
+make test-labs  # Run LABS full test suite
 ```

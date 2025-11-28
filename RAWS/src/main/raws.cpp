@@ -49,12 +49,11 @@ static Result decodeSony(pqtr::Sink& sink)
     if (!sony::Decoder::process_linear(bayer, meta, result.data))
         return result;
 
-    // Data info: camera-native RGB metadata
+    // Data info: scene-linear metadata
     for (const auto& kv : sonyInfo)
         result.dataInfo[kv.first] = kv.second;
 
     result.dataInfo["decoder"] = "raws_sony_arw2";
-    result.dataInfo["color_space"] = "camera_native";  // NEW: indicates no WB/matrix applied
     result.dataInfo["width"] = std::to_string(meta.crop_width);
     result.dataInfo["height"] = std::to_string(meta.crop_height);
     result.dataInfo["camera_make"] = meta.camera_make;
@@ -67,25 +66,6 @@ static Result decodeSony(pqtr::Sink& sink)
     oss.str(""); oss << meta.aperture; result.dataInfo["aperture"] = oss.str();
     oss.str(""); oss << meta.focal_length; result.dataInfo["focal_length"] = oss.str();
     result.dataInfo["orientation"] = std::to_string(meta.orientation);
-
-    // Color science metadata (for LABS to apply)
-    // WB: normalize so G=1.0
-    float g_ref = meta.wb_rggb[1] > 0 ? static_cast<float>(meta.wb_rggb[1]) : 1024.0f;
-    result.colorMeta.wb_r = static_cast<float>(meta.wb_rggb[0]) / g_ref;
-    result.colorMeta.wb_g = 1.0f;
-    result.colorMeta.wb_b = static_cast<float>(meta.wb_rggb[3]) / g_ref;  // Note: index 3 for B
-
-    // Color matrix: camera RGB → sRGB
-    result.colorMeta.color_matrix = meta.color_matrix;
-
-    // Lens distortion
-    result.colorMeta.has_distortion = meta.has_distortion_params;
-    result.colorMeta.distortion_knot_count = meta.distortion_knot_count;
-    if (meta.has_distortion_params) {
-        for (int i = 0; i < meta.distortion_knot_count && i < 16; i++) {
-            result.colorMeta.distortion_params[i] = meta.distortion_params[i];
-        }
-    }
 
     // Preview info: what produced the camera look
     result.preview = std::move(meta.preview);

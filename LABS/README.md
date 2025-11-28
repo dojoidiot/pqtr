@@ -9,36 +9,17 @@ The "settled science" of RAW image processing. LABS is a stable utility library 
 LABS sits between raw decoding and end-user applications:
 
 ```
-[RAWS] ──► [LABS HEAD] ──► [LABS BODY] ──► DESK / FAST / PLAY
-   │            │               │
-   │            │               └── pipe::Pipe API (dials, modules)
-   │            │
-   │            └── Applies color science:
-   │                • WB (from metadata)
-   │                • ColorMatrix (from metadata)
-   │
-   └── Provides:
-       • Camera-native RGB
-       • ColorMeta (WB, matrix, distortion)
+[RAWS] ──► [LABS] ──► DESK / FAST / PLAY
+            │
+            └── pipe::Pipe API
+                HEAD → BODY → TAIL
 ```
 
 - **Consumes**: `raws.a` (RAW decoder, via symlink)
 - **Produces**: `labs.a` (complete processing library)
 - **Used by**: DESK, FAST, PLAY
 
-## Separation of Concerns
-
-| Component | Responsibility | Camera-Specific? |
-|-----------|----------------|------------------|
-| **RAWS** | Sensor data extraction (BLC, demosaic, crop) | Yes |
-| **LABS HEAD** | Color science (WB, matrix) from metadata | No |
-| **LABS BODY** | Image processing (dials, modules, tune) | No |
-
-**Why this matters:**
-- RAWS decoder outputs camera-native RGB + metadata
-- LABS applies WB/matrix using metadata—same code for all cameras
-- Tune optimizer learns *actual* camera transform, not "correction to decoder's guess"
-- Adding new cameras requires only a RAWS decoder; LABS code unchanged
+LABS knows nothing about camera-specific decoding—it calls `raws::decode()` and receives scene-linear RGB. When new cameras are added to RAWS, LABS works unchanged.
 
 ## Project Structure
 
@@ -79,30 +60,9 @@ Parts are modular libraries that provide specific functionalities. They expose a
 
 These are command-line executables located in `bin/` that use the parts to perform tasks.
 
-*   [**`tune`**](./doc/tune.md): Optimizer that finds optimal Link settings to match camera preview. Outputs `edit.json`.
-*   [**`labs`**](./doc/labs.md): Pipe runner that processes RAW with optional edit settings. Outputs PNG.
-*   [**`diff`**](./doc/diff.md): Computes spectral loss (color/tone) and frequency loss (sharpness) between images.
-
-### Two-Phase Workflow
-
-```
-PHASE 1: OPTIMIZE
-  tune photo.ARW --output edit.json
-  → Loads RAW, uses embedded preview as target
-  → Runs SPSA optimizer to find dial values
-  → Saves optimized Link settings to edit.json
-
-PHASE 2: APPLY
-  labs photo.ARW --output tail.png --edit edit.json
-  → Loads RAW through HEAD (decode + color science)
-  → Loads edit.json into BODY as Link
-  → Runs BODY → TAIL → saves PNG
-```
-
-This separation allows:
-- Batch optimization (tune once, apply to many)
-- Manual editing (create edit.json by hand or GUI)
-- Style transfer (apply one image's edit.json to another)
+*   [**`pipe`**](./doc/pipe.md): A headless tool that processes a RAW file into a final image, producing a `.pipe.json` sidecar with pipeline configuration.
+*   [**`tune`**](./doc/tune.md): A headless tool that automatically optimizes dials to match a reference style. Two-stage process: SPSA for color/tone (17 dials + 17³ LUT), golden section for sharpness (2 dials). User handles geometry (6 dials).
+*   [**`diff`**](./doc/diff.md): A headless tool that computes spectral loss (color/tone) and frequency loss (sharpness) between images.
 
 ## RAW Decoding
 

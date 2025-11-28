@@ -1,75 +1,32 @@
-# Labs Tool & System Integration
+# Labs System Integration 
 
 [back](../README.md)
 
-This document describes the `labs` tool and how the LABS components integrate for RAW image processing with automatic style transfer.
-
-## The labs Tool
-
-The `labs` tool runs the pipe with optional edit settings:
-
-```bash
-labs <source.ARW> --output <image.png> [--edit edit.json] [--size N]
-```
-
-**Arguments:**
-- `--output <image.png>` - Output file (required)
-- `--edit <edit.json>` - Apply Link settings from tune
-- `--size <pixels>` - Max output dimension (default: full resolution)
-
-**Examples:**
-```bash
-labs photo.ARW --output photo.png                    # Baseline (no edits)
-labs photo.ARW --output photo.png --edit edit.json   # With optimized settings
-labs photo.ARW --output thumb.png --size 1080        # Social media size
-```
+This document describes how the various components within the `PQTR:LABS` system integrate and interact to provide RAW image processing with automatic style transfer capabilities.
 
 ## System Overview
 
-The `LABS` system consists of tools and libraries that work together:
+The `LABS` system consists of several independent programs (executables and libraries) that work together:
 
 ```
 ┌─────────┐
-│  RAWS   │  RAW decode → camera-native RGB + metadata
+│  raws   │  Existing: RAW decode → scene-referred linear RGB
 └────┬────┘
-     │ camera_rgb (CV_32FC3) + ColorMeta
+     │ linear_rgb.exr (CV_32FC3, scene-referred)
      ↓
 ┌─────────┐
-│  HEAD   │  Apply WB + ColorMatrix → scene-linear sRGB
-└────┬────┘
-     │ linear_rgb (CV_32FC3)
-     ↓
-┌─────────┐
-│  BODY   │  6-module pipeline + Links from edit.json
-└────┬────┘
+│  pipe   │  6-module creative grading pipeline
+└────┬────┘  Input: linear RGB, 25 dials → Output: display RGB
+     │ display_rgb.png
      │
      ├──────────────────────────────────┐
      │                                  │
      ↓                                  ↓
 ┌─────────┐                        ┌─────────┐
-│  diff   │  Spectral loss         │  tune   │  SPSA optimizer
-└─────────┘  (color/tone) +        └─────────┘  → outputs edit.json
-             Frequency loss
-             (sharpness)
-     │
-     ↓
-┌─────────┐
-│  TAIL   │  Gamma encode → PNG
-└─────────┘
-```
-
-## Two-Phase Workflow
-
-```
-PHASE 1: OPTIMIZE
-  tune photo.ARW --output edit.json
-  → Finds optimal dial values
-  → Saves Link settings to edit.json
-
-PHASE 2: APPLY
-  labs photo.ARW --output tail.png --edit edit.json
-  → Loads edit.json into BODY as Link
-  → Runs HEAD → BODY → TAIL → PNG
+│  diff   │  Spectral loss         │  tune   │  Two-stage optimizer
+└─────────┘  (color/tone) +        └─────────┘  3D LUT + SPSA (17 color dials)
+             Frequency loss                     + Edge (2 detail dials)
+             (sharpness)                        User: 6 geometric dials
 ```
 
 ## Data Flow and Integration Patterns

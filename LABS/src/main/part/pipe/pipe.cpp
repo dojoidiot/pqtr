@@ -1,12 +1,6 @@
 // pipe.cpp
 // PIMPL implementation of pipe.hpp
 // HEAD→BODY→TAIL builder pattern
-//
-// ARCHITECTURE: RAWS provides camera-native RGB + metadata.
-// HEAD applies WB + ColorMatrix to convert to scene-linear sRGB.
-// This separation ensures:
-//   - RAWS = sensor-specific extraction only
-//   - LABS = all color science (camera-agnostic)
 
 #include <pipe.hpp>
 #include "view.hpp"
@@ -14,7 +8,6 @@
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <stdexcept>
-#include <iostream>
 
 // RAW decoder (from RAWS library)
 #include "raws.hpp"
@@ -23,59 +16,6 @@ namespace pipe
 {
 
 using namespace internal;
-
-// ============================================================
-// Color Science (applied in HEAD)
-// ============================================================
-
-// Apply white balance to camera-native RGB
-// WB is multiplicative: R *= wb_r, G *= 1.0, B *= wb_b
-static View applyWhiteBalance(View input, float wb_r, float wb_g, float wb_b)
-{
-    if (input.empty()) return input;
-
-    // Create gain vector for multiply
-    cv::Scalar gains(wb_r, wb_g, wb_b);  // RGB order
-
-    View output;
-    cv::multiply(input, gains, output);
-
-    std::cout << "  [HEAD] WB applied: R=" << wb_r << " G=" << wb_g << " B=" << wb_b << std::endl;
-    return output;
-}
-
-// Apply color matrix to convert camera RGB → sRGB
-static View applyColorMatrix(View input, const cv::Matx33f& matrix)
-{
-    if (input.empty()) return input;
-
-    // Check if matrix is identity (skip if so)
-    cv::Matx33f identity = cv::Matx33f::eye();
-    bool is_identity = true;
-    for (int i = 0; i < 9; i++) {
-        if (std::abs(matrix.val[i] - identity.val[i]) > 0.001f) {
-            is_identity = false;
-            break;
-        }
-    }
-
-    if (is_identity) {
-        std::cout << "  [HEAD] ColorMatrix: identity (skipped)" << std::endl;
-        return input;
-    }
-
-    // Apply matrix: output = matrix * input (per-pixel)
-    cv::Mat matrixMat(matrix);
-    View output;
-    cv::transform(input, output, matrixMat);
-
-    std::cout << "  [HEAD] ColorMatrix applied:" << std::endl;
-    std::cout << "    [" << matrix(0,0) << ", " << matrix(0,1) << ", " << matrix(0,2) << "]" << std::endl;
-    std::cout << "    [" << matrix(1,0) << ", " << matrix(1,1) << ", " << matrix(1,2) << "]" << std::endl;
-    std::cout << "    [" << matrix(2,0) << ", " << matrix(2,1) << ", " << matrix(2,2) << "]" << std::endl;
-
-    return output;
-}
 
 // ============================================================
 // DataImpl
@@ -280,30 +220,8 @@ public:
         if (!raw.success)
             return pqtr::Hold<Head>(nullptr);
 
-        // LABS applies color science that RAWS deferred:
-        // 1. White Balance (from camera metadata)
-        // 2. Color Matrix (camera RGB → sRGB)
-        //
-        // This keeps RAWS as pure sensor extraction,
-        // and LABS handles all color science (camera-agnostic).
-
-        std::cout << "[HEAD] Applying color science from metadata..." << std::endl;
-
-        // Step 1: Apply white balance
-        View balanced = applyWhiteBalance(
-            raw.data,
-            raw.colorMeta.wb_r,
-            raw.colorMeta.wb_g,
-            raw.colorMeta.wb_b);
-
-        // Step 2: Apply color matrix
-        View corrected = applyColorMatrix(balanced, raw.colorMeta.color_matrix);
-
-        // Update color_space in metadata
-        raw.dataInfo["color_space"] = "scene_linear_srgb";
-
         return pqtr::Hold<Head>(new HeadImpl(
-            std::move(raw.dataInfo), std::move(corrected),
+            std::move(raw.dataInfo), std::move(raw.data),
             std::move(raw.previewInfo), std::move(raw.preview)));
     }
 };
