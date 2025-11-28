@@ -5,6 +5,7 @@
 // - geos::Data (loss metrics)
 // - 3D LUT (17³ color transform)
 // - pipe::Link (edit steps)
+// - pipe::Info (camera metadata)
 // - geos::Result (optimization results) - future
 //
 // See data.md for format specification.
@@ -75,7 +76,21 @@ namespace data
     } // namespace geos
 
     // ============================================================
-    // Link Serialization (Edit Steps)
+    // Info Serialization (Camera Metadata)
+    // ============================================================
+
+    namespace info
+    {
+        // Serialize info map to JSON string
+        std::string toJson(const pipe::Info& info);
+
+        // Save info to file
+        bool save(const pipe::Info& info, const std::string& path);
+
+    } // namespace info
+
+    // ============================================================
+    // Link Serialization (Single Edit Step)
     // ============================================================
 
     namespace link
@@ -93,5 +108,28 @@ namespace data
         bool load(pipe::Body::Link& link, const std::string& path);
 
     } // namespace link
+
+    // ============================================================
+    // Links Serialization (Multiple Edit Steps)
+    // ============================================================
+    // Two-link architecture: linear (scene-referred) + display (display-referred)
+
+    namespace links
+    {
+        // Serialize multiple links to JSON string
+        // Format: { "links": [ {...}, {...} ] }
+        std::string toJson(std::vector<pipe::Body::Link*>& links);
+
+        // Deserialize JSON string into links (modifies links in-place)
+        // Links must already exist in body - this populates their values
+        bool fromJson(std::vector<pipe::Body::Link*>& links, const std::string& json);
+
+        // Save links to file
+        bool save(std::vector<pipe::Body::Link*>& links, const std::string& path);
+
+        // Load links from file (modifies links in-place)
+        bool load(std::vector<pipe::Body::Link*>& links, const std::string& path);
+
+    } // namespace links
 
 } // namespace data

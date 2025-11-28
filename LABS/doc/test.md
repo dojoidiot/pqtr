@@ -358,8 +358,8 @@ make -f Makefile.tune test-labs
 
 # Batch test: tune all pics, create comparison grid
 make -f Makefile.tune test-batch
-# Output: tmp/var/batch/<name>/{tune.jpg, head.png, body.png, tune.json, tail.png, diff.png}
-# Output: tmp/var/batch/compare.png (JPEG vs TAIL grid)
+# Output: tmp/var/pics/<name>/{meta.json, tune.jpg, head.png, body.png, tune.json, tail.png, diff.png}
+# Output: tmp/var/pics/compare.png (JPEG vs TAIL grid)
 ```
 
 ---

@@ -140,7 +140,7 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 # With verbose progress logging
 ./tune source.ARW reference.png --save-area ./output --logs
 
-# Save intermediate images (head, body, optimized, diff)
+# Save intermediate images + metadata
 ./tune source.ARW reference.png --save-area ./output --fine
 
 # Intermediate images to separate directory
@@ -160,23 +160,80 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 | `--mode <mode>` | blockwise, full35d, linear (default: blockwise) |
 | `--skip-lut` | Skip 3D LUT estimation |
 | `--logs` | Verbose progress (dome.r, edge.ratio) |
-| `--fine` | Save intermediate images (tune.jpg, head, body, tail, diff) |
+| `--fine` | Save intermediate images + meta.json (camera metadata) |
 | `--fine-area <dir>` | Directory for --fine outputs (default: --save-area) |
+
+---
+
+## Two-Link Architecture
+
+Tune produces **two separate links** to separate concerns:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    TWO-LINK PIPELINE                            │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  RAW ──► LINK 1: Scene-Linear (5 dials)                         │
+│              exposure, temp, tint, black, white                 │
+│              No LUT - pure linear operations                    │
+│                   │                                             │
+│                   ▼                                             │
+│          LINK 2: Display-Referred (36 dials + LUT)              │
+│              tone curves, color, split tone                     │
+│              17³ LUT for residual correction                    │
+│                   │                                             │
+│                   ▼                                             │
+│          tail.png                                               │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Why Two Links?
+
+| Link | Domain | Dials | LUT | Purpose |
+|------|--------|-------|-----|---------|
+| **Scene-Linear** | Linear light | 5 | No | Exposure, white balance, clipping |
+| **Display** | Display-referred | 36 | Yes | Tone mapping, color grading |
+
+**Benefits:**
+- Scene-linear ops are physically meaningful (stops, kelvin)
+- Display ops are perceptually meaningful (contrast, saturation)
+- LUT only captures display transforms, not linear corrections
+- Cleaner separation for debugging and transfer
+
+### Output Format
+
+```json
+{
+  "links": [
+    {
+      "name": "linear",
+      "modules": { "exposure": 0.5, "temp": 0.5, "tint": 0.5, "black": 0.0, "white": 1.0 }
+    },
+    {
+      "name": "display",
+      "modules": { /* 36 dials */ },
+      "lut": { "grid": 17, "data": "..." }
+    }
+  ]
+}
+```
 
 ---
 
 ## Stage 1: GeoS Color/Tone Optimizer
 
-Optimizes 17 dials + 17³ LUT using spectral loss (geodesic distance on hypersphere).
+Optimizes dials + 17³ LUT using spectral loss (geodesic distance on hypersphere).
 
 **See [geos.md](./geos.md) for full theory and algorithm.**
 
 | Aspect | Value |
 |--------|-------|
-| **Dials** | 17 (exposure, WB, tone mapping, global color, split tone) + 17³ LUT |
+| **Dials** | 5 scene-linear + 36 display + 17³ LUT |
 | **Algorithm** | 3D LUT estimation + SPSA (Simultaneous Perturbation Stochastic Approximation) |
-| **Phases** | HUGE → MIDS → TINY (coarse-to-fine) |
-| **Loss** | Spectral (geodesic) - content-invariant |
+| **Phases** | Scene-Linear → LUT Estimation → Display (HUGE → MIDS → TINY) |
+| **Loss** | Spectral (geodesic) + Regional (4×4 grid) |
 | **Time** | ~5 minutes |
 | **Multi-start** | 5 random initializations |
 

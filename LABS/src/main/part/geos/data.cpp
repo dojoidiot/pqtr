@@ -451,3 +451,146 @@ bool load(pipe::Body::Link& link, const std::string& path)
 }
 
 } // namespace data::link
+
+// ============================================================
+// Info Serialization (Camera Metadata)
+// ============================================================
+
+namespace data::info
+{
+
+std::string toJson(const pipe::Info& info)
+{
+    std::ostringstream ss;
+    ss << "{\n";
+
+    bool first = true;
+    for (const auto& [key, value] : info)
+    {
+        if (!first) ss << ",\n";
+        first = false;
+
+        // Escape any quotes in the value
+        std::string escaped;
+        for (char c : value)
+        {
+            if (c == '"') escaped += "\\\"";
+            else if (c == '\\') escaped += "\\\\";
+            else escaped += c;
+        }
+
+        ss << "  \"" << key << "\": \"" << escaped << "\"";
+    }
+
+    ss << "\n}\n";
+    return ss.str();
+}
+
+bool save(const pipe::Info& info, const std::string& path)
+{
+    std::ofstream file(path);
+    if (!file.is_open())
+        return false;
+    file << toJson(info);
+    file.close();
+    return true;
+}
+
+} // namespace data::info
+
+// ============================================================
+// Links Serialization (Multiple Edit Steps)
+// ============================================================
+
+namespace data::links
+{
+
+std::string toJson(std::vector<pipe::Body::Link*>& linkPtrs)
+{
+    std::ostringstream ss;
+    ss << "{\n";
+    ss << "  \"links\": [\n";
+
+    for (size_t i = 0; i < linkPtrs.size(); i++)
+    {
+        // Get the single-link JSON and indent it
+        std::string linkJson = link::toJson(*linkPtrs[i]);
+
+        // Indent each line by 4 spaces
+        std::istringstream iss(linkJson);
+        std::string line;
+        bool firstLine = true;
+        while (std::getline(iss, line))
+        {
+            if (!firstLine) ss << "\n";
+            firstLine = false;
+            ss << "    " << line;
+        }
+
+        if (i < linkPtrs.size() - 1) ss << ",";
+        ss << "\n";
+    }
+
+    ss << "  ]\n";
+    ss << "}\n";
+    return ss.str();
+}
+
+bool fromJson(std::vector<pipe::Body::Link*>& linkPtrs, const std::string& json)
+{
+    // Find "links" array
+    size_t pos = json.find("\"links\"");
+    if (pos == std::string::npos) return false;
+
+    pos = json.find('[', pos);
+    if (pos == std::string::npos) return false;
+
+    // Parse each link object in the array
+    size_t linkIdx = 0;
+    while (linkIdx < linkPtrs.size())
+    {
+        // Find next object start
+        size_t objStart = json.find('{', pos + 1);
+        if (objStart == std::string::npos) break;
+
+        // Find matching closing brace (handle nested braces)
+        int braceCount = 1;
+        size_t objEnd = objStart + 1;
+        while (objEnd < json.size() && braceCount > 0)
+        {
+            if (json[objEnd] == '{') braceCount++;
+            else if (json[objEnd] == '}') braceCount--;
+            objEnd++;
+        }
+
+        std::string linkJson = json.substr(objStart, objEnd - objStart);
+        link::fromJson(*linkPtrs[linkIdx], linkJson);
+
+        pos = objEnd;
+        linkIdx++;
+    }
+
+    return linkIdx == linkPtrs.size();
+}
+
+bool save(std::vector<pipe::Body::Link*>& linkPtrs, const std::string& path)
+{
+    std::ofstream file(path);
+    if (!file.is_open())
+        return false;
+    file << toJson(linkPtrs);
+    file.close();
+    return true;
+}
+
+bool load(std::vector<pipe::Body::Link*>& linkPtrs, const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file.is_open())
+        return false;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return fromJson(linkPtrs, buffer.str());
+}
+
+} // namespace data::links

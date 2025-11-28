@@ -56,9 +56,11 @@ namespace geos
     // GEOS optimization strategy
     enum class Mode
     {
-        BLOCKWISE,   // 4-phase: A(10) → B(3) → AB(13) → C(24) selective
-        FULL_35D,    // Single-phase: all 37 dials simultaneously
-        LINEAR_ONLY  // Linear ops only: skip ToneMapping (dials 3-9)
+        BLOCKWISE,     // 4-phase: A(10) → B(7) → AB(17) → C(24) selective
+        FULL_35D,      // Single-phase: all 41 dials simultaneously
+        LINEAR_ONLY,   // Linear ops only: skip ToneMapping (dials 3-9)
+        SCENE_LINEAR,  // Scene-referred: exposure(0), temp(1), tint(2), black(8), white(9) only
+        DISPLAY        // Display-referred: skip scene-linear dials, optimize rest + LUT
     };
 
     struct Config

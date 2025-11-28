@@ -115,21 +115,21 @@ int main(int argc, char** argv)
             }
             check.close();
 
-            // Add link and load settings (includes dials + 3D LUT)
-            pipe::Body::Link& link = body.add("tune");
-            if (!data::link::load(link, tunePath))
+            // Create links and load settings (two-link architecture: linear + display)
+            pipe::Body::Link& linearLink = body.add("linear");
+            pipe::Body::Link& displayLink = body.add("display");
+            std::vector<pipe::Body::Link*> links = {&linearLink, &displayLink};
+
+            if (!data::links::load(links, tunePath))
             {
                 throw std::runtime_error("Failed to load tune: " + tunePath);
             }
 
             // Report what was loaded
-            if (link.lutCurve().isEstimated())
+            std::cout << "  Applied 2 links: linear + display" << std::endl;
+            if (displayLink.lutCurve().isEstimated())
             {
-                std::cout << "  Applied dials + 3D LUT" << std::endl;
-            }
-            else
-            {
-                std::cout << "  Applied dials (no LUT)" << std::endl;
+                std::cout << "  Display link includes 3D LUT" << std::endl;
             }
         }
         else

@@ -19,7 +19,7 @@
 //   --mode <mode>           Optimization mode: blockwise, full35d, linear (default: blockwise)
 //   --skip-lut              Skip 3D LUT estimation (pure dial optimization)
 //   --logs                  Verbose progress output (dome.r, edge.ratio)
-//   --fine                  Save intermediate images (head, body, optimized, diff)
+//   --fine                  Save intermediate images + meta.json
 //   --fine-area <dir>       Directory for --fine outputs (default: --save-area)
 //
 // Examples:
@@ -50,7 +50,7 @@ void printUsage(const char* prog)
     std::cerr << "  --mode <mode>           blockwise, full35d, linear (default: blockwise)\n";
     std::cerr << "  --skip-lut              Skip 3D LUT estimation\n";
     std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
-    std::cerr << "  --fine                  Save intermediate images (head, body, optimized, diff)\n";
+    std::cerr << "  --fine                  Save intermediate images + meta.json\n";
     std::cerr << "  --fine-area <dir>       Directory for --fine outputs (default: --save-area)\n";
 }
 
@@ -195,67 +195,114 @@ int main(int argc, char** argv)
                   << baseline.spectral << " (" << std::setprecision(2)
                   << (baseline.spectral * 100) << "%)" << std::endl;
 
-        // Create link for optimization
-        pipe::Body::Link& link = body.add("tune");
-
-        // Initialize all dials to neutral (0.5)
-        link.colorCorrection().exposure().set(0.5f);
-        link.colorCorrection().whiteBalance().temperature(0.5f);
-        link.colorCorrection().whiteBalance().tint(0.5f);
-        link.toneMapping().contrast().set(0.5f);
-        link.toneMapping().curveAdjustment().highlights().set(0.5f);
-        link.toneMapping().curveAdjustment().shadows().set(0.5f);
-        link.toneMapping().curveAdjustment().toePivot().set(0.5f);
-        link.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
-        link.toneMapping().clippingPoint().white().set(0.5f);
-        link.toneMapping().clippingPoint().black().set(0.5f);
-        link.globalColor().vibrance().set(0.5f);
-        link.globalColor().saturation().set(0.5f);
-        link.globalColor().colourDensity().set(0.5f);
-
-        // Run optimization
-        std::cout << "\n[GEOS] Running optimization..." << std::endl;
-
-        geos::Config config;
-        config.skip_edge = false;
-        config.skip_lut = skipLut || (mode == geos::Mode::LINEAR_ONLY);
-        config.geos_max_iter = 500;
-        config.geos_multi_starts = 5;
-        config.geos_threshold = threshold;
-        config.geos_mode = mode;
+        // ============================================================
+        // TWO-LINK ARCHITECTURE: linear (scene-referred) + display (display-referred)
+        // ============================================================
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
-        geos::Result result = geosTask->run(body, link, config,
-            [&phaseNames, logs](const geos::Progress& p) {
-                if (p.stage == geos::Progress::Stage::GEOS)
-                {
-                    std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
-                              << std::setw(3) << p.iteration << "/" << p.max_iterations
-                              << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral;
-                    if (logs) std::cout << "  r=" << std::setprecision(3) << p.dome.r;
-                    std::cout << "     " << std::flush;
-                }
-                else if (p.stage == geos::Progress::Stage::EDGE)
-                {
-                    std::cout << "\r  [EDGE] "
-                              << std::setw(3) << p.iteration << "/" << p.max_iterations
-                              << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency;
-                    if (logs) std::cout << "  ratio=" << std::setprecision(3) << p.edge.ratio;
-                    std::cout << "     " << std::flush;
-                }
-                return true;
-            });
+        auto progressCallback = [&phaseNames, logs](const geos::Progress& p) {
+            if (p.stage == geos::Progress::Stage::GEOS)
+            {
+                std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
+                          << std::setw(3) << p.iteration << "/" << p.max_iterations
+                          << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral;
+                if (logs) std::cout << "  r=" << std::setprecision(3) << p.dome.r;
+                std::cout << "     " << std::flush;
+            }
+            else if (p.stage == geos::Progress::Stage::EDGE)
+            {
+                std::cout << "\r  [EDGE] "
+                          << std::setw(3) << p.iteration << "/" << p.max_iterations
+                          << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency;
+                if (logs) std::cout << "  ratio=" << std::setprecision(3) << p.edge.ratio;
+                std::cout << "     " << std::flush;
+            }
+            return true;
+        };
 
+        // ------------------------------------------------------------
+        // LINK 1: Linear (scene-referred)
+        // Dials: exposure, temperature, tint, black_point, white_point
+        // ------------------------------------------------------------
+        std::cout << "\n[LINEAR] Creating scene-referred link..." << std::endl;
+        pipe::Body::Link& linearLink = body.add("linear");
+
+        // Initialize all dials to neutral (0.5)
+        linearLink.colorCorrection().exposure().set(0.5f);
+        linearLink.colorCorrection().whiteBalance().temperature(0.5f);
+        linearLink.colorCorrection().whiteBalance().tint(0.5f);
+        linearLink.toneMapping().contrast().set(0.5f);
+        linearLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+        linearLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+        linearLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
+        linearLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
+        linearLink.toneMapping().clippingPoint().white().set(0.5f);
+        linearLink.toneMapping().clippingPoint().black().set(0.5f);
+        linearLink.globalColor().vibrance().set(0.5f);
+        linearLink.globalColor().saturation().set(0.5f);
+        linearLink.globalColor().colourDensity().set(0.5f);
+
+        std::cout << "[LINEAR] Optimizing scene-referred dials (exposure, WB, clipping)..." << std::endl;
+
+        geos::Config linearConfig;
+        linearConfig.skip_edge = true;  // No sharpness for linear
+        linearConfig.skip_lut = true;   // No LUT for linear
+        linearConfig.geos_max_iter = 150;  // Fewer iterations for 5 dials
+        linearConfig.geos_threshold = threshold;
+        linearConfig.geos_mode = geos::Mode::SCENE_LINEAR;
+
+        geos::Result linearResult = geosTask->run(body, linearLink, linearConfig, progressCallback);
         std::cout << std::endl;
-        std::cout << "  Iterations: " << result.geos_iterations << std::endl;
-        std::cout << "  Final spectral: " << std::fixed << std::setprecision(4)
-                  << result.loss.spectral << " (" << std::setprecision(2)
-                  << (result.loss.spectral * 100) << "%)" << std::endl;
+        std::cout << "  Linear iterations: " << linearResult.geos_iterations << std::endl;
+        std::cout << "  Linear loss: " << std::fixed << std::setprecision(4)
+                  << linearResult.loss.spectral << " (" << std::setprecision(2)
+                  << (linearResult.loss.spectral * 100) << "%)" << std::endl;
 
-        // Save tune settings
-        std::cout << "\n[SAVE] Writing tune settings..." << std::endl;
+        // ------------------------------------------------------------
+        // LINK 2: Display (display-referred)
+        // Dials: contrast, curves, saturation, split tone, selective color + LUT
+        // ------------------------------------------------------------
+        std::cout << "\n[DISPLAY] Creating display-referred link..." << std::endl;
+        pipe::Body::Link& displayLink = body.add("display");
+
+        // Initialize all dials to neutral (0.5) - linear dials stay neutral
+        displayLink.colorCorrection().exposure().set(0.5f);
+        displayLink.colorCorrection().whiteBalance().temperature(0.5f);
+        displayLink.colorCorrection().whiteBalance().tint(0.5f);
+        displayLink.toneMapping().contrast().set(0.5f);
+        displayLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+        displayLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+        displayLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
+        displayLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
+        displayLink.toneMapping().clippingPoint().white().set(0.5f);
+        displayLink.toneMapping().clippingPoint().black().set(0.5f);
+        displayLink.globalColor().vibrance().set(0.5f);
+        displayLink.globalColor().saturation().set(0.5f);
+        displayLink.globalColor().colourDensity().set(0.5f);
+
+        std::cout << "[DISPLAY] Optimizing display-referred dials (contrast, color, style)..." << std::endl;
+
+        geos::Config displayConfig;
+        displayConfig.skip_edge = false;
+        displayConfig.skip_lut = skipLut;  // LUT applies to display link
+        displayConfig.geos_max_iter = 350;  // More iterations for 36 dials
+        displayConfig.geos_threshold = threshold;
+        displayConfig.geos_mode = geos::Mode::DISPLAY;
+
+        geos::Result displayResult = geosTask->run(body, displayLink, displayConfig, progressCallback);
+        std::cout << std::endl;
+        std::cout << "  Display iterations: " << displayResult.geos_iterations << std::endl;
+        std::cout << "  Final spectral: " << std::fixed << std::setprecision(4)
+                  << displayResult.loss.spectral << " (" << std::setprecision(2)
+                  << (displayResult.loss.spectral * 100) << "%)" << std::endl;
+
+        // ------------------------------------------------------------
+        // Save both links
+        // ------------------------------------------------------------
+        std::cout << "\n[SAVE] Writing tune settings (2 links)..." << std::endl;
         std::string tunePath = saveArea + "/tune.json";
-        if (!data::link::save(link, tunePath))
+        std::vector<pipe::Body::Link*> links = {&linearLink, &displayLink};
+        if (!data::links::save(links, tunePath))
         {
             throw std::runtime_error("Failed to save: " + tunePath);
         }
@@ -264,7 +311,14 @@ int main(int argc, char** argv)
         // Save fine outputs if requested
         if (fine)
         {
-            std::cout << "\n[FINE] Saving intermediate images..." << std::endl;
+            std::cout << "\n[FINE] Saving intermediate images and metadata..." << std::endl;
+
+            // meta.json - camera metadata
+            std::string metaPath = fineArea + "/meta.json";
+            if (data::info::save(info, metaPath))
+            {
+                std::cout << "  Saved: " << metaPath << " (camera metadata)" << std::endl;
+            }
 
             // tune.jpg - original target (camera JPEG or reference)
             if (!usePreview)

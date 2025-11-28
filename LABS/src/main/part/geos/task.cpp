@@ -29,8 +29,10 @@ namespace geos
             , m_targetLCH(convertToSafeLCH(m_targetProxy))
             , m_targetStyle(extractStyle(m_targetLCH))
             , m_targetLaplacianVar(laplacianVariance(m_targetProxy))
+            , m_targetFeatures(extractTargetFeatures(targetImg))
         {
             targetImg.copyTo(m_targetImage);
+            std::cerr << "[geos] Pre-computed regional features (4x4 grid)" << std::endl;
         }
 
         View target() override
@@ -114,8 +116,9 @@ namespace geos
             if (!config.skip_geos)
             {
                 bool lutEstimated = link.lutCurve().isEstimated();
+                // Pass regional features for DISPLAY mode
                 result.geos_iterations = optimizeGeos(
-                    body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated);
+                    body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
             }
 
             // Stage 3: Edge (Sharpness)
@@ -138,6 +141,7 @@ namespace geos
         cv::UMat m_targetLCH;
         StyleFeatures m_targetStyle;
         float m_targetLaplacianVar;
+        TargetFeatures m_targetFeatures;  // Regional features (4x4 grid)
     };
 
     // ============================================================

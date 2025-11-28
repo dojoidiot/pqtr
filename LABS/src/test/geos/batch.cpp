@@ -1,9 +1,9 @@
 // Batch test: tune each ARW to its JPEG using the tune binary
-// Each RAW gets its own folder in tmp/var/batch/<name>/
+// Each RAW gets its own folder in tmp/var/pics/<name>/
 // Then creates a comparison grid from all tail.png vs tune.jpg
 //
 // Output structure per image:
-//   tmp/var/batch/<name>/
+//   tmp/var/pics/<name>/
 //     - tune.jpg   (camera JPEG - target)
 //     - head.png   (target at working size)
 //     - body.png   (baseline)
@@ -11,7 +11,7 @@
 //     - tail.png   (optimized output)
 //     - diff.png   (visual difference x5)
 //
-// Final output: tmp/var/batch/compare.png (grid of all comparisons)
+// Final output: tmp/var/pics/compare.png (grid of all comparisons)
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
@@ -27,7 +27,7 @@ namespace fs = std::filesystem;
 int main(int argc, char* argv[])
 {
     std::string picsDir = "var/pics";
-    std::string outDir = "tmp/var/batch";
+    std::string outDir = "tmp/var/pics";
     int thumbSize = 360;  // Size for comparison thumbnails
 
     if (argc > 1) picsDir = argv[1];

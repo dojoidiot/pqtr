@@ -213,4 +213,117 @@ namespace geos::internal
         return static_cast<float>(stddev[0] * stddev[0]);
     }
 
+    // ============================================================
+    // Regional loss computation (Phase 2)
+    // ============================================================
+
+    StyleFeatures extractCellFeatures(const cv::UMat& lch, int cellIdx)
+    {
+        int row = cellIdx / GRID_SIZE;
+        int col = cellIdx % GRID_SIZE;
+
+        int cellH = lch.rows / GRID_SIZE;
+        int cellW = lch.cols / GRID_SIZE;
+
+        cv::Rect roi(col * cellW, row * cellH, cellW, cellH);
+        cv::UMat cell = lch(roi);
+
+        return extractStyle(cell);
+    }
+
+    TargetFeatures extractTargetFeatures(const cv::UMat& target)
+    {
+        TargetFeatures tf;
+
+        // Resize to proxy and convert to LCH
+        cv::UMat proxy = resizeProxy(target);
+        tf.lch = convertToSafeLCH(proxy);
+
+        // Extract global features
+        tf.global = extractStyle(tf.lch);
+
+        // Extract regional features (4x4 grid = 16 cells)
+        for (int i = 0; i < GRID_CELLS; i++)
+        {
+            tf.regions[i] = extractCellFeatures(tf.lch, i);
+        }
+
+        return tf;
+    }
+
+    float computeProgressiveLoss(
+        const cv::UMat& candidate,
+        const TargetFeatures& target,
+        LossMode mode,
+        float globalWeight)
+    {
+        // Resize candidate to proxy and convert to LCH
+        cv::UMat candProxy = resizeProxy(candidate);
+        cv::UMat candLCH = convertToSafeLCH(candProxy);
+
+        // Global loss (always computed)
+        StyleFeatures candGlobal = extractStyle(candLCH);
+        float globalLoss = geodesicLoss(target.global, candGlobal);
+
+        // GLOBAL_ONLY mode: return just global loss
+        if (mode == LossMode::GLOBAL_ONLY)
+        {
+            return globalLoss;
+        }
+
+        // Compute regional losses
+        float localSum = 0.0f;
+        int numCells = 0;
+
+        if (mode == LossMode::SAMPLED)
+        {
+            // Sample 8 cells: corners + center quad
+            for (int idx : SAMPLED_CELLS)
+            {
+                StyleFeatures candCell = extractCellFeatures(candLCH, idx);
+                localSum += geodesicLoss(target.regions[idx], candCell);
+                numCells++;
+            }
+        }
+        else // FULL_REGIONAL
+        {
+            // All 16 cells
+            for (int i = 0; i < GRID_CELLS; i++)
+            {
+                StyleFeatures candCell = extractCellFeatures(candLCH, i);
+                localSum += geodesicLoss(target.regions[i], candCell);
+                numCells++;
+            }
+        }
+
+        float localMean = localSum / static_cast<float>(numCells);
+
+        // Combined loss: weighted average of global and local
+        return globalWeight * globalLoss + (1.0f - globalWeight) * localMean;
+    }
+
+    RegionalAnalysis computeRegionalAnalysis(
+        const cv::UMat& candidate,
+        const TargetFeatures& target)
+    {
+        RegionalAnalysis ra;
+
+        // Resize candidate to proxy and convert to LCH
+        cv::UMat candProxy = resizeProxy(candidate);
+        cv::UMat candLCH = convertToSafeLCH(candProxy);
+
+        // Global loss
+        StyleFeatures candGlobal = extractStyle(candLCH);
+        ra.global = geodesicLoss(target.global, candGlobal);
+
+        // All 16 regional losses
+        for (int i = 0; i < GRID_CELLS; i++)
+        {
+            StyleFeatures candCell = extractCellFeatures(candLCH, i);
+            ra.local[i] = geodesicLoss(target.regions[i], candCell);
+        }
+
+        return ra;
+    }
+
 } // namespace geos::internal

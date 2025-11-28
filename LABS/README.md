@@ -130,3 +130,8 @@ All LABS documentation maintains:
 - **Technical Accuracy**: Code examples and counts match implementation
 
 Reference [docs.md](./doc/docs.md) for the review template and criteria.
+
+## Research
+
+- [analysis.md](./doc/analysis.md) - Empirical findings, batch results, LUT covariance problem
+- [idea.md](./doc/idea.md) - Future enhancement ideas

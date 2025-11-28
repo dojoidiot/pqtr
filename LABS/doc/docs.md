@@ -68,6 +68,8 @@ Passive voice is acceptable for:
 - **frequency loss** (edge: Laplacian variance for sharpness)
 - **tune.json** (output from tune: dials + 3D LUT, consumed by labs)
 - **three roles** (color/tone, sharpness, geometry)
+- **two-link architecture** (scene-linear + display links)
+- **analysis** (empirical findings doc)
 
 #### ❌ AVOID - Inconsistent Terms
 - ❌ "adjustment step" instead of "edit step"
@@ -146,21 +148,45 @@ Passive voice is acceptable for:
 **Ideas doc** (idea.md):
 1. [back] link to parent
 2. Brief intro (out of scope ideas)
-3. Ideas with: current state, proposed approach, benefits, considerations
+3. Ideas with: current state, problem, approach, benefits, considerations
+4. See Also links to related docs
+
+**Analysis doc** (analysis.md):
+1. [back] link to parent
+2. Current architecture overview
+3. Batch results (table format)
+4. Pattern observations (grouped by type)
+5. Optimizer tendencies
+6. Research findings (regional loss, LUT covariance)
+7. Cross-references to implementation docs
 
 ### 5. Technical Accuracy
 
 #### Items to Verify
 
-**Dial Counts** (current implementation):
-- Geometric: 6 dials (user-controlled)
-- Color Correction: 3 dials (exposure, temp, tint)
-- Tone Mapping: 7 dials (contrast, highlights, shadows, toe pivot, shoulder pivot, white point, black point)
+**Dial Counts** (current two-link architecture):
+
+Scene-Linear Link (5 dials):
+- exposure (1)
+- temperature (1)
+- tint (1)
+- black point (1)
+- white point (1)
+
+Display Link (36 dials + LUT):
+- Tone Mapping: 5 dials (contrast, highlights, shadows, toe pivot, shoulder pivot)
 - Global Color: 3 dials (vibrance, saturation, color density)
 - Split Tone: 4 dials (shadow hue/sat, highlight hue/sat)
-- Detail: 2 dials optimized (sharpen amount, sharpen radius)
-- **GEOS optimizes: 17 dials + 17³ LUT**
-- **EDGE optimizes: 2 dials**
+- Additional color dials: 24
+- **17³ 3D LUT** for residual correction
+
+Other:
+- Geometric: 6 dials (user-controlled)
+- Detail: 2 dials (sharpen amount, sharpen radius)
+
+**Summary:**
+- **geos optimizes: 5 scene-linear + 36 display + 17³ LUT**
+- **edge optimizes: 2 detail dials**
 - **User controls: 6 geometry dials**
 
 **Color Spaces**:

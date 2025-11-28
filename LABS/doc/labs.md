@@ -52,7 +52,7 @@ Automatically optimizes dials to match a reference style:
 | `--mode <mode>` | blockwise, full35d, linear (default: blockwise) |
 | `--skip-lut` | Skip 3D LUT estimation |
 | `--logs` | Verbose progress (dome.r, edge.ratio) |
-| `--fine` | Save intermediate images (tune.jpg, head, body, tail, diff) |
+| `--fine` | Save intermediate images + meta.json (camera metadata) |
 | `--fine-area <dir>` | Directory for --fine outputs (default: --save-area) |
 
 ### labs binary

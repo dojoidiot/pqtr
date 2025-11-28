@@ -155,7 +155,7 @@ namespace geos::internal
         }
     }
 
-    // Compute loss for current body state
+    // Compute loss for current body state (global only)
     float evaluateLoss(
         pipe::Body& body,
         const StyleFeatures& targetStyle)
@@ -165,6 +165,17 @@ namespace geos::internal
         cv::UMat candLCH = convertToSafeLCH(candProxy);
         StyleFeatures candStyle = extractStyle(candLCH);
         return geodesicLoss(targetStyle, candStyle);
+    }
+
+    // Compute loss with regional support (for DISPLAY mode)
+    float evaluateLossRegional(
+        pipe::Body& body,
+        const TargetFeatures& target,
+        LossMode mode,
+        float globalWeight = 0.3f)
+    {
+        View candidate = body.view();
+        return computeProgressiveLoss(candidate, target, mode, globalWeight);
     }
 
     // SPSA gain schedules
@@ -254,16 +265,29 @@ namespace geos::internal
 
             float newLoss = evaluateLoss(body, targetStyle);
 
-            // Track best
+            // Track best - check for MEANINGFUL improvement
             if (newLoss < bestLoss)
             {
+                float improvement = bestLoss - newLoss;
+                float relativeImprovement = improvement / bestLoss;
+
+                // Only reset stall counter if improvement is meaningful
+                if (relativeImprovement >= MIN_RELATIVE_IMPROVEMENT ||
+                    improvement >= MIN_ABSOLUTE_IMPROVEMENT)
+                {
+                    itersSinceImprovement = 0;
+                    if (k % 20 == 0 || newLoss < 0.02f)
+                    {
+                        std::cerr << "[BEST] k=" << k << " loss=" << newLoss << std::endl;
+                    }
+                }
+                else
+                {
+                    itersSinceImprovement++;  // Marginal improvement = count as stall
+                }
+
                 bestLoss = newLoss;
                 bestTheta = theta;
-                itersSinceImprovement = 0;
-                if (k % 20 == 0 || newLoss < 0.02f)
-                {
-                    std::cerr << "[BEST] k=" << k << " loss=" << newLoss << std::endl;
-                }
             }
             else
             {
@@ -275,11 +299,11 @@ namespace geos::internal
                 }
             }
 
-            // Early termination if stalled
+            // Early termination if stalled (no meaningful improvement)
             if (itersSinceImprovement >= STALL_THRESHOLD)
             {
-                std::cerr << "[BLOCK] Early stop: no improvement for "
-                          << STALL_THRESHOLD << " iterations" << std::endl;
+                std::cerr << "[BLOCK] Early stop: no meaningful improvement for "
+                          << STALL_THRESHOLD << " iterations (loss=" << bestLoss << ")" << std::endl;
                 break;
             }
 
@@ -572,6 +596,322 @@ namespace geos::internal
     }
 
     // ============================================================
+    // SCENE_LINEAR mode: 5 non-contiguous dials for linear link
+    // ============================================================
+    int optimizeSceneLinear(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        const Config& config,
+        Callback progress)
+    {
+        std::random_device rd;
+        std::mt19937 rng(rd());
+
+        Theta theta;
+        initNeutral(theta);  // All at 0.5 (neutral)
+        writeDials(link, theta);
+
+        float initialLoss = evaluateLoss(body, targetStyle);
+        std::cerr << "[GEOS-SCENE_LINEAR] Initial loss: " << initialLoss << std::endl;
+        std::cerr << "[GEOS-SCENE_LINEAR] Optimizing dials: exposure(0), temp(1), tint(2), black(8), white(9)" << std::endl;
+
+        int totalIter = config.geos_max_iter;
+        int iterCount = 0;
+
+        Theta bestTheta = theta;
+        float bestLoss = initialLoss;
+
+        std::bernoulli_distribution coin(0.5);
+        std::array<float, 5> delta;
+
+        int itersSinceImprovement = 0;
+
+        for (int k = 0; k < totalIter; k++)
+        {
+            float a_k = computeA(k, BLOCK_5D);
+            float c_k = computeC(k, BLOCK_5D);
+
+            // Generate perturbation for the 5 scene-linear dials
+            for (int i = 0; i < 5; i++)
+                delta[i] = coin(rng) ? 1.0f : -1.0f;
+
+            // Evaluate L+ (perturbed positive)
+            Theta thetaPlus = theta;
+            for (int i = 0; i < 5; i++)
+                thetaPlus[SCENE_LINEAR_DIALS[i]] = std::clamp(theta[SCENE_LINEAR_DIALS[i]] + c_k * delta[i], 0.0f, 1.0f);
+            writeDials(link, thetaPlus);
+            float lossPlus = evaluateLoss(body, targetStyle);
+
+            // Evaluate L- (perturbed negative)
+            Theta thetaMinus = theta;
+            for (int i = 0; i < 5; i++)
+                thetaMinus[SCENE_LINEAR_DIALS[i]] = std::clamp(theta[SCENE_LINEAR_DIALS[i]] - c_k * delta[i], 0.0f, 1.0f);
+            writeDials(link, thetaMinus);
+            float lossMinus = evaluateLoss(body, targetStyle);
+
+            // Gradient estimate and update
+            for (int i = 0; i < 5; i++)
+            {
+                float g_i = (lossPlus - lossMinus) / (2.0f * c_k * delta[i]);
+                theta[SCENE_LINEAR_DIALS[i]] = std::clamp(theta[SCENE_LINEAR_DIALS[i]] - a_k * g_i, 0.0f, 1.0f);
+            }
+            writeDials(link, theta);
+
+            float newLoss = evaluateLoss(body, targetStyle);
+
+            // Track best - check for MEANINGFUL improvement
+            if (newLoss < bestLoss)
+            {
+                float improvement = bestLoss - newLoss;
+                float relativeImprovement = improvement / bestLoss;
+
+                if (relativeImprovement >= MIN_RELATIVE_IMPROVEMENT ||
+                    improvement >= MIN_ABSOLUTE_IMPROVEMENT)
+                {
+                    itersSinceImprovement = 0;
+                    if (k % 20 == 0)
+                        std::cerr << "[BEST] k=" << k << " loss=" << newLoss << std::endl;
+                }
+                else
+                {
+                    itersSinceImprovement++;  // Marginal improvement = count as stall
+                }
+
+                bestLoss = newLoss;
+                bestTheta = theta;
+            }
+            else
+            {
+                itersSinceImprovement++;
+                if (newLoss > bestLoss * 2.0f)
+                {
+                    theta = bestTheta;
+                    writeDials(link, theta);
+                }
+            }
+
+            if (itersSinceImprovement >= STALL_THRESHOLD)
+            {
+                std::cerr << "[GEOS-SCENE_LINEAR] Early stop: no meaningful improvement (loss=" << bestLoss << ")" << std::endl;
+                break;
+            }
+
+            iterCount++;
+
+            if (progress)
+            {
+                Progress p;
+                p.stage = Progress::Stage::GEOS;
+                p.phase = Progress::Phase::TINY;
+                p.iteration = iterCount;
+                p.max_iterations = totalIter;
+                p.loss.spectral = newLoss;
+                if (!progress(p)) break;
+            }
+        }
+
+        theta = bestTheta;
+        writeDials(link, theta);
+
+        std::cerr << "[GEOS-SCENE_LINEAR] Final loss: " << bestLoss << std::endl;
+        std::cerr << "[GEOS-SCENE_LINEAR] Final dials: exp=" << theta[0] << " temp=" << theta[1]
+                  << " tint=" << theta[2] << " black=" << theta[8] << " white=" << theta[9] << std::endl;
+
+        return iterCount;
+    }
+
+    // ============================================================
+    // DISPLAY mode: skip scene-linear dials, optimize rest
+    // Uses regional loss for refinement phases
+    // ============================================================
+    int optimizeDisplay(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        const Config& config,
+        Callback progress,
+        bool lutEstimated,
+        const TargetFeatures* targetFeatures)
+    {
+        std::random_device rd;
+        std::mt19937 rng(rd());
+
+        Theta theta;
+        initNeutral(theta);
+        writeDials(link, theta);
+
+        float initialLoss = evaluateLoss(body, targetStyle);
+        std::cerr << "[GEOS-DISPLAY] Initial loss: " << initialLoss << std::endl;
+        std::cerr << "[GEOS-DISPLAY] Skipping scene-linear dials (0,1,2,8,9)" << std::endl;
+        if (targetFeatures)
+            std::cerr << "[GEOS-DISPLAY] Regional loss ENABLED for refinement" << std::endl;
+        else
+            std::cerr << "[GEOS-DISPLAY] Regional loss DISABLED (no target features)" << std::endl;
+
+        int totalIter = config.geos_max_iter;
+        int iterCount = 0;
+
+        // Phase 1: ToneMapping curves (3-7) - GLOBAL ONLY (fast exploration)
+        int phase1Iter = static_cast<int>(totalIter * 0.30f);
+        std::cerr << "\n[GEOS-DISPLAY] === Phase 1: ToneMapping curves (5 dials) [GLOBAL] ===" << std::endl;
+        optimizeBlock(body, link, targetStyle, theta,
+            DISPLAY_A_START, DISPLAY_A_SIZE,
+            BLOCK_5D, phase1Iter,
+            iterCount, totalIter,
+            Progress::Phase::HUGE,
+            targetLaplacianVar, progress, rng);
+
+        // Phase 2: GlobalColor + SplitTone (10-16) - GLOBAL ONLY (medium exploration)
+        int phase2Iter = static_cast<int>(totalIter * 0.25f);
+        std::cerr << "\n[GEOS-DISPLAY] === Phase 2: GlobalColor + SplitTone (7 dials) [GLOBAL] ===" << std::endl;
+        optimizeBlock(body, link, targetStyle, theta,
+            DISPLAY_B_START, DISPLAY_B_SIZE,
+            BLOCK_7D, phase2Iter,
+            iterCount, totalIter,
+            Progress::Phase::MIDS,
+            targetLaplacianVar, progress, rng);
+
+        // Phase 3: Joint refinement - REGIONAL loss if available
+        int phase3Iter = static_cast<int>(totalIter * 0.25f);
+
+        if (targetFeatures)
+        {
+            std::cerr << "\n[GEOS-DISPLAY] === Phase 3: Regional refinement (4x4 grid) ===" << std::endl;
+
+            // Inline SPSA with regional loss for combined dials [3-7] and [10-16]
+            // Using SAMPLED mode for speed (8 cells instead of 16)
+            std::vector<int> displayDials;
+            for (int i = DISPLAY_A_START; i < DISPLAY_A_START + DISPLAY_A_SIZE; i++)
+                displayDials.push_back(i);
+            for (int i = DISPLAY_B_START; i < DISPLAY_B_START + DISPLAY_B_SIZE; i++)
+                displayDials.push_back(i);
+
+            int numDials = static_cast<int>(displayDials.size());
+            std::vector<float> delta(numDials);
+            std::bernoulli_distribution coin(0.5);
+
+            Theta bestTheta = theta;
+            float bestLoss = evaluateLossRegional(body, *targetFeatures, LossMode::SAMPLED);
+            int itersSinceImprovement = 0;
+
+            std::cerr << "[REGIONAL] Start loss=" << bestLoss << " (sampled 8 cells)" << std::endl;
+
+            for (int k = 0; k < phase3Iter && itersSinceImprovement < STALL_THRESHOLD; k++)
+            {
+                float a_k = computeA(k, BLOCK_7D);  // Use 7D params for 12 combined dials
+                float c_k = computeC(k, BLOCK_7D);
+
+                // Generate perturbation
+                for (int i = 0; i < numDials; i++)
+                    delta[i] = coin(rng) ? 1.0f : -1.0f;
+
+                // Evaluate L+
+                Theta thetaPlus = theta;
+                for (int i = 0; i < numDials; i++)
+                    thetaPlus[displayDials[i]] = std::clamp(theta[displayDials[i]] + c_k * delta[i], 0.0f, 1.0f);
+                writeDials(link, thetaPlus);
+                float lossPlus = evaluateLossRegional(body, *targetFeatures, LossMode::SAMPLED);
+
+                // Evaluate L-
+                Theta thetaMinus = theta;
+                for (int i = 0; i < numDials; i++)
+                    thetaMinus[displayDials[i]] = std::clamp(theta[displayDials[i]] - c_k * delta[i], 0.0f, 1.0f);
+                writeDials(link, thetaMinus);
+                float lossMinus = evaluateLossRegional(body, *targetFeatures, LossMode::SAMPLED);
+
+                // Gradient estimate and update
+                for (int i = 0; i < numDials; i++)
+                {
+                    float g_i = (lossPlus - lossMinus) / (2.0f * c_k * delta[i]);
+                    theta[displayDials[i]] = std::clamp(theta[displayDials[i]] - a_k * g_i, 0.0f, 1.0f);
+                }
+                writeDials(link, theta);
+
+                float newLoss = evaluateLossRegional(body, *targetFeatures, LossMode::SAMPLED);
+
+                // Track meaningful improvement
+                if (newLoss < bestLoss)
+                {
+                    float improvement = bestLoss - newLoss;
+                    float relativeImprovement = improvement / bestLoss;
+
+                    if (relativeImprovement >= MIN_RELATIVE_IMPROVEMENT ||
+                        improvement >= MIN_ABSOLUTE_IMPROVEMENT)
+                    {
+                        itersSinceImprovement = 0;
+                        if (k % 20 == 0)
+                            std::cerr << "[REGIONAL] k=" << k << " loss=" << newLoss << std::endl;
+                    }
+                    else
+                    {
+                        itersSinceImprovement++;
+                    }
+                    bestLoss = newLoss;
+                    bestTheta = theta;
+                }
+                else
+                {
+                    itersSinceImprovement++;
+                    if (newLoss > bestLoss * 2.0f)
+                    {
+                        theta = bestTheta;
+                        writeDials(link, theta);
+                    }
+                }
+
+                iterCount++;
+            }
+
+            theta = bestTheta;
+            writeDials(link, theta);
+            std::cerr << "[REGIONAL] Final loss=" << bestLoss << std::endl;
+        }
+        else
+        {
+            // Fallback to global loss
+            std::cerr << "\n[GEOS-DISPLAY] === Phase 3: Joint refinement [GLOBAL] ===" << std::endl;
+            optimizeBlock(body, link, targetStyle, theta,
+                DISPLAY_A_START, DISPLAY_A_SIZE,
+                BLOCK_5D, phase3Iter / 2,
+                iterCount, totalIter,
+                Progress::Phase::TINY,
+                targetLaplacianVar, progress, rng);
+            optimizeBlock(body, link, targetStyle, theta,
+                DISPLAY_B_START, DISPLAY_B_SIZE,
+                BLOCK_7D, phase3Iter / 2,
+                iterCount, totalIter,
+                Progress::Phase::TINY,
+                targetLaplacianVar, progress, rng);
+        }
+
+        // Phase 4: SelectiveColour (17-40) - skip if LUT active
+        if (!lutEstimated)
+        {
+            int phase4Iter = static_cast<int>(totalIter * 0.20f);
+            std::cerr << "\n[GEOS-DISPLAY] === Phase 4: SelectiveColour (24 dials) ===" << std::endl;
+            optimizeBlock(body, link, targetStyle, theta,
+                DISPLAY_C_START, DISPLAY_C_SIZE,
+                BLOCK_24D, phase4Iter,
+                iterCount, totalIter,
+                Progress::Phase::TINY,
+                targetLaplacianVar, progress, rng);
+        }
+        else
+        {
+            std::cerr << "\n[GEOS-DISPLAY] === Phase 4: SKIPPED (LUT active) ===" << std::endl;
+        }
+
+        float finalLoss = evaluateLoss(body, targetStyle);
+        std::cerr << "\n[GEOS-DISPLAY] === FINAL ===" << std::endl;
+        std::cerr << "[GEOS-DISPLAY] Final loss: " << finalLoss << std::endl;
+
+        return iterCount;
+    }
+
+    // ============================================================
     // Entry point: dispatch based on config.geos_mode
     // ============================================================
     int optimizeGeos(
@@ -581,7 +921,8 @@ namespace geos::internal
         float targetLaplacianVar,
         const Config& config,
         Callback progress,
-        bool lutEstimated)
+        bool lutEstimated,
+        const TargetFeatures* targetFeatures)
     {
         // Sanity checks
         float check1 = evaluateLoss(body, targetStyle);
@@ -601,6 +942,14 @@ namespace geos::internal
         else if (config.geos_mode == Mode::LINEAR_ONLY)
         {
             return optimizeLinearOnly(body, link, targetStyle, targetLaplacianVar, config, progress);
+        }
+        else if (config.geos_mode == Mode::SCENE_LINEAR)
+        {
+            return optimizeSceneLinear(body, link, targetStyle, targetLaplacianVar, config, progress);
+        }
+        else if (config.geos_mode == Mode::DISPLAY)
+        {
+            return optimizeDisplay(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated, targetFeatures);
         }
         else
         {
