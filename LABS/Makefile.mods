@@ -24,9 +24,8 @@ LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB
 SRC_DIR = src
 TEST_DIR = $(SRC_DIR)/test
 MODS_DIR = $(SRC_DIR)/main/part/pipe/mods
-TMP_DIR = tmp/test
-BIN_DIR = $(TMP_DIR)/bin
-OBJ_DIR = $(TMP_DIR)/obj
+OBJ_DIR = tmp/obj/mods
+BIN_DIR = tmp/bin/mods
 
 # Module sources (shared with main build)
 MODS_SRCS = $(MODS_DIR)/tone_map.cpp \
@@ -80,8 +79,8 @@ TEST_DETAIL_OBJ = $(OBJ_DIR)/test_detail.o
 TEST_DETAIL_BIN = $(BIN_DIR)/test_detail
 
 # Test data
-TEST_DATA_DIR = tmp/var/test/data
-TEST_OUTPUT_DIR = tmp/var/test/output
+TEST_DATA_DIR = tmp/var/mods/data
+TEST_OUTPUT_DIR = tmp/var/mods/output
 
 .PHONY: all clean test test-tone-map test-exposure test-white-balance test-global-color test-selective-color test-geometric test-detail gen-test-data
 
@@ -150,7 +149,7 @@ $(OBJ_DIR):
 	mkdir -p $(OBJ_DIR)
 
 clean:
-	rm -rf $(TMP_DIR)
+	rm -rf $(OBJ_DIR) $(BIN_DIR) tmp/var/mods
 
 # Generate synthetic test data
 gen-test-data: $(GEN_TEST_IMAGES_BIN)

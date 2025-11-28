@@ -19,18 +19,18 @@
 namespace data
 {
     // ============================================================
-    // Base64 Encoding/Decoding (for LUT storage)
+    // Hex Encoding/Decoding (for LUT storage - compact uint16)
     // ============================================================
 
-    namespace base64
+    namespace hex
     {
-        // Encode binary data to base64 string
-        std::string encode(const void* data, size_t size);
+        // Encode uint16 array to hex string (4 chars per value)
+        std::string encode(const uint16_t* data, size_t count);
 
-        // Decode base64 string to binary data
-        std::vector<uint8_t> decode(const std::string& encoded);
+        // Decode hex string to uint16 array
+        std::vector<uint16_t> decode(const std::string& encoded);
 
-    } // namespace base64
+    } // namespace hex
 
     // ============================================================
     // 3D LUT Serialization
@@ -39,7 +39,7 @@ namespace data
     namespace lut
     {
         // Serialize 3D LUT to JSON object string
-        // Format: {"grid": 17, "data": "base64..."}
+        // Format: {"grid": 17, "data": "hex..."} - uint16 per channel
         std::string toJson(const float* lut, int gridSize);
 
         // Deserialize 3D LUT from JSON object string

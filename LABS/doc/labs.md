@@ -27,6 +27,56 @@ The `LABS` system consists of several independent programs (executables and libr
 └─────────┘  (color/tone) +        └─────────┘  3D LUT + SPSA (17 color dials)
              Frequency loss                     + Edge (2 detail dials)
              (sharpness)                        User: 6 geometric dials
+                                                Outputs: tune.json
+                                        ↓
+                                   ┌─────────┐
+                                   │  labs   │  Apply tune.json to RAW
+                                   └─────────┘  Outputs: styled.png
+```
+
+## Headless Tools
+
+### tune binary
+
+Automatically optimizes dials to match a reference style:
+
+```bash
+./tune source.ARW reference.png --save-area ./output [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--save-area <dir>` | Output directory for tune.json (required) |
+| `--threshold <value>` | Stop when spectral loss below (default: 0.005) |
+| `--size <pixels>` | Working size (default: 1080) |
+| `--mode <mode>` | blockwise, full35d, linear (default: blockwise) |
+| `--skip-lut` | Skip 3D LUT estimation |
+| `--logs` | Verbose progress (dome.r, edge.ratio) |
+| `--fine` | Save intermediate images (tune.jpg, head, body, tail, diff) |
+| `--fine-area <dir>` | Directory for --fine outputs (default: --save-area) |
+
+### labs binary
+
+Applies tune.json settings to a RAW file:
+
+```bash
+./labs source.ARW --output styled.png [options]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--output <image.png>` | Output file (required) |
+| `--tune <tune.json>` | Apply settings from tune (dials + 3D LUT) |
+| `--size <pixels>` | Max output dimension (default: full res) |
+
+**Example workflow:**
+```bash
+# Step 1: Tune to match a reference
+./tune photo.ARW reference_style.png --save-area ./styles
+
+# Step 2: Apply to same or other photos
+./labs photo.ARW --tune ./styles/tune.json --output styled.png
+./labs other.ARW --tune ./styles/tune.json --output other_styled.png
 ```
 
 ## Data Flow and Integration Patterns
@@ -64,24 +114,14 @@ pqtr::Tune tuner(pipeline, diff_tool);
 pqtr::TuneResult result = tuner.optimize(source_linear, reference);
 
 // Result contains:
-// - geos_link: 17 color/tone dials + 17³ LUT as a pipe Link
-// - edge_link: 2 detail dials as a pipe Link
+// - link: 17 color/tone dials + 2 detail dials + 17³ LUT
 // - Geometric dials NOT included (user responsibility)
 
-// 3. Save as style sidecars
-saveJson("sunset.geos.json", result.geos_link);
-saveJson("sunset.edge.json", result.edge_link);
+// 3. Save as tune.json
+data::link::toJson(result.link, "sunset/tune.json");
 
-// 4. Apply to new photos
-cv::UMat new_photo = raws.process("another_photo.ARW");
-
-// User sets geometry for this specific photo
-json geom_link = { {"name", "framing"}, {"modules", { {"geometric", { /* user values */ }} }} };
-
-// Build pipe with geometry + style links
-pipe["links"] = { geom_link, result.geos_link, result.edge_link };
-
-cv::UMat styled = pipeline.process();
+// 4. Apply to new photos via labs binary
+// ./labs another_photo.ARW --tune sunset/tune.json --output styled.png
 ```
 
 **The three roles:**

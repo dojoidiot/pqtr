@@ -134,28 +134,34 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 
 ```bash
 # Optimize all 19 creative dials (17 color + 2 sharpness)
-# Outputs: style.geos.json + style.edge.json
-./tune source.ARW reference.png --output style
+# Outputs: tune.json (contains dials + 3D LUT)
+./tune source.ARW reference.png --save-area ./output
 
-# Color/tone only (skip sharpness)
-# Outputs: style.geos.json only
-./tune source.ARW reference.png --skip-edge --output style
+# With verbose progress logging
+./tune source.ARW reference.png --save-area ./output --logs
 
-# Sharpness only (skip color/tone)
-# Outputs: style.edge.json only
-./tune source.ARW reference.png --skip-geos --output style
+# Save intermediate images (head, body, optimized, diff)
+./tune source.ARW reference.png --save-area ./output --fine
+
+# Intermediate images to separate directory
+./tune source.ARW reference.png --save-area ./output --fine --fine-area ./debug
+
+# Skip LUT estimation (dials only)
+./tune source.ARW reference.png --save-area ./output --skip-lut
 ```
 
 ### Options
 
 | Option | Description |
 |--------|-------------|
-| `--output NAME` | Output base name (creates NAME.geos.json, NAME.edge.json) |
-| `--skip-geos` | Skip color/tone optimization |
-| `--skip-edge` | Skip sharpness optimization |
-| `--geos-starts N` | Multi-start count for GeoS SPSA (default: 5) |
-| `--geos-max-iter N` | Max GeoS iterations (default: 500) |
-| `--visualize` | Show real-time progress |
+| `--save-area <dir>` | Output directory for tune.json (required) |
+| `--threshold <value>` | Stop when spectral loss below (default: 0.005) |
+| `--size <pixels>` | Working size (default: 1080) |
+| `--mode <mode>` | blockwise, full35d, linear (default: blockwise) |
+| `--skip-lut` | Skip 3D LUT estimation |
+| `--logs` | Verbose progress (dome.r, edge.ratio) |
+| `--fine` | Save intermediate images (tune.jpg, head, body, tail, diff) |
+| `--fine-area <dir>` | Directory for --fine outputs (default: --save-area) |
 
 ---
 
@@ -205,114 +211,107 @@ Optimizes 2 detail dials using frequency-based loss (Laplacian variance).
 
 ---
 
-## Output: Sidecar Files
+## Output: tune.json
 
-Tune outputs two sidecar files, each in pipe Link format:
+Tune outputs a single `tune.json` file containing all optimized settings:
 
 ```
-<name>.geos.json   # 17 color/tone dials + 17³ LUT
-<name>.edge.json   # 2 detail dials
+<save-area>/tune.json   # 17 color/tone dials + 2 detail dials + 17³ LUT
 ```
 
-These are standard pipe Links - they can be added directly to any pipe.json.
+This file is consumed by the `labs` binary via `--tune tune.json`.
 
-### style.geos.json
+### tune.json Format
 
 ```json
 {
-  "name": "geos",
+  "version": "1.0",
   "meta": {
-    "loss": 0.0005,
+    "loss": { "spectral": 0.0005, "frequency": 0.007 },
     "iterations": 342,
     "reference": "sunset_beach.png"
   },
-  "modules": {
-    "color_correction": {
-      "exposure": { "value": 0.65 },
-      "white_balance": { "temperature": 0.55, "tint": 0.48 }
-    },
-    "tone_mapping": {
-      "contrast": { "value": 0.72 },
-      "highlights": 0.45,
-      "shadows": 0.55,
-      "toe_pivot": 0.5,
-      "shoulder_pivot": 0.5,
-      "black_point": 0.35,
-      "white_point": 0.85
-    },
-    "global_color": {
-      "vibrance": 0.55,
-      "saturation": 0.68,
-      "color_density": 0.52
-    },
-    "split_tone": {
-      "shadow_hue": 0.5,
-      "shadow_sat": 0.5,
-      "highlight_hue": 0.5,
-      "highlight_sat": 0.5
+  "link": {
+    "name": "tune",
+    "modules": {
+      "color_correction": {
+        "exposure": { "value": 0.65 },
+        "white_balance": { "temperature": 0.55, "tint": 0.48 }
+      },
+      "tone_mapping": {
+        "contrast": { "value": 0.72 },
+        "highlights": 0.45,
+        "shadows": 0.55,
+        "toe_pivot": 0.5,
+        "shoulder_pivot": 0.5,
+        "black_point": 0.35,
+        "white_point": 0.85
+      },
+      "global_color": {
+        "vibrance": 0.55,
+        "saturation": 0.68,
+        "color_density": 0.52
+      },
+      "split_tone": {
+        "shadow_hue": 0.5,
+        "shadow_sat": 0.5,
+        "highlight_hue": 0.5,
+        "highlight_sat": 0.5
+      },
+      "detail": {
+        "sharpen_amount": 0.4,
+        "sharpen_radius": 0.5
+      }
     }
   },
-  "lut3d": {
+  "lut": {
     "grid": 17,
-    "data": "base64-encoded-58956-bytes..."
+    "data": "hex-encoded-uint16-values..."
   }
 }
 ```
 
-### style.edge.json
+### LUT Encoding
 
-```json
-{
-  "name": "edge",
-  "meta": {
-    "loss": 0.007,
-    "reference": "sunset_beach.png"
-  },
-  "modules": {
-    "detail": {
-      "sharpen_amount": 0.4,
-      "sharpen_radius": 0.5
-    }
-  }
-}
-```
+The 3D LUT is stored as hex-encoded uint16 values:
+- **Grid**: 17³ = 4913 points × 3 channels = 14,739 values
+- **Encoding**: Each float [0,1] → uint16 [0,65535] → 4 hex chars
+- **Size**: ~59KB hex string (more compact than base64/float at ~78KB)
 
 **Note:** Geometric dials are not included - they are user-controlled per image. Sharpening operates on L-channel only to preserve color accuracy.
 
 ---
 
-## Applying Style Sidecars
+## Applying Tuned Settings
 
-When applying a tuned style to a new image:
+When applying tuned settings to a new image:
 
-1. **User sets geometry** - Crop, zoom, rotate as desired
-2. **Add geos Link** - Load `.geos.json` as a pipe Link
-3. **Add edge Link** - Load `.edge.json` as a pipe Link
-4. **Process through pipe** - Output has reference style
+### Command Line (labs binary)
+
+```bash
+# Apply tune.json to a RAW file
+./labs source.ARW --tune tune.json --output styled.png
+
+# With custom output size
+./labs source.ARW --tune tune.json --output styled.png --size 2048
+```
+
+### Programmatic Usage
 
 ```cpp
-// Load sidecars as Links
-json geos = loadJson("sunset.geos.json");
-json edge = loadJson("sunset.edge.json");
+// Load tune.json
+pipe::Body::Link link = data::link::fromJson(loadFile("tune.json"));
 
-// Build pipe.json
-json pipe;
-pipe["version"] = "1.0";
-pipe["decoder"] = "sony_arw2";
-pipe["links"] = json::array();
+// Build pipeline with tuned link
+pipe::Body body;
+body.add(link);
 
-// User geometry Link (optional)
-json geom;
-geom["name"] = "framing";
-geom["modules"]["geometric"] = { /* user values */ };
-pipe["links"].push_back(geom);
-
-// Add tuned Links
-pipe["links"].push_back(geos);
-pipe["links"].push_back(edge);
-
-// Process
-cv::UMat output = processPipe(rawFile, pipe);
+// Process RAW through HEAD → BODY → TAIL
+pipe::Head head;
+cv::UMat linear = head.decode("source.ARW");
+cv::UMat display = body.view(linear);
+pipe::Tail tail;
+tail.save(display, "styled.png", 1080);
 ```
 
 ---

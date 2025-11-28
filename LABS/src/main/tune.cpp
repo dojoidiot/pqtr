@@ -2,27 +2,31 @@
 // Headless tool: Automatically finds optimal pipe dial values to match a target image
 //
 // WORKFLOW:
-//   tune <source.ARW> <target.png> --output link.json
+//   tune <source.ARW> <target.png> --save-area <dir>
 //   → Loads RAW through HEAD
 //   → Uses target.png as reference (or embedded preview if target is "preview")
 //   → Runs GEOS + EDGE optimization
-//   → Saves optimized Link settings to link.json
+//   → Saves optimized Link settings to <dir>/tune.json
 //
 // Usage:
 //   tune <source.ARW> <target.png> [options]
 //   tune <source.ARW> preview [options]      # Use embedded camera preview as target
 //
 // Options:
-//   --output <link.json>    Save optimized dial values (required)
+//   --save-area <dir>       Output directory for tune.json (required)
 //   --threshold <value>     Stop when spectral loss below this (default: 0.005 = 0.5%)
 //   --size <pixels>         Working size for optimization (default: 1080)
 //   --mode <mode>           Optimization mode: blockwise, full35d, linear (default: blockwise)
 //   --skip-lut              Skip 3D LUT estimation (pure dial optimization)
+//   --logs                  Verbose progress output (dome.r, edge.ratio)
+//   --fine                  Save intermediate images (head, body, optimized, diff)
+//   --fine-area <dir>       Directory for --fine outputs (default: --save-area)
 //
 // Examples:
-//   tune photo.ARW preview --output style.json              # Match camera JPEG
-//   tune photo.ARW reference.png --output style.json        # Match external reference
-//   tune photo.ARW preview --output style.json --mode linear  # Linear ops only
+//   tune photo.ARW preview --save-area ./out                # Match camera JPEG
+//   tune photo.ARW reference.png --save-area ./out          # Match external reference
+//   tune photo.ARW preview --save-area ./out --mode linear  # Linear ops only
+//   tune photo.ARW preview --save-area ./out --logs --fine  # Verbose + intermediates
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -38,13 +42,16 @@
 
 void printUsage(const char* prog)
 {
-    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> --output <link.json> [options]\n\n";
+    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> --save-area <dir> [options]\n\n";
     std::cerr << "Options:\n";
-    std::cerr << "  --output <link.json>    Save optimized dial values (required)\n";
+    std::cerr << "  --save-area <dir>       Output directory for tune.json (required)\n";
     std::cerr << "  --threshold <value>     Stop when spectral loss below (default: 0.005)\n";
     std::cerr << "  --size <pixels>         Working size (default: 1080)\n";
     std::cerr << "  --mode <mode>           blockwise, full35d, linear (default: blockwise)\n";
     std::cerr << "  --skip-lut              Skip 3D LUT estimation\n";
+    std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
+    std::cerr << "  --fine                  Save intermediate images (head, body, optimized, diff)\n";
+    std::cerr << "  --fine-area <dir>       Directory for --fine outputs (default: --save-area)\n";
 }
 
 int main(int argc, char** argv)
@@ -65,19 +72,25 @@ int main(int argc, char** argv)
     // Parse arguments
     std::string sourcePath = argv[1];
     std::string targetPath = argv[2];
-    std::string outputPath;
+    std::string saveArea;
+    std::string fineArea;
     float threshold = 0.005f;
     int workingSize = 1080;
     geos::Mode mode = geos::Mode::BLOCKWISE;
     bool skipLut = false;
+    bool logs = false;
+    bool fine = false;
 
     for (int i = 3; i < argc; i++)
     {
         std::string arg = argv[i];
-        if (arg == "--output" && i + 1 < argc) outputPath = argv[++i];
+        if (arg == "--save-area" && i + 1 < argc) saveArea = argv[++i];
+        else if (arg == "--fine-area" && i + 1 < argc) fineArea = argv[++i];
         else if (arg == "--threshold" && i + 1 < argc) threshold = std::stof(argv[++i]);
         else if (arg == "--size" && i + 1 < argc) workingSize = std::stoi(argv[++i]);
         else if (arg == "--skip-lut") skipLut = true;
+        else if (arg == "--logs") logs = true;
+        else if (arg == "--fine") fine = true;
         else if (arg == "--mode" && i + 1 < argc)
         {
             std::string m = argv[++i];
@@ -89,12 +102,15 @@ int main(int argc, char** argv)
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
 
-    if (outputPath.empty())
+    if (saveArea.empty())
     {
-        std::cerr << "Error: --output is required\n";
+        std::cerr << "Error: --save-area is required\n";
         printUsage(argv[0]);
         return 1;
     }
+
+    // Default fine-area to save-area
+    if (fineArea.empty()) fineArea = saveArea;
 
     try
     {
@@ -104,9 +120,11 @@ int main(int argc, char** argv)
         std::cout << "=== TUNE ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
         std::cout << "Target: " << targetPath << std::endl;
-        std::cout << "Output: " << outputPath << std::endl;
+        std::cout << "Save area: " << saveArea << std::endl;
         std::cout << "Mode: " << modeName << std::endl;
         std::cout << "Working size: " << workingSize << "px" << std::endl;
+        if (logs) std::cout << "Logs: enabled" << std::endl;
+        if (fine) std::cout << "Fine area: " << fineArea << std::endl;
 
         // Create pipe and load RAW
         pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
@@ -208,20 +226,22 @@ int main(int argc, char** argv)
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
         geos::Result result = geosTask->run(body, link, config,
-            [&phaseNames](const geos::Progress& p) {
+            [&phaseNames, logs](const geos::Progress& p) {
                 if (p.stage == geos::Progress::Stage::GEOS)
                 {
                     std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
-                              << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral
-                              << "     " << std::flush;
+                              << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral;
+                    if (logs) std::cout << "  r=" << std::setprecision(3) << p.dome.r;
+                    std::cout << "     " << std::flush;
                 }
                 else if (p.stage == geos::Progress::Stage::EDGE)
                 {
                     std::cout << "\r  [EDGE] "
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
-                              << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency
-                              << "     " << std::flush;
+                              << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency;
+                    if (logs) std::cout << "  ratio=" << std::setprecision(3) << p.edge.ratio;
+                    std::cout << "     " << std::flush;
                 }
                 return true;
             });
@@ -232,13 +252,56 @@ int main(int argc, char** argv)
                   << result.loss.spectral << " (" << std::setprecision(2)
                   << (result.loss.spectral * 100) << "%)" << std::endl;
 
-        // Save link settings
-        std::cout << "\n[SAVE] Writing link settings..." << std::endl;
-        if (!data::link::save(link, outputPath))
+        // Save tune settings
+        std::cout << "\n[SAVE] Writing tune settings..." << std::endl;
+        std::string tunePath = saveArea + "/tune.json";
+        if (!data::link::save(link, tunePath))
         {
-            throw std::runtime_error("Failed to save: " + outputPath);
+            throw std::runtime_error("Failed to save: " + tunePath);
         }
-        std::cout << "  Saved: " << outputPath << std::endl;
+        std::cout << "  Saved: " << tunePath << std::endl;
+
+        // Save fine outputs if requested
+        if (fine)
+        {
+            std::cout << "\n[FINE] Saving intermediate images..." << std::endl;
+
+            // tune.jpg - original target (camera JPEG or reference)
+            if (!usePreview)
+            {
+                // Copy the original target file as tune.jpg
+                cv::imwrite(fineArea + "/tune.jpg", targetMat);
+                std::cout << "  Saved: " << fineArea << "/tune.jpg (original target)" << std::endl;
+            }
+            else
+            {
+                // Save the preview as tune.jpg
+                cv::imwrite(fineArea + "/tune.jpg", targetMat);
+                std::cout << "  Saved: " << fineArea << "/tune.jpg (camera preview)" << std::endl;
+            }
+
+            // head.png - target resized to working size
+            cv::imwrite(fineArea + "/head.png", targetForTune);
+            std::cout << "  Saved: " << fineArea << "/head.png (target at working size)" << std::endl;
+
+            // body.png - baseline before optimization
+            cv::imwrite(fineArea + "/body.png", bodyMat);
+            std::cout << "  Saved: " << fineArea << "/body.png (baseline)" << std::endl;
+
+            // tail.png - result after optimization
+            cv::UMat optView = body.view();
+            cv::Mat optMat;
+            optView.copyTo(optMat);
+            cv::imwrite(fineArea + "/tail.png", optMat);
+            std::cout << "  Saved: " << fineArea << "/tail.png (optimized result)" << std::endl;
+
+            // diff.png - visual difference (target vs tail, amplified 5x)
+            cv::Mat diffMat;
+            cv::absdiff(optMat, targetForTune, diffMat);
+            diffMat.convertTo(diffMat, -1, 5.0);  // Amplify 5x for visibility
+            cv::imwrite(fineArea + "/diff.png", diffMat);
+            std::cout << "  Saved: " << fineArea << "/diff.png (difference x5)" << std::endl;
+        }
 
         std::cout << "\n[OK] Done" << std::endl;
         return 0;

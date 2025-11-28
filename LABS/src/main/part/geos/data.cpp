@@ -8,75 +8,61 @@
 #include <cstring>
 
 // ============================================================
-// Base64 Encoding/Decoding
+// Hex Encoding/Decoding (uint16 values)
 // ============================================================
 
-namespace data::base64
+namespace data::hex
 {
 
-static const char* CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char HEX_CHARS[] = "0123456789abcdef";
 
-static const uint8_t DECODE_TABLE[128] = {
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64,
-    64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 64, 62, 64, 64, 64, 63,
-    52, 53, 54, 55, 56, 57, 58, 59, 60, 61, 64, 64, 64, 64, 64, 64,
-    64,  0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14,
-    15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 64, 64, 64, 64, 64,
-    64, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
-    41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 64, 64, 64, 64, 64
-};
-
-std::string encode(const void* data, size_t size)
+std::string encode(const uint16_t* data, size_t count)
 {
-    const uint8_t* bytes = static_cast<const uint8_t*>(data);
     std::string result;
-    result.reserve((size + 2) / 3 * 4);
+    result.reserve(count * 4);
 
-    for (size_t i = 0; i < size; i += 3)
+    for (size_t i = 0; i < count; i++)
     {
-        uint32_t n = static_cast<uint32_t>(bytes[i]) << 16;
-        if (i + 1 < size) n |= static_cast<uint32_t>(bytes[i + 1]) << 8;
-        if (i + 2 < size) n |= static_cast<uint32_t>(bytes[i + 2]);
-
-        result += CHARS[(n >> 18) & 0x3F];
-        result += CHARS[(n >> 12) & 0x3F];
-        result += (i + 1 < size) ? CHARS[(n >> 6) & 0x3F] : '=';
-        result += (i + 2 < size) ? CHARS[n & 0x3F] : '=';
+        uint16_t v = data[i];
+        result += HEX_CHARS[(v >> 12) & 0xF];
+        result += HEX_CHARS[(v >> 8) & 0xF];
+        result += HEX_CHARS[(v >> 4) & 0xF];
+        result += HEX_CHARS[v & 0xF];
     }
 
     return result;
 }
 
-std::vector<uint8_t> decode(const std::string& encoded)
+static inline int hexVal(char c)
 {
-    std::vector<uint8_t> result;
-    result.reserve(encoded.size() * 3 / 4);
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
 
-    uint32_t n = 0;
-    int bits = 0;
+std::vector<uint16_t> decode(const std::string& encoded)
+{
+    std::vector<uint16_t> result;
+    result.reserve(encoded.size() / 4);
 
-    for (char c : encoded)
+    for (size_t i = 0; i + 3 < encoded.size(); i += 4)
     {
-        if (c == '=') break;
-        if (c < 0 || static_cast<unsigned char>(c) >= 128) continue;
-        uint8_t d = DECODE_TABLE[static_cast<unsigned char>(c)];
-        if (d == 64) continue;
+        int h0 = hexVal(encoded[i]);
+        int h1 = hexVal(encoded[i + 1]);
+        int h2 = hexVal(encoded[i + 2]);
+        int h3 = hexVal(encoded[i + 3]);
 
-        n = (n << 6) | d;
-        bits += 6;
+        if (h0 < 0 || h1 < 0 || h2 < 0 || h3 < 0) continue;
 
-        if (bits >= 8)
-        {
-            bits -= 8;
-            result.push_back(static_cast<uint8_t>((n >> bits) & 0xFF));
-        }
+        uint16_t v = (h0 << 12) | (h1 << 8) | (h2 << 4) | h3;
+        result.push_back(v);
     }
 
     return result;
 }
 
-} // namespace data::base64
+} // namespace data::hex
 
 // ============================================================
 // 3D LUT Serialization
@@ -88,14 +74,21 @@ namespace data::lut
 std::string toJson(const float* lut, int gridSize)
 {
     size_t numFloats = gridSize * gridSize * gridSize * 3;
-    size_t numBytes = numFloats * sizeof(float);
 
-    std::string b64 = base64::encode(lut, numBytes);
+    // Convert float [0,1] to uint16 [0,65535]
+    std::vector<uint16_t> u16(numFloats);
+    for (size_t i = 0; i < numFloats; i++)
+    {
+        float v = std::max(0.0f, std::min(1.0f, lut[i]));
+        u16[i] = static_cast<uint16_t>(v * 65535.0f + 0.5f);
+    }
+
+    std::string hexData = hex::encode(u16.data(), numFloats);
 
     std::ostringstream ss;
     ss << "{\n";
     ss << "  \"grid\": " << gridSize << ",\n";
-    ss << "  \"data\": \"" << b64 << "\"\n";
+    ss << "  \"data\": \"" << hexData << "\"\n";
     ss << "}";
     return ss.str();
 }
@@ -111,7 +104,7 @@ std::vector<float> fromJson(const std::string& json, int& gridSize)
         return {};
     gridSize = std::stoi(json.substr(pos + 1));
 
-    // Parse base64 data
+    // Parse hex data
     pos = json.find("\"data\"");
     if (pos == std::string::npos)
         return {};
@@ -122,13 +115,15 @@ std::vector<float> fromJson(const std::string& json, int& gridSize)
     if (end == std::string::npos)
         return {};
 
-    std::string b64 = json.substr(pos + 1, end - pos - 1);
-    std::vector<uint8_t> bytes = base64::decode(b64);
+    std::string hexData = json.substr(pos + 1, end - pos - 1);
+    std::vector<uint16_t> u16 = hex::decode(hexData);
 
-    // Convert to floats
-    size_t numFloats = bytes.size() / sizeof(float);
-    std::vector<float> result(numFloats);
-    std::memcpy(result.data(), bytes.data(), bytes.size());
+    // Convert uint16 [0,65535] back to float [0,1]
+    std::vector<float> result(u16.size());
+    for (size_t i = 0; i < u16.size(); i++)
+    {
+        result[i] = static_cast<float>(u16[i]) / 65535.0f;
+    }
 
     return result;
 }
@@ -289,7 +284,18 @@ std::string toJson(pipe::Body::Link& link)
     ss << "      \"sharpen_radius\": " << link.detail().sharpen().radius() << ",\n";
     ss << "      \"denoise_luma\": " << link.detail().denoise().luminance().get() << ",\n";
     ss << "      \"denoise_chroma\": " << link.detail().denoise().chroma().get() << "\n";
-    ss << "    }\n";
+    ss << "    }";
+
+    // 3D LUT (only if estimated)
+    if (link.lutCurve().isEstimated())
+    {
+        ss << ",\n";
+        ss << "    \"lut\": " << lut::toJson(link.lutCurve().lut(), link.lutCurve().GRID_SIZE) << "\n";
+    }
+    else
+    {
+        ss << "\n";
+    }
 
     ss << "  }\n";
     ss << "}\n";
@@ -391,6 +397,35 @@ bool fromJson(pipe::Body::Link& link, const std::string& json)
     link.detail().sharpen().radius(parseFloat(json, "sharpen_radius", 0.4f));
     link.detail().denoise().luminance().set(parseFloat(json, "denoise_luma", 0.0f));
     link.detail().denoise().chroma().set(parseFloat(json, "denoise_chroma", 0.0f));
+
+    // 3D LUT (if present)
+    size_t lutPos = json.find("\"lut\"");
+    if (lutPos != std::string::npos)
+    {
+        // Find the LUT object - it starts at the next {
+        size_t lutStart = json.find('{', lutPos);
+        if (lutStart != std::string::npos)
+        {
+            // Find matching closing brace
+            int braceCount = 1;
+            size_t lutEnd = lutStart + 1;
+            while (lutEnd < json.size() && braceCount > 0)
+            {
+                if (json[lutEnd] == '{') braceCount++;
+                else if (json[lutEnd] == '}') braceCount--;
+                lutEnd++;
+            }
+
+            std::string lutJson = json.substr(lutStart, lutEnd - lutStart);
+            int gridSize = 0;
+            std::vector<float> lutData = lut::fromJson(lutJson, gridSize);
+
+            if (!lutData.empty() && gridSize == link.lutCurve().GRID_SIZE)
+            {
+                link.lutCurve().setLut(lutData.data());
+            }
+        }
+    }
 
     return true;
 }

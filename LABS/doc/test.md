@@ -281,7 +281,7 @@ After exposure (dial=0.75, +2 EV, ×4):
 | High contrast transfer | Flat RAW + punchy reference | Increased contrast dial |
 | Desaturated transfer | Vibrant RAW + muted reference | Lower saturation/vibrance |
 | Content invariance | Different scenes, same style | Similar dial values |
-| Output format | Full optimization | Valid .geos.json + .edge.json |
+| Output format | Full optimization | Valid tune.json with dials + LUT |
 
 ### Three Roles Verification
 
@@ -338,6 +338,28 @@ Output images are saved to `tmp/var/test/output/` for visual verification:
 ```bash
 ls tmp/var/test/output/
 # exposure_neutral.png, exposure_dark.png, wb_warm.png, etc.
+```
+
+### Tune/Labs Integration Tests
+
+```bash
+# Build tune and labs binaries
+make -f Makefile.tune all
+
+# Fast optimization test (~10s)
+make -f Makefile.tune test-fast
+
+# Full optimization test (~60s)
+make -f Makefile.tune test-full
+
+# Apply existing tune.json to test RAW
+make -f Makefile.tune test-labs
+# Output: tmp/var/labs/tail.png
+
+# Batch test: tune all pics, create comparison grid
+make -f Makefile.tune test-batch
+# Output: tmp/var/batch/<name>/{tune.jpg, head.png, body.png, tune.json, tail.png, diff.png}
+# Output: tmp/var/batch/compare.png (JPEG vs TAIL grid)
 ```
 
 ---

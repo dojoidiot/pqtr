@@ -6,7 +6,7 @@
 
 This document defines data persistence formats for the PQTR:LABS system. It covers:
 - **Pipe Data**: Link configurations and dial values (complete specification)
-- **Style Sidecars**: GeoS (.geos.json) and Edge (.edge.json) tuned presets
+- **Tune Output**: tune.json (dials + 3D LUT)
 - **Image Storage**: Linear RGB and display RGB formats
 - **Diff Data**: Perceptual difference metrics
 - **Tune Data**: Optimization history
@@ -474,109 +474,106 @@ cv::imwrite("output.png", output_8bit);
 
 ---
 
-## Style Sidecar Files
+## Tune Output Format (tune.json)
 
 ### Purpose
 
-Style presets from the tune tool are stored as **pipe Link sidecars**. Each sidecar is a standard Link that can be added directly to any pipe.json.
+The tune tool outputs a single `tune.json` file containing all optimized settings (dials + 3D LUT). This file is consumed by the `labs` binary via `--tune tune.json`.
 
 See [tune.md](./tune.md) for the tuning process.
 
-### File Types
-
-| File | Content | Dials |
-|------|---------|-------|
-| `<name>.geos.json` | Color/tone Link | 35 |
-| `<name>.edge.json` | Sharpness Link | 4 |
-
-**NOT included:** Geometric dials (6) - user sets per image.
-
-### GeoS Sidecar (.geos.json)
-
-```json
-{
-  "name": "geos",
-  "meta": {
-    "loss": 0.0156,
-    "iterations": 342,
-    "reference": "sunset_beach.png"
-  },
-  "modules": {
-    "color_correction": {
-      "white_balance": { "temperature": 0.55, "tint": 0.48 },
-      "exposure": { "value": 0.65 }
-    },
-    "tone_mapping": {
-      "contrast": { "value": 0.72 },
-      "curve_adjustment": { "highlights": 0.45, "shadows": 0.55 },
-      "clipping_point": { "black": 0.15, "white": 0.85 }
-    },
-    "global_color": {
-      "vibrance": 0.55,
-      "saturation": 0.68,
-      "color_density": 0.52
-    },
-    "selective_color": {
-      "red": { "hue": 0.52, "saturation": 0.55, "luminance": 0.5 },
-      "orange": { "hue": 0.5, "saturation": 0.6, "luminance": 0.5 },
-      "yellow": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "green": { "hue": 0.5, "saturation": 0.45, "luminance": 0.5 },
-      "cyan": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "blue": { "hue": 0.48, "saturation": 0.55, "luminance": 0.5 },
-      "purple": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 },
-      "magenta": { "hue": 0.5, "saturation": 0.5, "luminance": 0.5 }
-    }
-  }
-}
-```
-
-### Edge Sidecar (.edge.json)
-
-```json
-{
-  "name": "edge",
-  "meta": {
-    "loss": 0.0234,
-    "reference": "sunset_beach.png"
-  },
-  "modules": {
-    "detail": {
-      "sharpen": { "amount": 0.4, "radius": 0.5 },
-      "denoise": { "luminance": 0.3, "chroma": 0.5 }
-    }
-  }
-}
-```
-
-### Using Style Sidecars
-
-Style sidecars are standard Links - add them to any pipe.json:
+### Structure
 
 ```json
 {
   "version": "1.0",
-  "decoder": "sony_arw2",
-  "links": [
-    { "name": "framing", "modules": { "geometric": { /* user values */ } } },
-    { /* contents of style.geos.json */ },
-    { /* contents of style.edge.json */ }
-  ]
+  "meta": {
+    "loss": { "spectral": 0.0005, "frequency": 0.007 },
+    "iterations": 342,
+    "reference": "sunset_beach.png"
+  },
+  "link": {
+    "name": "tune",
+    "modules": {
+      "color_correction": {
+        "white_balance": { "temperature": 0.55, "tint": 0.48 },
+        "exposure": { "value": 0.65 }
+      },
+      "tone_mapping": {
+        "contrast": { "value": 0.72 },
+        "highlights": 0.45,
+        "shadows": 0.55,
+        "toe_pivot": 0.5,
+        "shoulder_pivot": 0.5,
+        "black_point": 0.35,
+        "white_point": 0.85
+      },
+      "global_color": {
+        "vibrance": 0.55,
+        "saturation": 0.68,
+        "color_density": 0.52
+      },
+      "split_tone": {
+        "shadow_hue": 0.5,
+        "shadow_sat": 0.5,
+        "highlight_hue": 0.5,
+        "highlight_sat": 0.5
+      },
+      "detail": {
+        "sharpen_amount": 0.4,
+        "sharpen_radius": 0.5
+      }
+    }
+  },
+  "lut": {
+    "grid": 17,
+    "data": "hex-encoded-uint16-values..."
+  }
 }
 ```
+
+**NOT included:** Geometric dials (6) - user sets per image.
+
+### 3D LUT Encoding
+
+The `lut` section stores a 17³ 3D color lookup table using hex-encoded uint16 values:
+
+| Property | Value |
+|----------|-------|
+| Grid size | 17 (17³ = 4913 points) |
+| Channels | 3 (RGB) |
+| Total values | 14,739 |
+| Encoding | uint16 [0,65535] → 4 hex chars |
+| Size | ~59KB hex string |
+
+**Encoding process:**
+1. Float [0.0, 1.0] → uint16 [0, 65535]: `uint16_t v = float * 65535.0f + 0.5f`
+2. uint16 → 4 hex chars: `v=0xABCD → "abcd"`
+
+**Decoding process:**
+1. 4 hex chars → uint16: `"abcd" → 0xABCD`
+2. uint16 → float: `float = uint16 / 65535.0f`
+
+**Size comparison:**
+- Hex/uint16: 14,739 × 4 chars = ~59KB
+- Base64/float: 14,739 × 4 bytes × 4/3 = ~78KB
 
 ### Meta Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `loss` | float | Final optimization loss |
-| `iterations` | int | GeoS only: SPSA iterations |
+| `loss.spectral` | float | Color/tone loss (geodesic, 0 = perfect) |
+| `loss.frequency` | float | Sharpness loss (Laplacian, 0 = perfect) |
+| `iterations` | int | SPSA iterations used |
 | `reference` | string | Reference image filename |
 
 ### Validation
 
-- **name**: Required, typically "geos" or "edge"
-- **modules**: Must match pipe Link schema
+- **version**: Must be "1.0"
+- **link.modules**: Must match pipe Link schema
 - **Values**: All in range [0.0, 1.0]
+- **lut.grid**: Must be 17
+- **lut.data**: Must be valid hex string of correct length
 
 ---
 

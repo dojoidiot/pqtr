@@ -28,8 +28,7 @@ INCLUDES = $(OPENCV_INCLUDE) \
 
 # Directories
 SRC_DIR = src/main
-TMP_DIR = tmp/libs
-OBJ_DIR = $(TMP_DIR)/obj
+OBJ_DIR = tmp/obj/labs
 LIB_DIR = lib
 
 # RAWS library (via wire.sh symlink)
@@ -94,10 +93,10 @@ all: $(LABS_A)
 
 # Combine LABS objects with RAWS library into labs.a
 $(LABS_A): $(ALL_OBJS) $(RAWS_A) | $(LIB_DIR)
-	@rm -rf $(TMP_DIR)/merge && mkdir -p $(TMP_DIR)/merge
-	cd $(TMP_DIR)/merge && ar x ../../../$(RAWS_A)
-	ar rcs $@ $(ALL_OBJS) $(TMP_DIR)/merge/*.o
-	@rm -rf $(TMP_DIR)/merge
+	@rm -rf $(OBJ_DIR)/merge && mkdir -p $(OBJ_DIR)/merge
+	cd $(OBJ_DIR)/merge && ar x ../../../../$(RAWS_A)
+	ar rcs $@ $(ALL_OBJS) $(OBJ_DIR)/merge/*.o
+	@rm -rf $(OBJ_DIR)/merge
 	@echo "Built: $@ (includes RAWS)"
 
 # Pipe objects
@@ -126,7 +125,7 @@ $(OBJ_DIR)/geos:
 	mkdir -p $(OBJ_DIR)/geos
 
 clean:
-	rm -rf $(TMP_DIR) $(LABS_A)
+	rm -rf $(OBJ_DIR) $(LABS_A)
 
 info:
 	@echo "Target: $(LABS_A)"

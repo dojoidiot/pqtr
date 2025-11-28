@@ -25,7 +25,7 @@ LABS knows nothing about camera-specific decoding—it calls `raws::decode()` an
 
 ```
 LABS/
-├── bin/              # Compiled binaries (tune)
+├── bin/              # Compiled binaries (tune, labs)
 ├── inc/              # Public headers
 │   ├── pipe.hpp      # Pipe API
 │   ├── geos.hpp      # Optimizer API
@@ -50,12 +50,12 @@ LABS/
 │       ├── mods/             # Module unit tests
 │       └── geos/             # Optimizer tests
 ├── tmp/
-│   ├── obj/                  # Build objects
-│   ├── bin/                  # Test binaries
-│   └── var/                  # Test output
+│   ├── obj/<name>/           # Build objects (labs, mods, tune)
+│   ├── bin/<name>/           # Test binaries
+│   └── var/<name>/           # Test output
 ├── Makefile                  # Top-level (delegates)
 ├── Makefile.labs             # Builds lib/labs.a
-├── Makefile.tune             # Builds bin/tune + geos tests
+├── Makefile.tune             # Builds bin/tune, bin/labs + geos tests
 └── Makefile.mods             # Module unit tests
 ```
 
@@ -63,9 +63,11 @@ LABS/
 
 ```bash
 make              # Build lib/labs.a (default)
-make tune         # Build bin/tune + tests
+make tune         # Build bin/tune, bin/labs + tests
 make test         # Run quick tests (mods + tune-fast)
 make test-all     # Run full test suite
+make test-labs    # Apply tune.json to test RAW
+make test-batch   # Tune all pics, create comparison grid
 make all          # Build everything
 make clean        # Clean all artifacts
 ```
@@ -91,7 +93,7 @@ Parts are modular libraries in `src/main/part/`. They expose a public API using 
 Command-line executables in `bin/`:
 
 *   **`tune`**: Automatically optimizes dials to match a reference style. Two-stage: SPSA for color/tone (17 dials + 17³ LUT), golden section for sharpness (2 dials).
-*   **`labs`**: Processes RAW to PNG with optional Link settings.
+*   **`labs`**: Processes RAW to PNG with optional tune.json settings (dials + 3D LUT).
 
 ## RAW Decoding
 

@@ -2,9 +2,9 @@
 // Pipe runner: Processes RAW through pipeline with optional tune settings
 //
 // WORKFLOW:
-//   labs <source.ARW> --output tail.png [--link link.json]
+//   labs <source.ARW> --output tail.png [--tune tune.json]
 //   → Loads RAW through HEAD (decode + color science)
-//   → If link.json provided, loads Link settings into BODY
+//   → If tune.json provided, loads dial settings + 3D LUT into BODY
 //   → Runs BODY → TAIL → saves output image
 //
 // Usage:
@@ -12,12 +12,12 @@
 //
 // Options:
 //   --output <image.png>    Output file (required)
-//   --link <link.json>      Apply Link settings from tune
+//   --tune <tune.json>      Apply settings from tune (dials + 3D LUT)
 //   --size <pixels>         Max output dimension (default: 0 = full resolution)
 //
 // Examples:
 //   labs photo.ARW --output photo.png                    # Baseline (no edits)
-//   labs photo.ARW --output photo.png --link style.json  # With optimized settings
+//   labs photo.ARW --output photo.png --tune style.json  # With optimized settings
 //   labs photo.ARW --output thumb.png --size 1080        # Social media size
 
 #include <tool.hpp>
@@ -33,7 +33,7 @@ void printUsage(const char* prog)
     std::cerr << "Usage: " << prog << " <source.ARW> --output <image.png> [options]\n\n";
     std::cerr << "Options:\n";
     std::cerr << "  --output <image.png>    Output file (required)\n";
-    std::cerr << "  --link <link.json>      Apply Link settings from tune\n";
+    std::cerr << "  --tune <tune.json>      Apply settings from tune (dials + 3D LUT)\n";
     std::cerr << "  --size <pixels>         Max output dimension (default: full res)\n";
 }
 
@@ -55,14 +55,14 @@ int main(int argc, char** argv)
     // Parse arguments
     std::string sourcePath = argv[1];
     std::string outputPath;
-    std::string linkPath;
+    std::string tunePath;
     int maxSize = 0;
 
     for (int i = 2; i < argc; i++)
     {
         std::string arg = argv[i];
         if (arg == "--output" && i + 1 < argc) outputPath = argv[++i];
-        else if (arg == "--link" && i + 1 < argc) linkPath = argv[++i];
+        else if (arg == "--tune" && i + 1 < argc) tunePath = argv[++i];
         else if (arg == "--size" && i + 1 < argc) maxSize = std::stoi(argv[++i]);
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
@@ -80,7 +80,7 @@ int main(int argc, char** argv)
         std::cout << "=== LABS ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
         std::cout << "Output: " << outputPath << std::endl;
-        if (!linkPath.empty()) std::cout << "Link: " << linkPath << std::endl;
+        if (!tunePath.empty()) std::cout << "Tune: " << tunePath << std::endl;
         if (maxSize > 0) std::cout << "Size: " << maxSize << "px" << std::endl;
 
         // Create pipe and load RAW
@@ -102,30 +102,39 @@ int main(int argc, char** argv)
         std::cout << "\n[BODY] Processing..." << std::endl;
         pipe::Body& body = head->body(0);
 
-        // Load link settings if provided
-        if (!linkPath.empty())
+        // Load tune settings if provided
+        if (!tunePath.empty())
         {
-            std::cout << "  Loading link: " << linkPath << std::endl;
+            std::cout << "  Loading tune: " << tunePath << std::endl;
 
             // Check file exists
-            std::ifstream check(linkPath);
+            std::ifstream check(tunePath);
             if (!check.good())
             {
-                throw std::runtime_error("Link file not found: " + linkPath);
+                throw std::runtime_error("Tune file not found: " + tunePath);
             }
             check.close();
 
-            // Add link and load settings
+            // Add link and load settings (includes dials + 3D LUT)
             pipe::Body::Link& link = body.add("tune");
-            if (!data::link::load(link, linkPath))
+            if (!data::link::load(link, tunePath))
             {
-                throw std::runtime_error("Failed to load link: " + linkPath);
+                throw std::runtime_error("Failed to load tune: " + tunePath);
             }
-            std::cout << "  Applied!" << std::endl;
+
+            // Report what was loaded
+            if (link.lutCurve().isEstimated())
+            {
+                std::cout << "  Applied dials + 3D LUT" << std::endl;
+            }
+            else
+            {
+                std::cout << "  Applied dials (no LUT)" << std::endl;
+            }
         }
         else
         {
-            std::cout << "  No link file (baseline output)" << std::endl;
+            std::cout << "  No tune file (baseline output)" << std::endl;
         }
 
         // Save via TAIL

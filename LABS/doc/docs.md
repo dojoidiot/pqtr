@@ -66,7 +66,7 @@ Passive voice is acceptable for:
 - **HEAD → BODY → TAIL** (pipeline stages)
 - **spectral loss** (geos: geodesic distance for color/tone)
 - **frequency loss** (edge: Laplacian variance for sharpness)
-- **style sidecars** (.geos.json, .edge.json - pipe Link format)
+- **tune.json** (output from tune: dials + 3D LUT, consumed by labs)
 - **three roles** (color/tone, sharpness, geometry)
 
 #### ❌ AVOID - Inconsistent Terms
