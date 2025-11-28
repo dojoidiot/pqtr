@@ -224,6 +224,281 @@ Should read from Sony metadata tag 0x7310 (SR2SubIFD "Color Matrix").
 
 ---
 
+## Camera Metadata Hints
+
+**Current:** RAWS extracts metadata but LABS only uses it for display/comparison.
+
+**Opportunity:** Camera metadata contains hints about photographer intent that could inform LABS module behavior.
+
+### Currently Extracted (RAWS)
+
+| Category | Fields | Current Use |
+|----------|--------|-------------|
+| **Shooting** | iso, shutter_speed, aperture, focal_length, lens_model | Metadata display |
+| **Style** | creative_style, dro, contrast, saturation, sharpness | Preview comparison |
+| **Processing** | wb_rggb, color_matrix, black/white_level | RAWS decoder |
+| **Lens** | distortion_params, distortion_knot_count | Undistort module |
+
+### Hint Opportunities for LABS
+
+| Hint | EXIF/MakerNote | Target Module | Use Case |
+|------|----------------|---------------|----------|
+| **ISO** | EXIF 34855 | Detail | High ISO → gentler sharpening, noise-aware path |
+| **DRO level** | Sony 0xb04f | ToneMapping | "Lv5" → aggressive shadow lift expected |
+| **Creative Style** | Sony 0xb020 | GlobalColor | "Vivid" → higher saturation, "Portrait" → skin protection |
+| **Contrast** | Sony 0x2004 | ToneMapping | +3 → steeper curve expected |
+| **Saturation** | Sony 0x2005 | GlobalColor | Direct hint for saturation dial |
+| **Sharpness** | Sony 0x2006 | Detail | Direct hint for sharpen_amount |
+| **Focal length** | EXIF 37386 | Geometric | Vignette correction (lens-dependent) |
+| **Aperture** | EXIF 33437 | Geometric | Vignette intensity varies with f-stop |
+
+### Not Yet Extracted (potential value)
+
+| Tag | Description | Potential Use |
+|-----|-------------|---------------|
+| **Face regions** | Sony 0x0201 | Protect skin tones, local exposure |
+| **Scene type** | EXIF 41729 | Auto-detected scene → style hints |
+| **Metering mode** | EXIF 37383 | Exposure intent (spot vs matrix) |
+| **Flash fired** | EXIF 37385 | WB expectations, harsh light handling |
+| **Focus distance** | MakerNotes | DOF-aware sharpening |
+| **Long exposure NR** | Sony tag | Camera already applied NR to JPEG |
+
+### Implementation Approaches
+
+**Approach 1: Hint-as-Dial-Init**
+
+Use style settings as starting points for tune optimization:
+
+```cpp
+// In tune, before SPSA optimization
+if (hint.contrast > 0)
+    dial_tone_contrast = 0.5f + hint.contrast * 0.05f;  // +2 → 0.60
+if (hint.saturation > 0)
+    dial_saturation = 0.5f + hint.saturation * 0.05f;
+```
+
+Benefits:
+- Faster tune convergence (closer to target)
+- Respects photographer intent
+- No architectural changes to pipe
+
+**Approach 2: Hint-as-Branch**
+
+Enable/disable processing paths based on metadata:
+
+```cpp
+// In Detail module
+if (info["iso"] > 6400)
+    enable_noise_aware_sharpening();  // Gentler, edge-preserving
+
+// In GlobalColor module
+if (info["creative_style"] == "Portrait")
+    enable_skin_protection();  // Reduce saturation in skin hues
+```
+
+Benefits:
+- Adaptive processing per-image
+- Better handling of edge cases (high ISO, portraits)
+- Requires module modifications
+
+### Considerations
+
+- **Scope boundary**: RAWS extracts, LABS interprets (clean separation)
+- **Hint vs Override**: Hints inform defaults, user dials override
+- **Tune interaction**: Hints could bias tune starting point, not constrain search
+- **Cross-camera**: Sony-specific tags need abstraction for Canon/Nikon
+
+### Priority
+
+1. **ISO → Detail** - Most impactful, high-ISO images need different sharpening
+2. **Style settings → Dial init** - Direct mapping, fast convergence
+3. **Face regions** - High value but complex (regional processing)
+
+---
+
+## Color Science Metadata
+
+**Current:** RAWS extracts basic color data but misses several DNG-standard tags that define proper color processing.
+
+**Opportunity:** Standard color science metadata defines mathematically correct processing that cameras expect RAW converters to implement.
+
+### DNG Standard Tags
+
+The [DNG Specification](https://www.kronometric.org/phot/processing/DNG/dng_spec_1.4.0.0.pdf) defines a complete color science framework:
+
+| Tag | Name | Purpose | Currently Used |
+|-----|------|---------|----------------|
+| 0xc621 | ColorMatrix1 | Camera RGB → XYZ (Illuminant 1) | Hardcoded |
+| 0xc622 | ColorMatrix2 | Camera RGB → XYZ (Illuminant 2) | No |
+| 0xc623 | CameraCalibration1 | Per-unit calibration adjustment | No |
+| 0xc624 | CameraCalibration2 | Per-unit calibration adjustment | No |
+| 0xc65a | CalibrationIlluminant1 | Light source for Matrix1 (e.g., A=2856K) | No |
+| 0xc65b | CalibrationIlluminant2 | Light source for Matrix2 (e.g., D65=6500K) | No |
+| 0xc714 | ForwardMatrix1 | WB'd camera RGB → XYZ D50 | No |
+| 0xc715 | ForwardMatrix2 | WB'd camera RGB → XYZ D50 | No |
+| 0xc625 | ReductionMatrix1 | XYZ → camera RGB (inverse path) | No |
+| 0xc62a | BaselineExposure | Expected EV adjustment | No |
+| 0xc6fc | ProfileToneCurve | Expected rendering curve | No |
+
+### Sony-Specific Tags
+
+| Tag | Name | Purpose | Currently Used |
+|-----|------|---------|----------------|
+| 0x7310 | ColorMatrix | Camera RGB → sRGB | Hardcoded (should read) |
+| 0x7313 | WB_RGGB | As-shot white balance | Yes |
+| 0x7010 | ToneCurve | Linearization curve points | Yes (fixed curve) |
+| 0x7037 | DistortionCorrParams | Lens distortion spline | Yes |
+| 0x2011 | VignettingCorrection | Vignette correction on/off | No |
+| 0x2012 | LateralChromaticAberration | CA correction on/off | No |
+| 0x0115 | ColorSpace | sRGB vs AdobeRGB selection | No |
+
+### Dual-Illuminant Matrix Interpolation
+
+DNG spec requires interpolating ColorMatrix1/2 based on white balance CCT:
+
+```cpp
+// DNG 1.2+ required algorithm
+float cct_wb = colorTemperature(as_shot_neutral);
+float cct_1 = illuminantCCT(CalibrationIlluminant1);  // e.g., 2856K (A)
+float cct_2 = illuminantCCT(CalibrationIlluminant2);  // e.g., 6500K (D65)
+
+// Interpolate using inverse CCT (mired scale)
+float t = (1/cct_wb - 1/cct_1) / (1/cct_2 - 1/cct_1);
+t = clamp(t, 0, 1);
+
+ColorMatrix = lerp(ColorMatrix1, ColorMatrix2, t);
+```
+
+**Impact:** Without this, daylight shots use tungsten matrix or vice versa → color cast.
+
+### Forward Matrix Path (Alternative)
+
+DNG provides two paths for color conversion:
+
+**Path A: ColorMatrix** (camera RGB → XYZ → sRGB)
+```
+Camera RGB → ColorMatrix → XYZ → Bradford adapt → XYZ D65 → sRGB matrix → linear sRGB
+```
+
+**Path B: ForwardMatrix** (white-balanced RGB → XYZ D50 → sRGB)
+```
+Camera RGB → WB → ForwardMatrix → XYZ D50 → D50→D65 adapt → sRGB matrix → linear sRGB
+```
+
+DNG spec: *"If ForwardMatrix tags are included, use those. Otherwise use ColorMatrix."*
+
+Sony ARW files typically don't include ForwardMatrix, so Path A applies.
+
+### Chromatic Adaptation
+
+When using ColorMatrix path with illuminant ≠ D65:
+
+```cpp
+// Bradford chromatic adaptation: XYZ(source) → XYZ(D65)
+// Only needed if ColorMatrix output is not D65-adapted
+cv::Matx33f bradford_A_to_D65 = {
+    0.8446965f, -0.1366786f,  0.2296475f,
+   -0.0363200f,  1.0296515f,  0.0068627f,
+    0.0f,        0.0f,        1.2093654f
+};
+XYZ_D65 = bradford_A_to_D65 * XYZ_A;
+```
+
+**Question for validation:** Does Sony's 0x7310 matrix already output D65-adapted values, or raw XYZ needing adaptation?
+
+### Placement: Decoder vs Pipe
+
+| Item | Placement | Rationale |
+|------|-----------|-----------|
+| **ColorMatrix interpolation** | RAWS | Fundamental colorimetry, must happen before any processing |
+| **Chromatic adaptation** | RAWS | Part of correct XYZ→sRGB path |
+| **Vignette correction** | RAWS | Optical artifact, not stylistic |
+| **CA correction** | RAWS | Optical artifact, not stylistic |
+| **BaselineExposure** | LABS hint | Affects exposure dial starting point |
+| **ProfileToneCurve** | LABS hint | Affects tone mapping target |
+| **ColorSpace selection** | LABS | Affects output gamut (sRGB vs AdobeRGB) |
+
+### Implementation Priority
+
+1. **Read ColorMatrix from 0x7310** - Fix hardcoded matrix (already in idea.md)
+2. **Dual-illuminant interpolation** - If Sony provides Matrix1/2, interpolate by WB temp
+3. **Vignette correction** - Extract 0x2011, apply in RAWS
+4. **CA correction** - Extract 0x2012, apply in RAWS
+5. **BaselineExposure → LABS** - Pass as exposure hint
+
+### TODO: Research Questions
+
+1. Does Sony embed CalibrationIlluminant tags, or just a single matrix?
+2. Is Sony's 0x7310 matrix D65-referenced or camera-illuminant-referenced?
+3. What vignette correction data does Sony embed (coefficients or just on/off)?
+4. Does Sony's CA correction need coefficients or is it algorithmic?
+
+### References
+
+- [DNG Specification 1.6.0.0](https://paulbourke.net/dataformats/dng/dng_spec_1_6_0_0.pdf)
+- [Developing RAW by Hand](https://www.odelama.com/photo/Developing-a-RAW-Photo-by-hand/Developing-a-RAW-Photo-by-hand_Part-2/)
+- [Sony MakerNote Tags](https://exiftool.org/TagNames/Sony.html)
+- [darktable color calibration](https://docs.darktable.org/usermanual/4.0/en/module-reference/processing-modules/color-calibration/)
+
+---
+
+## Pipeline Order Validation
+
+**Status:** Order confirmed correct (2024-11 review).
+
+### Current Pipeline
+
+```
+RAWS (Decoder)              LABS (Processing)           LABS (Display)
+──────────────              ─────────────────           ──────────────
+RAW Bayer                   Scene-Linear sRGB           Scene-Linear
+    │                            │                           │
+    ├─► BLC (Bayer)             ├─► Exposure                ├─► sRGB Gamma
+    ├─► WB (Bayer)              ├─► White Balance           ├─► Clip [0,1]
+    ├─► Demosaic                ├─► Tone Mapping            ├─► 8-bit
+    ├─► Color Matrix            ├─► Global Color            │
+    ├─► Undistort               ├─► Selective Color         ▼
+    └─► Crop                    └─► Detail              PNG (sRGB)
+         │                           │
+         ▼                           ▼
+    Scene-Linear sRGB           Scene-Linear sRGB
+    [0, 1+] HDR headroom       [0, 1+] HDR headroom
+```
+
+### Validated Decisions
+
+| Decision | Correct | Rationale |
+|----------|---------|-----------|
+| BLC before WB | Yes | Must subtract offset before applying gains |
+| WB on Bayer | Yes | Balance channels before interpolation reduces demosaic artifacts |
+| Color Matrix after Demosaic | Yes | Need RGB pixels to transform primaries |
+| Processing in Linear | Yes | Exposure/color math is correct in radiometric space |
+| Gamma at output only | Yes | Preserves HDR headroom through processing chain |
+| HDR headroom [0,1+] | Yes | Scene highlights can exceed 1.0, clipped only at display |
+
+### Terminology
+
+"Scene-linear sRGB" is correct:
+- **Scene-linear**: Photometrically proportional to scene luminance
+- **sRGB**: The color primaries (gamut) and D65 white point, NOT the gamma
+
+### TODO: Deep Research Validation
+
+Final validation against authoritative sources:
+
+1. **dcraw / LibRaw** - Verify order matches established RAW processors
+2. **DNG Specification** - Adobe's canonical RAW processing order
+3. **darktable / RawTherapee** - Cross-reference open-source implementations
+4. **Bruce Lindbloom** - Color science reference for matrix placement
+5. **ICC Profile Spec** - PCS requirements for color transforms
+
+Specific questions to verify:
+- Is WB-on-Bayer universally preferred, or do some pipelines WB after demosaic?
+- Does chromatic adaptation (Bradford) belong before or after color matrix?
+- Should undistort happen before or after demosaic for best quality?
+
+---
+
 ## See Also
 
 - [analysis.md](./analysis.md) - Empirical findings and research
