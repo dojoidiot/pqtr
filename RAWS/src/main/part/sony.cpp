@@ -122,7 +122,7 @@ namespace sony
             // CRITICAL: LibRaw uses the ADJUSTED width (after subtracting 32), not TIFF width
             // Each 16-byte block decodes to 16 pixels written with stride-2 interleaving
             // The file stride between rows = width (3936), not TIFF width (3968)
-            int raw_width = width; // Bytes per row = adjusted width (LibRaw compatible)
+            int raw_width = width;
             const uint8_t *data_ptr = compressed_data;
             const uint8_t *data_end = compressed_data + compressed_size;
 
@@ -188,9 +188,8 @@ namespace sony
                         }
                     }
 
-                    // Write decoded pixels with stride-2 (LibRaw compatible)
-                    // Implements Bayer pattern interleaving:
-                    // Alternates between even positions (0,2,4...) and odd positions (1,3,5...)
+                    // Write decoded pixels with stride-2 interleaving
+                    // Even columns (0,2,4...) then odd columns (1,3,5...)
                     for (int i = 0; i < 16; i++, col += 2)
                     {
                         if (col < width)
@@ -198,10 +197,6 @@ namespace sony
                             row_out[col] = pix[i];
                         }
                     }
-
-                    // Column adjustment (LibRaw: col -= col & 1 ? 1 : 31)
-                    // After even col: move back 31 to odd position
-                    // After odd col: move back 1 to next even position
                     col -= (col & 1) ? 1 : 31;
 
                     dp += 16;

@@ -35,11 +35,11 @@ namespace sony
         try
         {
             // Map custom pattern codes to OpenCV RGB output codes
-            // IMPORTANT: Use RGB not BGR for correct color matrix application
+            // Pipeline uses RGB internally; convert to BGR at output stage
             int cv_pattern_code;
             switch (metadata.bayer_pattern)
             {
-            case 46: // RGGB
+            case 46: // RGGB - CFA tag says RGGB, trust it
                 cv_pattern_code = cv::COLOR_BayerRG2RGB;
                 break;
             case 47: // GRBG

@@ -182,45 +182,41 @@ output = bilinear_blend(LUTs, px.x, px.y)
 
 ---
 
-## RAWS: Per-Image Color Matrix
+## RAWS: Per-Image Color Matrix ✅ IMPLEMENTED
 
-**Current:** RAWS uses a hardcoded color matrix (prepare.cpp:544-547).
+**Status:** Implemented 2024-11. Tag 0x7800 in encrypted SR2SubIFD.
 
-**Problem:** Baseline output has pink/magenta color cast because the hardcoded matrix is for one specific camera/illuminant combination. The tune optimizer compensates, but baseline is wrong.
+**Original Problem:** RAWS used a hardcoded color matrix causing pink/magenta cast.
 
-### Root Cause
+### Implementation
 
-```cpp
-// Hardcoded in RAWS/src/main/part/sony/prepare.cpp
-metadata.color_matrix = cv::Matx33f(
-    1344.0f / 1024.0f, -211.0f / 1024.0f,  -76.0f / 1024.0f,
-      -9.0f / 1024.0f, 1224.0f / 1024.0f, -159.0f / 1024.0f,
-       7.0f / 1024.0f,  -41.0f / 1024.0f, 1090.0f / 1024.0f);
-```
+1. Parse DNGPrivateData (tag 0xc634) from IFD0 to get SR2 IFD location
+2. Read SR2 encryption parameters (tags 0x7200, 0x7201, 0x7221)
+3. Decrypt SR2SubIFD using Dave Coffin's algorithm (128-element pad array)
+4. Extract ColorMatrix from tag 0x7800 (9 × int16, fixed-point /1024)
+5. Fall back to hardcoded matrix only if tag missing
 
-Should read from Sony metadata tag 0x7310 (SR2SubIFD "Color Matrix").
+**Key Discovery:** Documentation incorrectly stated tag 0x7310 - that's BlackLevel. ColorMatrix is at **0x7800**.
 
-### Fix (in RAWS)
+### Measured Impact
 
-1. Parse tag 0x7310 from SR2SubIFD
-2. Extract 9 × int16 values (fixed-point /1024)
-3. Build cv::Matx33f from actual file values
-4. Fall back to hardcoded only if tag missing
+Example: DSC00202.ARW vs hardcoded fallback (from DSC00458.ARW):
 
-### Impact
+| Position | Per-Image | Fallback | Delta |
+|----------|-----------|----------|-------|
+| [0,0] | 1361 | 1344 | +17 |
+| [0,2] | -94 | -76 | -18 |
+| [1,0] | 66 | -9 | **+75** |
+| [1,1] | 1149 | 1224 | -75 |
+| [2,0] | 77 | 7 | **+70** |
+| [2,1] | -180 | -41 | **-139** |
+| [2,2] | 1159 | 1090 | +69 |
 
-| Scenario | Current | Fixed |
-|----------|---------|-------|
-| Baseline output | Pink cast | Correct |
-| Tune convergence | Compensates (works) | Faster (less work) |
-| Cross-camera | Wrong colors | Correct |
+Significant per-image variation confirms value of reading actual matrix.
 
-### Considerations
+### Code Location
 
-- This is a RAWS fix, not LABS
-- Current tune workflow works (optimizer compensates)
-- Fix improves baseline quality and reduces tune iterations
-- Would eliminate need for extreme WB adjustments
+- `RAWS/src/main/part/sony/prepare.cpp` - SR2SubIFD decryption and ColorMatrix extraction
 
 ---
 
@@ -344,7 +340,7 @@ The [DNG Specification](https://www.kronometric.org/phot/processing/DNG/dng_spec
 
 | Tag | Name | Purpose | Currently Used |
 |-----|------|---------|----------------|
-| 0x7310 | ColorMatrix | Camera RGB → sRGB | Hardcoded (should read) |
+| 0x7800 | ColorMatrix | Camera RGB → sRGB | ✅ Now reads per-image |
 | 0x7313 | WB_RGGB | As-shot white balance | Yes |
 | 0x7010 | ToneCurve | Linearization curve points | Yes (fixed curve) |
 | 0x7037 | DistortionCorrParams | Lens distortion spline | Yes |
@@ -420,7 +416,7 @@ XYZ_D65 = bradford_A_to_D65 * XYZ_A;
 
 ### Implementation Priority
 
-1. **Read ColorMatrix from 0x7310** - Fix hardcoded matrix (already in idea.md)
+1. ~~**Read ColorMatrix from 0x7800**~~ - ✅ DONE (was incorrectly documented as 0x7310)
 2. **Dual-illuminant interpolation** - If Sony provides Matrix1/2, interpolate by WB temp
 3. **Vignette correction** - Extract 0x2011, apply in RAWS
 4. **CA correction** - Extract 0x2012, apply in RAWS

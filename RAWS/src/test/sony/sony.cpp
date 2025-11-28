@@ -183,6 +183,9 @@ int main(int argc, char** argv) {
         rgb_output.convertTo(output_8bit, CV_8UC3, 255.0);
         cv::Mat output_cpu = output_8bit.getMat(cv::ACCESS_READ);
 
+        // Pipeline outputs RGB; convert to BGR for OpenCV imwrite
+        cv::cvtColor(output_cpu, output_cpu, cv::COLOR_RGB2BGR);
+
         // Draw sparse numbered grid for distortion reference
         int grid_spacing = 500;  // pixels between grid lines
         cv::Scalar grid_color(128, 128, 128);  // gray

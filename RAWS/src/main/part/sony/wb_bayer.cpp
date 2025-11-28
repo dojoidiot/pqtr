@@ -56,7 +56,7 @@ namespace sony
             // Map pattern code to gain positions
             switch (metadata.bayer_pattern)
             {
-            case 46: // RGGB
+            case 46: // RGGB - canonical: (0,0)=R, (0,1)=G, (1,0)=G, (1,1)=B
                 gain_pattern.at<float>(0, 0) = wb_r;
                 gain_pattern.at<float>(0, 1) = wb_g;
                 gain_pattern.at<float>(1, 0) = wb_g;

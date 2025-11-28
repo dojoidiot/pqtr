@@ -58,7 +58,11 @@ namespace sony
         {
             SONY_TAG_TONE_CURVE = 0x7010,
             SONY_TAG_DISTORTION_CORR_PARAMS = 0x7037,  // Lens distortion correction (int16s[17])
+            SONY_TAG_SR2_SUBIFD_OFFSET = 0x7200,      // SR2SubIFD offset (encrypted IFD)
+            SONY_TAG_SR2_SUBIFD_LENGTH = 0x7201,      // SR2SubIFD length
+            SONY_TAG_SR2_SUBIFD_KEY = 0x7221,         // SR2SubIFD decryption key
             SONY_TAG_WB_RGGB = 0x7313,
+            SONY_TAG_COLOR_MATRIX = 0x7800,           // Color matrix (int16s[9], /1024) - in SR2SubIFD
             // Style metadata (in MakerNotes)
             SONY_TAG_CONTRAST = 0x2004,
             SONY_TAG_SATURATION = 0x2005,
@@ -66,6 +70,33 @@ namespace sony
             SONY_TAG_CREATIVE_STYLE = 0xb020,
             SONY_TAG_DRO = 0xb04f
         };
+
+        // Sony SR2SubIFD decryption (Dave Coffin's algorithm from dcraw)
+        void decrypt_sr2(uint8_t* data, uint32_t length, uint32_t key)
+        {
+            uint32_t pad[128] = {0};  // Initialize to zero (dcraw uses static)
+            uint32_t p;
+
+            // Initialize pad array
+            for (p = 0; p < 4; p++)
+                pad[p] = key = key * 48828125 + 1;
+            pad[3] = pad[3] << 1 | (pad[0] ^ pad[2]) >> 31;
+            for (p = 4; p < 127; p++)
+                pad[p] = (pad[p-4] ^ pad[p-2]) << 1 | (pad[p-3] ^ pad[p-1]) >> 31;
+            // Convert to big-endian (htonl equivalent)
+            for (p = 0; p < 127; p++)
+                pad[p] = ((pad[p] & 0xff) << 24) | ((pad[p] & 0xff00) << 8) |
+                         ((pad[p] >> 8) & 0xff00) | ((pad[p] >> 24) & 0xff);
+
+            // Decrypt data
+            uint32_t* d = reinterpret_cast<uint32_t*>(data);
+            p = 127;  // Start at 127 (after initialization loops)
+            for (uint32_t i = 0; i < length / 4; i++)
+            {
+                p++;
+                d[i] ^= pad[(p-1) & 127] = pad[p & 127] ^ pad[(p+64) & 127];
+            }
+        }
     }
 
     bool Decoder::prepare(pqtr::Sink &source, cv::UMat &output, Info &info, RawMetadata &metadata)
@@ -125,6 +156,11 @@ namespace sony
         uint32_t preview_offset = 0;
         uint32_t preview_length = 0;
 
+        // SR2SubIFD (encrypted IFD containing ColorMatrix) - will be populated from DNGPrivateData
+        uint32_t sr2_offset = 0;
+        uint32_t sr2_length = 0;
+        uint32_t sr2_key = 0;
+
         // Parse IFD0 entries
         for (int i = 0; i < num_entries; i++)
         {
@@ -133,6 +169,33 @@ namespace sony
                 break;
 
             IFDEntry entry = parse_ifd_entry(&file_data[entry_offset]);
+
+            // DNGPrivateData (0xc634) points to SR2 IFD structure directly
+            if (entry.tag == 0xc634)
+            {
+                // The SR2 IFD starts directly at this offset
+                uint32_t sr2_ifd_offset = entry.value_offset;
+
+                if (sr2_ifd_offset + 100 <= static_cast<size_t>(file_size))
+                {
+                    uint16_t sr2_dir_entries = read_u16(&file_data[sr2_ifd_offset]);
+
+                    for (int j = 0; j < sr2_dir_entries && j < 20; j++)
+                    {
+                        uint32_t sr2_entry_offset = sr2_ifd_offset + 2 + (j * 12);
+                        if (sr2_entry_offset + 12 > static_cast<size_t>(file_size))
+                            break;
+                        IFDEntry sr2_entry = parse_ifd_entry(&file_data[sr2_entry_offset]);
+
+                        if (sr2_entry.tag == SONY_TAG_SR2_SUBIFD_OFFSET)
+                            sr2_offset = sr2_entry.value_offset;
+                        if (sr2_entry.tag == SONY_TAG_SR2_SUBIFD_LENGTH)
+                            sr2_length = sr2_entry.value_offset;
+                        if (sr2_entry.tag == SONY_TAG_SR2_SUBIFD_KEY)
+                            sr2_key = sr2_entry.value_offset;
+                    }
+                }
+            }
 
             switch (entry.tag)
             {
@@ -211,6 +274,10 @@ namespace sony
         bool found_sony_curve = false;
         bool found_sony_wb = false;
         uint16_t wb_rggb[4] = {0, 0, 0, 0};
+
+        // Color matrix from tag 0x7800 (int16s[9], values /1024)
+        bool found_color_matrix = false;
+        int16_t color_matrix_raw[9] = {0};
 
         // Initialize style metadata defaults
         metadata.creative_style = "Standard";
@@ -403,6 +470,29 @@ namespace sony
                 }
             }
 
+            // Color matrix: tag 0x7800, int16s[9] (3x3 matrix, values /1024)
+            // Note: This tag is in SR2SubIFD (encrypted), not here. Kept for fallback.
+            if (entry.tag == SONY_TAG_COLOR_MATRIX && !found_color_matrix)
+            {
+                if (entry.count == 9 && entry.value_offset + 18 <= static_cast<size_t>(file_size))
+                {
+                    for (int j = 0; j < 9; j++)
+                    {
+                        color_matrix_raw[j] = static_cast<int16_t>(
+                            read_u16(&file_data[entry.value_offset + j * 2]));
+                    }
+                    found_color_matrix = true;
+                }
+            }
+
+            // SR2SubIFD info (encrypted IFD containing ColorMatrix at 0x7800)
+            if (entry.tag == SONY_TAG_SR2_SUBIFD_OFFSET)
+                sr2_offset = get_entry_value(entry, file_data);
+            if (entry.tag == SONY_TAG_SR2_SUBIFD_LENGTH)
+                sr2_length = get_entry_value(entry, file_data);
+            if (entry.tag == SONY_TAG_SR2_SUBIFD_KEY)
+                sr2_key = get_entry_value(entry, file_data);
+
             switch (entry.tag)
             {
             case TAG_IMAGE_WIDTH:
@@ -534,17 +624,67 @@ namespace sony
             metadata.wb_rggb[3] = 1024;
         }
 
+        // Parse SR2SubIFD for ColorMatrix (tag 0x7800)
+        // SR2SubIFD is encrypted; decrypt using Dave Coffin's algorithm
+        if (sr2_offset > 0 && sr2_length > 0 && sr2_key != 0 && !found_color_matrix)
+        {
+            if (sr2_offset + sr2_length <= static_cast<size_t>(file_size))
+            {
+                // Copy and decrypt SR2SubIFD data
+                std::vector<uint8_t> sr2_data(sr2_length);
+                memcpy(sr2_data.data(), &file_data[sr2_offset], sr2_length);
+                decrypt_sr2(sr2_data.data(), sr2_length, sr2_key);
+
+                // Parse decrypted IFD
+                if (sr2_length >= 2)
+                {
+                    uint16_t sr2_num_entries = read_u16(sr2_data.data());
+                    for (int i = 0; i < sr2_num_entries && i < 200; i++)
+                    {
+                        uint32_t entry_offset = 2 + (i * 12);
+                        if (entry_offset + 12 > sr2_length)
+                            break;
+
+                        IFDEntry entry = parse_ifd_entry(&sr2_data[entry_offset]);
+
+                        if (entry.tag == SONY_TAG_COLOR_MATRIX && entry.count == 9)
+                        {
+                            // Offset in IFD entry is file offset; convert to relative
+                            uint32_t rel_offset = entry.value_offset - sr2_offset;
+                            if (rel_offset + 18 <= sr2_length)
+                            {
+                                for (int j = 0; j < 9; j++)
+                                {
+                                    color_matrix_raw[j] = static_cast<int16_t>(
+                                        read_u16(&sr2_data[rel_offset + j * 2]));
+                                }
+                                found_color_matrix = true;
+                            }
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
         // Color matrix: camera RGB → linear sRGB
-        // From Sony metadata tag 0x7310 (SR2SubIFD "Color Matrix")
-        // Values are fixed-point /1024:
-        //   1344 -211  -76
-        //     -9 1224 -159
-        //      7  -41 1090
-        // This is the pure colorimetric transform (WB not baked in)
-        metadata.color_matrix = cv::Matx33f(
-            1344.0f / 1024.0f, -211.0f / 1024.0f,  -76.0f / 1024.0f,
-              -9.0f / 1024.0f, 1224.0f / 1024.0f, -159.0f / 1024.0f,
-               7.0f / 1024.0f,  -41.0f / 1024.0f, 1090.0f / 1024.0f);
+        // Read from Sony metadata tag 0x7800 (SR2SubIFD "ColorMatrix")
+        // Values are fixed-point /1024, 3x3 row-major
+        if (found_color_matrix)
+        {
+            metadata.color_matrix = cv::Matx33f(
+                color_matrix_raw[0] / 1024.0f, color_matrix_raw[1] / 1024.0f, color_matrix_raw[2] / 1024.0f,
+                color_matrix_raw[3] / 1024.0f, color_matrix_raw[4] / 1024.0f, color_matrix_raw[5] / 1024.0f,
+                color_matrix_raw[6] / 1024.0f, color_matrix_raw[7] / 1024.0f, color_matrix_raw[8] / 1024.0f);
+        }
+        else
+        {
+            // Fallback: hardcoded matrix (from DSC00458.ARW)
+            metadata.color_matrix = cv::Matx33f(
+                1344.0f / 1024.0f, -211.0f / 1024.0f,  -76.0f / 1024.0f,
+                  -9.0f / 1024.0f, 1224.0f / 1024.0f, -159.0f / 1024.0f,
+                   7.0f / 1024.0f,  -41.0f / 1024.0f, 1090.0f / 1024.0f);
+        }
 
         // Active area crop - removes optical black borders
         // Read from DNG DefaultCropOrigin/DefaultCropSize tags
