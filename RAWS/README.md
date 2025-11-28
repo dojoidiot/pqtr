@@ -15,6 +15,22 @@ Camera RAW ──► [RAWS] ──► scene-linear RGB ──► [LABS]
                     (format auto-detection)
 ```
 
+### Separation of Concerns
+
+**RAWS extracts canonical data. TUNE applies style.**
+
+| RAWS does | RAWS does NOT |
+|-----------|---------------|
+| Decompress sensor data | Apply tone curves |
+| Black level subtraction | Add contrast/saturation |
+| White balance (camera-reported) | Match camera JPEG appearance |
+| Demosaic | Make "pleasing" output |
+| ColorMatrix → standard colorspace | Any stylistic decisions |
+
+**RAWS output will look flat and desaturated.** This is correct—scene-linear data has no tone curve or color grading. The camera JPEG look is achieved by TUNE, not RAWS.
+
+**Validation:** If TUNE achieves low error rates, RAWS is extracting correct data. Visual appearance of raw RAWS output is not a validation criterion.
+
 - **Produces**: `RAWS.a` static library
 - **Exposes**: `raws::decode(Sink&)` → `raws::Result`
 - **Used by**: LABS (links into `labs.a`)

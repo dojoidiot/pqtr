@@ -134,6 +134,21 @@ RAWS (RAW decoder library)
 | **Pipeline** | LABS | Core processing engine. Stable library exposing `pipe::Pipe` for HEAD→BODY→TAIL processing. |
 | **Apps** | DESK/FAST/PLAY | User interfaces. DESK creates Vibes, FAST/PLAY consume them. |
 
+### Architecture: RAWS vs TUNE
+
+**Critical principle:** RAWS and TUNE have distinct responsibilities.
+
+| | RAWS | TUNE |
+|---|------|------|
+| **Purpose** | Canonical extraction | Style optimization |
+| **Output** | Scene-referred linear RGB | Display-referred, reference-matched |
+| **Camera-specific** | Yes (decoding) | No (camera-agnostic transforms) |
+| **Style decisions** | None | All |
+
+**RAWS output will NOT look like a camera JPEG.** This is correct—scene-linear data is flat and desaturated before display transforms. The camera JPEG is just one style that TUNE can match.
+
+**Validation:** TUNE error rates, not visual appearance of RAWS output. If TUNE achieves low error, RAWS is working correctly.
+
 ## Dependency Wiring
 
 The `wire.sh` script manages cross-project dependencies by creating symbolic links.

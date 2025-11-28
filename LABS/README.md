@@ -21,6 +21,21 @@ LABS sits between raw decoding and end-user applications:
 
 LABS knows nothing about camera-specific decoding—it calls `raws::decode()` and receives scene-linear RGB. When new cameras are added to RAWS, LABS works unchanged.
 
+### Separation of Concerns: RAWS vs TUNE
+
+**RAWS extracts. TUNE transforms.**
+
+| RAWS (upstream) | TUNE (in LABS) |
+|-----------------|----------------|
+| Canonical extraction | Style optimization |
+| Scene-referred linear RGB | Display-referred output |
+| Camera-specific decoding | Camera-agnostic transforms |
+| No style decisions | All style decisions |
+
+**The camera JPEG is just one style.** TUNE finds transforms to match any reference—camera JPEG, film emulation, or custom look. RAWS provides neutral, canonical data that TUNE can shape into any style.
+
+**Validation:** TUNE error rates prove RAWS correctness. If TUNE achieves low error, the extraction is working. Don't judge RAWS by visual appearance—scene-linear data looks flat before style transforms.
+
 ## Project Structure
 
 ```
