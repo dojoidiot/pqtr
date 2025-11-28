@@ -8,17 +8,20 @@
 
 namespace sony
 {
-    // Process to scene-linear RGB (HEAD output)
+    // Process to camera-native RGB (HEAD output)
     //
-    // CANONICAL PIPELINE ORDER (scene-referred):
+    // MINIMAL PIPELINE (sensor data extraction only):
     //   1. BLC on Bayer    - subtract black level, normalize
-    //   2. WB on Bayer     - apply gains before color interpolation
-    //   3. Demosaic        - Bayer → RGB
-    //   4. Color Matrix    - camera RGB → linear sRGB
-    //   5. Undistort       - lens distortion correction
-    //   6. Crop            - remove optical black borders
+    //   2. Demosaic        - Bayer → RGB
+    //   3. Crop            - remove optical black borders
     //
-    // Output is scene-linear sRGB, ready for BODY modules (styling/grading)
+    // DEFERRED TO LABS:
+    //   - WB (white balance)     → passed as metadata, applied by LABS
+    //   - Color Matrix           → passed as metadata, applied by LABS
+    //   - Undistort              → passed as metadata, applied by LABS
+    //
+    // Output is camera-native RGB (no WB, no color matrix).
+    // LABS applies WB + matrix using metadata, or optimizer learns transform.
     //
     bool Decoder::process_linear(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb)
     {
@@ -33,46 +36,28 @@ namespace sony
                 return false;
             }
 
-            // Stage 2: WB on Bayer (CV_32FC1 → CV_32FC1)
-            // Applies per-channel gains to Bayer pattern before demosaic
-            // This is the correct place for WB - on raw sensor data
-            cv::UMat bayer_wb;
-            if (!wb_bayer(bayer_blc, bayer_wb, metadata))
-            {
-                std::cerr << "[process_linear] WB failed" << std::endl;
-                return false;
-            }
+            // WB SKIPPED - deferred to LABS
+            // Metadata contains wb_rggb for LABS to apply
 
-            // Stage 3: Demosaic (CV_32FC1 → CV_32FC3 RGB)
+            // Stage 2: Demosaic (CV_32FC1 → CV_32FC3 RGB)
             // Converts Bayer pattern to RGB (not BGR)
-            cv::UMat rgb_linear;
-            if (!demosaic(bayer_wb, rgb_linear, metadata))
+            // Note: Without WB, colors will have strong green cast - this is expected
+            cv::UMat rgb_native;
+            if (!demosaic(bayer_blc, rgb_native, metadata))
             {
                 std::cerr << "[process_linear] Demosaic failed" << std::endl;
                 return false;
             }
 
-            // Stage 4: Color Matrix (CV_32FC3 → CV_32FC3)
-            // Transforms camera-native RGB to linear sRGB working space
-            cv::UMat rgb_srgb;
-            if (!color_matrix(rgb_linear, rgb_srgb, metadata))
-            {
-                std::cerr << "[process_linear] Color Matrix failed" << std::endl;
-                return false;
-            }
+            // COLOR MATRIX SKIPPED - deferred to LABS
+            // Metadata contains color_matrix for LABS to apply
 
-            // Stage 5: Undistort (CV_32FC3 → CV_32FC3)
-            // Corrects lens barrel/pincushion distortion using Sony coefficients
-            cv::UMat rgb_undistort;
-            if (!undistort(rgb_srgb, rgb_undistort, metadata))
-            {
-                std::cerr << "[process_linear] Undistort failed" << std::endl;
-                return false;
-            }
+            // UNDISTORT SKIPPED - deferred to LABS
+            // Metadata contains distortion_params for LABS to apply
 
-            // Stage 6: Crop (CV_32FC3 → CV_32FC3)
+            // Stage 3: Crop (CV_32FC3 → CV_32FC3)
             // Removes optical black border pixels
-            if (!crop(rgb_undistort, rgb, metadata))
+            if (!crop(rgb_native, rgb, metadata))
             {
                 std::cerr << "[process_linear] Crop failed" << std::endl;
                 return false;

@@ -4,8 +4,7 @@
 // Provides serialization for all LABS data types:
 // - tune::Data (loss metrics)
 // - 3D LUT (17³ color transform)
-// - pipe::Link (edit steps) - future
-// - tune::Result (optimization results) - future
+// - pipe::Link (edit steps / dial values)
 //
 // See data.md for format specification.
 
@@ -73,5 +72,27 @@ namespace data
         ::tune::Data load(const std::string& path);
 
     } // namespace tune
+
+    // ============================================================
+    // Link Serialization (Edit Steps)
+    // ============================================================
+
+    namespace link
+    {
+        // Serialize a Link to JSON string
+        // Only saves dials that have been explicitly set
+        std::string toJson(pipe::Body::Link& link);
+
+        // Apply JSON settings to a Link
+        // Link must already exist in body; this sets dial values
+        bool fromJson(pipe::Body::Link& link, const std::string& json);
+
+        // Save Link to file
+        bool save(pipe::Body::Link& link, const std::string& path);
+
+        // Load Link settings from file and apply to existing Link
+        bool load(pipe::Body::Link& link, const std::string& path);
+
+    } // namespace link
 
 } // namespace data
