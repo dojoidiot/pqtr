@@ -495,6 +495,135 @@ Specific questions to verify:
 
 ---
 
+## Architecture: RAWS vs TUNE Separation of Concerns
+
+**Status:** Documented 2024-11. Core architectural principle.
+
+### The Boundary
+
+```
+RAWS (Extraction)                    TUNE/LABS (Optimization)
+─────────────────────────────        ─────────────────────────────
+Decompress sensor data               Linear transforms (exposure, curves)
+Black level subtraction              Display-referred transforms
+Normalize to [0,1]                   Tone mapping, gamma
+White balance (camera-reported)      Color grading, saturation
+Demosaic                             Geometric LUTs
+ColorMatrix → standard colorspace    Style matching
+
+OUTPUT: Scene-referred               OUTPUT: Display-referred
+        Linear RGB                           sRGB (or target space)
+        Camera-agnostic                      Reference-matched
+```
+
+### Key Insight
+
+**RAWS output will NOT look like a camera JPEG.** This is correct behavior, not a bug.
+
+Scene-referred linear data:
+- Has no tone curve (looks flat, low contrast)
+- Has no saturation boost (looks desaturated)
+- Has no manufacturer color science (looks "neutral")
+- Has HDR headroom (values can exceed 1.0)
+
+Camera JPEGs have:
+- Proprietary tone curves
+- Color rendering / "film simulation" / creative styles
+- Contrast and saturation adjustments
+- Clipped to display range
+
+**The camera JPEG is just one possible style.** TUNE's job is to find the transforms that match *any* reference - camera JPEG, film emulation, or custom look.
+
+### Validation Criteria
+
+**RAWS is correct if:**
+1. Same camera → TUNE finds consistent transforms across images
+2. Different cameras → TUNE finds different transforms, but all match their reference
+3. TUNE error rates are low → extraction is providing usable canonical data
+
+**RAWS is NOT validated by:**
+- Visual match to camera JPEG (that's TUNE's job)
+- "Pleasing" colors (subjective, style-dependent)
+- Looking like other RAW converters' default output (they apply hidden curves)
+
+### Why This Matters
+
+If RAWS tried to match camera JPEG directly:
+- Would bake in one manufacturer's style
+- Different cameras would need different RAWS code paths
+- TUNE would have nothing to optimize
+- Custom styles would be impossible
+
+By keeping RAWS neutral and canonical:
+- All style decisions are in TUNE/LABS
+- Same pipeline works for any camera (once extraction is implemented)
+- Any reference can be matched (JPEG, film, custom)
+- Full creative control preserved
+
+### Practical Implication
+
+When RAWS output looks "wrong" (flat, pink, desaturated):
+1. **Don't** chase visual match to JPEG in RAWS code
+2. **Do** verify data is mathematically correct (black levels, WB gains, matrix values)
+3. **Do** run TUNE and check if it achieves low error rates
+4. **If** TUNE succeeds → RAWS is working, "wrong" appearance is expected
+5. **If** TUNE fails → investigate RAWS data quality
+
+---
+
+## RAWS: Baseline Appearance Notes
+
+**Status:** Expected behavior. Documented for reference.
+
+**Observation:** RAWS output appears cyan/pink compared to embedded JPEG preview.
+
+### Understanding (2024-11)
+
+This is **not a bug** but the expected appearance of scene-referred linear data before style transforms.
+
+**What RAWS outputs:**
+- Scene-linear RGB in standard colorspace
+- Camera white balance applied (neutrals are neutral)
+- No tone curve, no saturation boost, no contrast
+
+**What camera JPEG has:**
+- Sony's proprietary color science
+- DRO (Dynamic Range Optimizer) shadow lift
+- Creative Style processing
+- sRGB gamma curve
+
+The visual difference is entirely explained by missing display transforms.
+
+**Validation:** TUNE achieves low error rates on real images → decompression and extraction are correct.
+
+### Investigation Record
+
+Ruled out as causes (2024-11 debugging session):
+- Bayer pattern interpretation (RGGB confirmed correct)
+- WB gain mapping
+- ColorMatrix application
+- Linearization curve
+- ARW2 decompression interleaving
+
+Confirmed working:
+- ARW2 decompression (verified via stripes test)
+- Per-image ColorMatrix extraction (matches exiftool)
+- Canonical pipeline order
+
+### If Future Issues Arise
+
+Only investigate RAWS if:
+1. TUNE cannot converge (error rates stay high)
+2. Systematic artifacts appear (banding, wrong colors in specific regions)
+3. Cross-camera comparison shows one camera worse than others
+
+Approach:
+1. Compare raw pixel values against dcraw/LibRaw LINEAR output (not default)
+2. Verify black level subtraction values
+3. Check WB gain normalization
+
+---
+
 ## See Also
 
 - [analysis.md](./analysis.md) - Empirical findings and research
