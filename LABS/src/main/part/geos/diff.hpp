@@ -1,6 +1,6 @@
 // diff.hpp
 // Internal: Loss metric computation helpers
-// Not a public header - used only within tune module
+// Not a public header - used only within geos module
 
 #pragma once
 
@@ -8,7 +8,7 @@
 #include <array>
 #include <utility>
 
-namespace tune::internal
+namespace geos::internal
 {
     // Constants
     constexpr int PROXY_SIZE = 512;
@@ -41,4 +41,4 @@ namespace tune::internal
     // Laplacian variance for sharpness measurement
     float laplacianVariance(const cv::UMat& image);
 
-} // namespace tune::internal
+} // namespace geos::internal

@@ -1,36 +1,40 @@
 # RAWS Top-Level Makefile
 #
 # Usage:
-#   make           # Build library (raws.a)
+#   make           # Build library (RAWS.a)
 #   make test      # Build and run tests
+#   make test-all  # Run full test suite
 #   make all       # Build everything
 #   make clean     # Clean all build artifacts
 
-.PHONY: all lib test clean help
+.PHONY: all lib test test-all clean help
 
 help:
 	@echo "RAWS Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  lib     Build raws.a library"
-	@echo "  test    Build and run sony test"
-	@echo "  all     Build everything"
-	@echo "  clean   Remove all build artifacts"
+	@echo "  lib       Build RAWS.a library"
+	@echo "  test      Run sony decoder test"
+	@echo "  test-all  Run full test suite (+ distortion)"
+	@echo "  all       Build everything"
+	@echo "  clean     Remove all build artifacts"
 
 # Default: build library
 lib:
 	$(MAKE) -f Makefile.raws
 
-# Test: build library, then test binaries, then run
+# Quick test
 test: lib
-	$(MAKE) -f Makefile.sony
-	@echo ""
-	@echo "Running sony decoder test..."
-	LD_LIBRARY_PATH=../LABS/lib/opencv/build/lib tmp/bin/sony var/sony.ARW
+	$(MAKE) -f Makefile.sony test
 
-# All: library + tests
+# Full test suite
+test-all: lib
+	$(MAKE) -f Makefile.sony test
+	$(MAKE) -f Makefile.sony test-dist
+
+# All: library + test binaries
 all: lib
-	$(MAKE) -f Makefile.sony
+	$(MAKE) -f Makefile.sony all
 
 # Clean everything
 clean:

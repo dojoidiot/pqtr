@@ -9,7 +9,7 @@
 // Usage: test_diff <input.ARW> <output_dir>
 
 #include <pipe.hpp>
-#include <tune.hpp>
+#include <geos.hpp>
 #include <sink.hpp>
 #include <hold.hpp>
 #include <tool.hpp>
@@ -24,11 +24,11 @@ struct TestResult {
 };
 
 // Test spectral loss with identical images
-TestResult test_identical(tune::Task& task, tune::View& img)
+TestResult test_identical(geos::Task& task, geos::View& img)
 {
     TestResult r;
 
-    tune::Data loss = task.diff(img);
+    geos::Data loss = task.diff(img);
 
     // Allow small floating point errors (including -0.0)
     if (loss.spectral < -0.001f) {
@@ -48,18 +48,18 @@ TestResult test_identical(tune::Task& task, tune::View& img)
 }
 
 // Test spectral loss with modified image
-TestResult test_modified(tune::Task& task, tune::View& original)
+TestResult test_modified(geos::Task& task, geos::View& original)
 {
     TestResult r;
 
     // Create modified version (shift colors)
-    tune::View modified;
+    geos::View modified;
     original.copyTo(modified);
 
     // Add color shift
     cv::add(modified, cv::Scalar(20, 0, -20), modified);
 
-    tune::Data loss = task.diff(modified);
+    geos::Data loss = task.diff(modified);
 
     if (loss.spectral < 0.0f) {
         r.message = "Negative spectral loss";
@@ -78,20 +78,20 @@ TestResult test_modified(tune::Task& task, tune::View& original)
 }
 
 // Test loss ordering (more different = higher loss)
-TestResult test_ordering(tune::Task& task, tune::View& original)
+TestResult test_ordering(geos::Task& task, geos::View& original)
 {
     TestResult r;
 
     // Create two levels of modification
-    tune::View small_mod, large_mod;
+    geos::View small_mod, large_mod;
     original.copyTo(small_mod);
     original.copyTo(large_mod);
 
     cv::add(small_mod, cv::Scalar(10, 0, -10), small_mod);
     cv::add(large_mod, cv::Scalar(40, 0, -40), large_mod);
 
-    tune::Data small_loss = task.diff(small_mod);
-    tune::Data large_loss = task.diff(large_mod);
+    geos::Data small_loss = task.diff(small_mod);
+    geos::Data large_loss = task.diff(large_mod);
 
     if (large_loss.spectral <= small_loss.spectral) {
         r.message = "Ordering wrong: small=" + std::to_string(small_loss.spectral * 100) +
@@ -106,16 +106,16 @@ TestResult test_ordering(tune::Task& task, tune::View& original)
 }
 
 // Test visual diff output
-TestResult test_visual_diff(tune::Task& task, tune::View& original, const std::string& outputDir)
+TestResult test_visual_diff(geos::Task& task, geos::View& original, const std::string& outputDir)
 {
     TestResult r;
 
     // Create modified version
-    tune::View modified;
+    geos::View modified;
     original.copyTo(modified);
     cv::add(modified, cv::Scalar(30, -15, -30), modified);
 
-    tune::View diffView = task.view(modified, 5.0f);
+    geos::View diffView = task.view(modified, 5.0f);
 
     if (diffView.empty()) {
         r.message = "Visual diff returned empty";
@@ -163,7 +163,7 @@ int main(int argc, char** argv)
         }
 
         // Get image for testing (use body view at 512px)
-        tune::View testImg = head->body(512).view();
+        geos::View testImg = head->body(512).view();
 
         if (testImg.empty()) {
             std::cerr << "Failed to get test image" << std::endl;
@@ -174,7 +174,7 @@ int main(int argc, char** argv)
         std::cout << std::endl;
 
         // Create tune task with test image as target
-        pqtr::Hold<tune::Task> task = tune::make(testImg);
+        pqtr::Hold<geos::Task> task = geos::make(testImg);
 
         std::cout << "Running tests..." << std::endl;
         std::cout << std::endl;

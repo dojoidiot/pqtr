@@ -1,10 +1,10 @@
 // labs.cpp
-// Pipe runner: Processes RAW through pipeline with optional edit settings
+// Pipe runner: Processes RAW through pipeline with optional tune settings
 //
 // WORKFLOW:
-//   labs <source.ARW> --output tail.png [--edit edit.json]
+//   labs <source.ARW> --output tail.png [--link link.json]
 //   → Loads RAW through HEAD (decode + color science)
-//   → If edit.json provided, loads Link settings into BODY
+//   → If link.json provided, loads Link settings into BODY
 //   → Runs BODY → TAIL → saves output image
 //
 // Usage:
@@ -12,12 +12,12 @@
 //
 // Options:
 //   --output <image.png>    Output file (required)
-//   --edit <edit.json>      Apply Link settings from tune
+//   --link <link.json>      Apply Link settings from tune
 //   --size <pixels>         Max output dimension (default: 0 = full resolution)
 //
 // Examples:
 //   labs photo.ARW --output photo.png                    # Baseline (no edits)
-//   labs photo.ARW --output photo.png --edit edit.json   # With optimized settings
+//   labs photo.ARW --output photo.png --link style.json  # With optimized settings
 //   labs photo.ARW --output thumb.png --size 1080        # Social media size
 
 #include <tool.hpp>
@@ -33,12 +33,19 @@ void printUsage(const char* prog)
     std::cerr << "Usage: " << prog << " <source.ARW> --output <image.png> [options]\n\n";
     std::cerr << "Options:\n";
     std::cerr << "  --output <image.png>    Output file (required)\n";
-    std::cerr << "  --edit <edit.json>      Apply Link settings from tune\n";
+    std::cerr << "  --link <link.json>      Apply Link settings from tune\n";
     std::cerr << "  --size <pixels>         Max output dimension (default: full res)\n";
 }
 
 int main(int argc, char** argv)
 {
+    // Handle --help before minimum argument check
+    for (int i = 1; i < argc; i++)
+    {
+        std::string arg = argv[i];
+        if (arg == "--help" || arg == "-h") { printUsage(argv[0]); return 0; }
+    }
+
     if (argc < 2)
     {
         printUsage(argv[0]);
@@ -48,16 +55,16 @@ int main(int argc, char** argv)
     // Parse arguments
     std::string sourcePath = argv[1];
     std::string outputPath;
-    std::string editPath;
+    std::string linkPath;
     int maxSize = 0;
 
     for (int i = 2; i < argc; i++)
     {
         std::string arg = argv[i];
         if (arg == "--output" && i + 1 < argc) outputPath = argv[++i];
-        else if (arg == "--edit" && i + 1 < argc) editPath = argv[++i];
+        else if (arg == "--link" && i + 1 < argc) linkPath = argv[++i];
         else if (arg == "--size" && i + 1 < argc) maxSize = std::stoi(argv[++i]);
-        else if (arg == "--help" || arg == "-h") { printUsage(argv[0]); return 0; }
+        else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
 
@@ -73,7 +80,7 @@ int main(int argc, char** argv)
         std::cout << "=== LABS ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
         std::cout << "Output: " << outputPath << std::endl;
-        if (!editPath.empty()) std::cout << "Edit: " << editPath << std::endl;
+        if (!linkPath.empty()) std::cout << "Link: " << linkPath << std::endl;
         if (maxSize > 0) std::cout << "Size: " << maxSize << "px" << std::endl;
 
         // Create pipe and load RAW
@@ -95,30 +102,30 @@ int main(int argc, char** argv)
         std::cout << "\n[BODY] Processing..." << std::endl;
         pipe::Body& body = head->body(0);
 
-        // Load edit settings if provided
-        if (!editPath.empty())
+        // Load link settings if provided
+        if (!linkPath.empty())
         {
-            std::cout << "  Loading edit: " << editPath << std::endl;
+            std::cout << "  Loading link: " << linkPath << std::endl;
 
             // Check file exists
-            std::ifstream check(editPath);
+            std::ifstream check(linkPath);
             if (!check.good())
             {
-                throw std::runtime_error("Edit file not found: " + editPath);
+                throw std::runtime_error("Link file not found: " + linkPath);
             }
             check.close();
 
             // Add link and load settings
-            pipe::Body::Link& link = body.add("edit");
-            if (!data::link::load(link, editPath))
+            pipe::Body::Link& link = body.add("tune");
+            if (!data::link::load(link, linkPath))
             {
-                throw std::runtime_error("Failed to load edit: " + editPath);
+                throw std::runtime_error("Failed to load link: " + linkPath);
             }
             std::cout << "  Applied!" << std::endl;
         }
         else
         {
-            std::cout << "  No edit file (baseline output)" << std::endl;
+            std::cout << "  No link file (baseline output)" << std::endl;
         }
 
         // Save via TAIL

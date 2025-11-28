@@ -1,13 +1,13 @@
 // edge.hpp
 // Internal: Golden section optimizer for detail dials (4 parameters)
-// Not a public header - used only within tune module
+// Not a public header - used only within geos module
 
 #pragma once
 
-#include <tune.hpp>
+#include <geos.hpp>
 #include "diff.hpp"
 
-namespace tune::internal
+namespace geos::internal
 {
 
     // Run golden section optimization on detail dials
@@ -20,4 +20,4 @@ namespace tune::internal
         Callback progress
     );
 
-} // namespace tune::internal
+} // namespace geos::internal

@@ -15,9 +15,47 @@ Camera RAW ──► [RAWS] ──► scene-linear RGB ──► [LABS]
                     (format auto-detection)
 ```
 
-- **Produces**: `raws.a` static library
+- **Produces**: `RAWS.a` static library
 - **Exposes**: `raws::decode(Sink&)` → `raws::Result`
 - **Used by**: LABS (links into `labs.a`)
+
+## Project Structure
+
+```
+RAWS/
+├── inc/
+│   └── raws.hpp              # Public API
+├── lib/
+│   └── RAWS.a                # Built library
+├── src/
+│   ├── main/
+│   │   ├── raws.cpp          # Format detection, dispatch
+│   │   └── part/
+│   │       ├── sony.cpp      # Sony decoder entry
+│   │       ├── sony.h        # Sony internal header
+│   │       └── sony/         # Sony pipeline stages
+│   └── test/
+│       └── sony/             # Sony decoder tests
+│           ├── sony.cpp      # Main decoder test
+│           └── distortion.cpp
+├── tmp/
+│   ├── obj/                  # Build objects
+│   ├── bin/                  # Test binaries
+│   └── var/                  # Test output
+├── Makefile                  # Top-level (delegates)
+├── Makefile.raws             # Builds lib/RAWS.a
+└── Makefile.sony             # Sony decoder tests
+```
+
+## Building
+
+```bash
+make              # Build lib/RAWS.a (default)
+make test         # Run sony decoder test
+make test-all     # Run full test suite (+ distortion)
+make all          # Build everything
+make clean        # Clean all artifacts
+```
 
 ## Supported Formats
 
@@ -47,45 +85,14 @@ namespace raws {
 
 LABS calls `raws::decode()` and receives scene-linear RGB. It knows nothing about Sony, Canon, or Nikon internals.
 
-## Project Structure
-
-```
-RAWS/
-├── inc/
-│   └── raws.hpp          # Public API
-├── lib/
-│   └── raws.a            # Built library
-├── src/
-│   ├── main/
-│   │   └── raws.cpp      # Format detection, dispatch
-│   └── main/part/
-│       ├── sony.h        # Sony decoder (internal)
-│       ├── sony.cpp
-│       └── sony/         # Sony pipeline stages
-├── doc/
-│   └── sony.md           # Sony technical docs
-├── Makefile.raws         # Builds raws.a
-└── Makefile.sony         # Builds standalone test binary
-```
-
-## Building
-
-```bash
-# Library (used by LABS)
-make -f Makefile.raws     # Produces lib/raws.a
-
-# Standalone test binary (for decoder development)
-make -f Makefile.sony     # Produces tmp/sony/sony
-./tmp/sony/sony var/sony.ARW
-```
-
 ## Adding a New Format
 
-1. Create `src/main/part/<format>.h` and `src/main/part/<format>/` directory
+1. Create `src/main/part/<format>.cpp` and `src/main/part/<format>/` directory
 2. Implement decoder following Sony pattern (prepare → process_linear)
 3. Add format detection in `src/main/raws.cpp`
 4. Add source files to `Makefile.raws`
-5. Create `doc/<format>.md` for technical documentation
+5. Create test in `src/test/<format>/`
+6. Create `doc/<format>.md` for technical documentation
 
 The key contract: return `pipe::View` (CV_32FC3) containing scene-linear sRGB in [0,1+] range.
 

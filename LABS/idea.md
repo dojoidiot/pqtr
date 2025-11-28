@@ -1,3 +1,5 @@
+
+
 Here is a summary of our reverse-engineering process so far. We are working to mathematically replicate a **Sony "Standard" Camera Profile** by comparing a raw **Linear image** to a processed **Display image**.
 
 We have discovered that the transformation is not a simple curve, but a **three-stage pipeline** following the DCP (DNG Camera Profile) standard.
@@ -162,3 +164,7 @@ The question is: do we have sufficient color coverage in our test images, or do 
 - [DCamProf Documentation](http://rawtherapee.com/mirror/dcamprof/dcamprof.html)
 - [DCP Files Structure](https://dcptool.sourceforge.net/DCP%20FIles.html)
 - [RawPedia Color Management](https://rawpedia.rawtherapee.com/Color_Management)
+
+is our diff the correct model - does it need more.
+pipe is colour science space only - but RAWS decoder can add meta tags in a standard language between the two
+can 

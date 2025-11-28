@@ -1,8 +1,8 @@
 # RAWS Library Makefile
-# Builds lib/raws.a static library
+# Builds lib/RAWS.a static library
 #
 # Exposes:
-#   - raws::decode() (auto-detecting RAW decoder)
+#   - sony::Decoder (Sony ARW RAW decoder)
 
 # Compiler
 CXX = g++
@@ -22,66 +22,70 @@ INCLUDES = $(OPENCV_INCLUDE) \
            -I../LABS/inc
 
 # Directories
-OBJ_DIR = tmp/raws/obj
+SRC_DIR = src/main
+TMP_DIR = tmp/libs
+OBJ_DIR = $(TMP_DIR)/obj
 LIB_DIR = lib
 
-# Source files - public API
-API_SRCS = src/main/raws.cpp
+# Sony decoder sources (part)
+SONY_SRCS = $(SRC_DIR)/part/sony.cpp \
+            $(SRC_DIR)/part/sony/prepare.cpp \
+            $(SRC_DIR)/part/sony/process.cpp \
+            $(SRC_DIR)/part/sony/blc.cpp \
+            $(SRC_DIR)/part/sony/blc_bayer.cpp \
+            $(SRC_DIR)/part/sony/wb_gain.cpp \
+            $(SRC_DIR)/part/sony/wb_bayer.cpp \
+            $(SRC_DIR)/part/sony/demosaic.cpp \
+            $(SRC_DIR)/part/sony/color_matrix.cpp \
+            $(SRC_DIR)/part/sony/undistort.cpp \
+            $(SRC_DIR)/part/sony/crop.cpp \
+            $(SRC_DIR)/part/sony/gamma_oetf.cpp
 
-# Source files - Sony decoder (internal)
-SONY_DIR = src/main/part
-SONY_SRCS = $(SONY_DIR)/sony.cpp \
-            $(SONY_DIR)/sony/prepare.cpp \
-            $(SONY_DIR)/sony/process.cpp \
-            $(SONY_DIR)/sony/blc.cpp \
-            $(SONY_DIR)/sony/blc_bayer.cpp \
-            $(SONY_DIR)/sony/wb_gain.cpp \
-            $(SONY_DIR)/sony/wb_bayer.cpp \
-            $(SONY_DIR)/sony/demosaic.cpp \
-            $(SONY_DIR)/sony/color_matrix.cpp \
-            $(SONY_DIR)/sony/undistort.cpp \
-            $(SONY_DIR)/sony/crop.cpp \
-            $(SONY_DIR)/sony/gamma_oetf.cpp
+# RAWS API sources
+RAWS_SRCS = $(SRC_DIR)/raws.cpp
 
 # Object files
-OBJS = $(OBJ_DIR)/raws.o \
-       $(OBJ_DIR)/sony.o \
-       $(OBJ_DIR)/sony/prepare.o \
-       $(OBJ_DIR)/sony/process.o \
-       $(OBJ_DIR)/sony/blc.o \
-       $(OBJ_DIR)/sony/blc_bayer.o \
-       $(OBJ_DIR)/sony/wb_gain.o \
-       $(OBJ_DIR)/sony/wb_bayer.o \
-       $(OBJ_DIR)/sony/demosaic.o \
-       $(OBJ_DIR)/sony/color_matrix.o \
-       $(OBJ_DIR)/sony/undistort.o \
-       $(OBJ_DIR)/sony/crop.o \
-       $(OBJ_DIR)/sony/gamma_oetf.o
+SONY_OBJS = $(OBJ_DIR)/sony/sony.o \
+            $(OBJ_DIR)/sony/prepare.o \
+            $(OBJ_DIR)/sony/process.o \
+            $(OBJ_DIR)/sony/blc.o \
+            $(OBJ_DIR)/sony/blc_bayer.o \
+            $(OBJ_DIR)/sony/wb_gain.o \
+            $(OBJ_DIR)/sony/wb_bayer.o \
+            $(OBJ_DIR)/sony/demosaic.o \
+            $(OBJ_DIR)/sony/color_matrix.o \
+            $(OBJ_DIR)/sony/undistort.o \
+            $(OBJ_DIR)/sony/crop.o \
+            $(OBJ_DIR)/sony/gamma_oetf.o
 
-# Target
-RAWS_A = $(LIB_DIR)/raws.a
+RAWS_OBJS = $(OBJ_DIR)/raws.o
 
-.PHONY: all clean
+ALL_OBJS = $(RAWS_OBJS) $(SONY_OBJS)
+
+# Target static library
+RAWS_A = $(LIB_DIR)/RAWS.a
+
+.PHONY: all clean info
 
 all: $(RAWS_A)
 
-$(RAWS_A): $(OBJS) | $(LIB_DIR)
+$(RAWS_A): $(ALL_OBJS) | $(LIB_DIR)
 	ar rcs $@ $^
 	@echo "Built: $@"
 
-# Public API
-$(OBJ_DIR)/raws.o: src/main/raws.cpp | $(OBJ_DIR)
+# RAWS API object
+$(OBJ_DIR)/raws.o: $(SRC_DIR)/raws.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Sony decoder
-$(OBJ_DIR)/sony.o: $(SONY_DIR)/sony.cpp | $(OBJ_DIR)
+# Sony decoder object
+$(OBJ_DIR)/sony/sony.o: $(SRC_DIR)/part/sony.cpp | $(OBJ_DIR)/sony
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Sony submodules
-$(OBJ_DIR)/sony/%.o: $(SONY_DIR)/sony/%.cpp | $(OBJ_DIR)/sony
+# Sony submodule objects
+$(OBJ_DIR)/sony/%.o: $(SRC_DIR)/part/sony/%.cpp | $(OBJ_DIR)/sony
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Directories
+# Directory creation
 $(LIB_DIR):
 	mkdir -p $(LIB_DIR)
 
@@ -92,4 +96,9 @@ $(OBJ_DIR)/sony:
 	mkdir -p $(OBJ_DIR)/sony
 
 clean:
-	rm -rf tmp/raws $(RAWS_A)
+	rm -rf $(TMP_DIR) $(RAWS_A)
+
+info:
+	@echo "Target: $(RAWS_A)"
+	@echo "Objects: $(ALL_OBJS)"
+	@echo "OpenCV: $(OPENCV_ROOT)"

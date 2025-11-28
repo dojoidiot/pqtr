@@ -1,5 +1,5 @@
 // data.cpp
-// Serialization for tune data types and 3D LUT
+// Serialization for geos data types and 3D LUT
 
 #include <data.hpp>
 #include <fstream>
@@ -156,13 +156,13 @@ std::vector<float> load(const std::string& path, int& gridSize)
 } // namespace data::lut
 
 // ============================================================
-// Tune Data (Loss Metrics)
+// Geos Data (Loss Metrics)
 // ============================================================
 
-namespace data::tune
+namespace data::geos
 {
 
-std::string toJson(const ::tune::Data& d)
+std::string toJson(const ::geos::Data& d)
 {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(6);
@@ -173,9 +173,9 @@ std::string toJson(const ::tune::Data& d)
     return ss.str();
 }
 
-::tune::Data fromJson(const std::string& json)
+::geos::Data fromJson(const std::string& json)
 {
-    ::tune::Data d;
+    ::geos::Data d;
     size_t pos = json.find("\"spectral\"");
     if (pos != std::string::npos)
     {
@@ -193,7 +193,7 @@ std::string toJson(const ::tune::Data& d)
     return d;
 }
 
-bool save(const ::tune::Data& d, const std::string& path)
+bool save(const ::geos::Data& d, const std::string& path)
 {
     std::ofstream file(path);
     if (!file.is_open())
@@ -203,17 +203,17 @@ bool save(const ::tune::Data& d, const std::string& path)
     return true;
 }
 
-::tune::Data load(const std::string& path)
+::geos::Data load(const std::string& path)
 {
     std::ifstream file(path);
     if (!file.is_open())
-        return ::tune::Data{};
+        return ::geos::Data{};
     std::stringstream buffer;
     buffer << file.rdbuf();
     return fromJson(buffer.str());
 }
 
-} // namespace data::tune
+} // namespace data::geos
 
 // ============================================================
 // Link Serialization (Edit Steps)

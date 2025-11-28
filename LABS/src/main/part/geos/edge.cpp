@@ -10,7 +10,7 @@
 #include <iostream>
 #include <iomanip>
 
-namespace tune::internal
+namespace geos::internal
 {
     // Golden ratio constants
     constexpr float PHI = 1.618033988749895f;
@@ -245,4 +245,4 @@ namespace tune::internal
         return evaluations;
     }
 
-} // namespace tune::internal
+} // namespace geos::internal

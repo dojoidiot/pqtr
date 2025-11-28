@@ -1,6 +1,6 @@
-// geos.hpp
+// spsa.hpp
 // Internal: SPSA optimizer for color/tone dials
-// Not a public header - used only within tune module
+// Not a public header - used only within geos module
 //
 // Two modes (selected via Config::geos_mode):
 //
@@ -15,10 +15,10 @@
 
 #pragma once
 
-#include <tune.hpp>
+#include <geos.hpp>
 #include "diff.hpp"
 
-namespace tune::internal
+namespace geos::internal
 {
     // Total dials: 37 original + 4 split tone = 41
     constexpr int GEOS_DIAL_COUNT = 41;
@@ -125,4 +125,4 @@ namespace tune::internal
         bool lutEstimated = false
     );
 
-} // namespace tune::internal
+} // namespace geos::internal

@@ -1,4 +1,4 @@
-// geos.cpp
+// spsa.cpp
 // SPSA optimizer for color/tone dials
 //
 // Two modes:
@@ -8,14 +8,14 @@
 // Algorithm: Simultaneous Perturbation Stochastic Approximation
 // See doc/geos.md for theory
 
-#include "geos.hpp"
+#include "spsa.hpp"
 #include <random>
 #include <array>
 #include <algorithm>
 #include <cmath>
 #include <iostream>
 
-namespace tune::internal
+namespace geos::internal
 {
     // ============================================================
     // Dial mapping: 41 dials <-> theta vector [0,1]^41
@@ -594,11 +594,11 @@ namespace tune::internal
         }
 
         // Dispatch based on mode
-        if (config.geos_mode == GeosMode::FULL_35D)
+        if (config.geos_mode == Mode::FULL_35D)
         {
             return optimizeFull41D(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
-        else if (config.geos_mode == GeosMode::LINEAR_ONLY)
+        else if (config.geos_mode == Mode::LINEAR_ONLY)
         {
             return optimizeLinearOnly(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
@@ -608,4 +608,4 @@ namespace tune::internal
         }
     }
 
-} // namespace tune::internal
+} // namespace geos::internal

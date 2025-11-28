@@ -12,7 +12,7 @@
 #include <sink.hpp>
 #include <hold.hpp>
 #include <pipe.hpp>
-#include <tune.hpp>
+#include <geos.hpp>
 #include <data.hpp>
 #include <iostream>
 #include <iomanip>
@@ -42,15 +42,15 @@ TestResult test_optimizer_convergence(
     auto start = high_resolution_clock::now();
 
     try {
-        pqtr::Hold<tune::Task> task = tune::make(target);
+        pqtr::Hold<geos::Task> task = geos::make(target);
 
         // Get baseline loss
         cv::UMat baseline = body.view();
-        tune::Data baselineLoss = task->diff(baseline);
+        geos::Data baselineLoss = task->diff(baseline);
 
         // Configure quick optimization
-        tune::Config config;
-        config.geos_mode = tune::GeosMode::LINEAR_ONLY;  // Fast mode
+        geos::Config config;
+        config.geos_mode = geos::Mode::LINEAR_ONLY;  // Fast mode
         config.geos_max_iter = MAX_ITERATIONS;
         config.geos_multi_starts = 3;
         config.skip_edge = true;
@@ -59,8 +59,8 @@ TestResult test_optimizer_convergence(
         float lastLoss = baselineLoss.spectral;
         int iterations = 0;
 
-        tune::Result result = task->run(body, link, config,
-            [&](const tune::Progress& p) {
+        geos::Result result = task->run(body, link, config,
+            [&](const geos::Progress& p) {
                 lastLoss = p.loss.spectral;
                 iterations = p.iteration;
                 return true;

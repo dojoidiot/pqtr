@@ -1,19 +1,19 @@
-// tune.cpp
-// Main tune Task implementation
-// Delegates to diff, geos, and edge modules
+// task.cpp
+// Main geos Task implementation
+// Delegates to diff, spsa, and edge modules
 //
 // LUT-based luminance curve pre-pass:
 // The Link now contains a LutCurve module that can estimate
 // the tone curve from base->target and apply it automatically.
 
-#include <tune.hpp>
+#include <geos.hpp>
 #include "diff.hpp"
-#include "geos.hpp"
+#include "spsa.hpp"
 #include "edge.hpp"
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 
-namespace tune
+namespace geos
 {
     using namespace internal;
 
@@ -102,7 +102,7 @@ namespace tune
                 View baseView = body.view();
                 if (link.lutCurve().estimate(baseView, m_targetImage))
                 {
-                    std::cout << "[tune] LUT curve estimated" << std::endl;
+                    std::cout << "[geos] LUT curve estimated" << std::endl;
                 }
             }
 
@@ -149,4 +149,4 @@ namespace tune
         return pqtr::Hold<Task>(new TaskImpl(target));
     }
 
-} // namespace tune
+} // namespace geos

@@ -12,7 +12,7 @@
 #include <sink.hpp>
 #include <hold.hpp>
 #include <pipe.hpp>
-#include <tune.hpp>
+#include <geos.hpp>
 #include <data.hpp>
 #include <iostream>
 #include <iomanip>
@@ -23,17 +23,17 @@
 constexpr int OUTPUT_SIZE = 1080;  // Social media size for outputs
 constexpr int WORKING_SIZE = 512;  // Optimization proxy size
 
-tune::GeosMode parseMode(int argc, char* argv[])
+geos::Mode parseMode(int argc, char* argv[])
 {
     for (int i = 1; i < argc; i++)
     {
         if (std::strcmp(argv[i], "--mode") == 0 && i + 1 < argc)
         {
-            if (std::strcmp(argv[i+1], "full") == 0) return tune::GeosMode::FULL_35D;
-            if (std::strcmp(argv[i+1], "linear") == 0) return tune::GeosMode::LINEAR_ONLY;
+            if (std::strcmp(argv[i+1], "full") == 0) return geos::Mode::FULL_35D;
+            if (std::strcmp(argv[i+1], "linear") == 0) return geos::Mode::LINEAR_ONLY;
         }
     }
-    return tune::GeosMode::BLOCKWISE;
+    return geos::Mode::BLOCKWISE;
 }
 
 int main(int argc, char* argv[])
@@ -96,8 +96,8 @@ int main(int argc, char* argv[])
         cv::UMat headU, bodyU;
         headForDiff.copyTo(headU);
         bodyMat.copyTo(bodyU);
-        pqtr::Hold<tune::Task> tuneTask = tune::make(headU);
-        tune::Data baselineLoss = tuneTask->diff(bodyU);
+        pqtr::Hold<geos::Task> tuneTask = geos::make(headU);
+        geos::Data baselineLoss = tuneTask->diff(bodyU);
         std::cout << "  Baseline loss: " << std::fixed << std::setprecision(2)
                   << (baselineLoss.spectral * 100) << "%" << std::endl;
 
@@ -122,25 +122,25 @@ int main(int argc, char* argv[])
         pipe::Body& bodyOpt = head2->body(WORKING_SIZE);
         pipe::Body::Link& linkOpt = bodyOpt.add("tune");
 
-        pqtr::Hold<tune::Task> optTask = tune::make(targetResized);
+        pqtr::Hold<geos::Task> optTask = geos::make(targetResized);
 
-        tune::GeosMode mode = parseMode(argc, argv);
-        const char* modeName = (mode == tune::GeosMode::FULL_35D) ? "full" :
-                               (mode == tune::GeosMode::LINEAR_ONLY) ? "linear" : "blockwise";
+        geos::Mode mode = parseMode(argc, argv);
+        const char* modeName = (mode == geos::Mode::FULL_35D) ? "full" :
+                               (mode == geos::Mode::LINEAR_ONLY) ? "linear" : "blockwise";
 
-        tune::Config config;
+        geos::Config config;
         config.geos_mode = mode;
         config.geos_max_iter = 500;
         config.geos_multi_starts = 5;
         config.skip_edge = false;
-        config.skip_lut = (mode == tune::GeosMode::LINEAR_ONLY);
+        config.skip_lut = (mode == geos::Mode::LINEAR_ONLY);
 
         std::cout << "Optimizing (mode: " << modeName << ")..." << std::endl;
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
-        tune::Result result = optTask->run(bodyOpt, linkOpt, config,
-            [&phaseNames](const tune::Progress& p) {
-                if (p.stage == tune::Progress::Stage::GEOS)
+        geos::Result result = optTask->run(bodyOpt, linkOpt, config,
+            [&phaseNames](const geos::Progress& p) {
+                if (p.stage == geos::Progress::Stage::GEOS)
                 {
                     std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
         cv::UMat tailU;
         tailForDiff.copyTo(tailU);
 
-        tune::Data finalLoss = tuneTask->diff(tailU);
+        geos::Data finalLoss = tuneTask->diff(tailU);
         std::cout << "  Baseline loss: " << std::fixed << std::setprecision(2)
                   << (baselineLoss.spectral * 100) << "%" << std::endl;
         std::cout << "  Final loss:    " << std::fixed << std::setprecision(2)

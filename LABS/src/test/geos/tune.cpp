@@ -20,7 +20,7 @@
 #include <sink.hpp>
 #include <hold.hpp>
 #include <pipe.hpp>
-#include <tune.hpp>
+#include <geos.hpp>
 #include <data.hpp>
 #include <iostream>
 #include <iomanip>
@@ -31,7 +31,7 @@
 constexpr int SOCIAL_SIZE = 1080;
 const std::string OUTPUT_DIR = "tmp/var/tune/";
 
-tune::GeosMode parseMode(int argc, char* argv[])
+geos::Mode parseMode(int argc, char* argv[])
 {
     for (int i = 1; i < argc - 1; i++)
     {
@@ -41,16 +41,16 @@ tune::GeosMode parseMode(int argc, char* argv[])
                 std::strcmp(argv[i+1], "full") == 0 ||
                 std::strcmp(argv[i+1], "35d") == 0)
             {
-                return tune::GeosMode::FULL_35D;
+                return geos::Mode::FULL_35D;
             }
             if (std::strcmp(argv[i+1], "linear") == 0 ||
                 std::strcmp(argv[i+1], "lin") == 0)
             {
-                return tune::GeosMode::LINEAR_ONLY;
+                return geos::Mode::LINEAR_ONLY;
             }
         }
     }
-    return tune::GeosMode::BLOCKWISE;  // Default
+    return geos::Mode::BLOCKWISE;  // Default
 }
 
 int main(int argc, char* argv[])
@@ -139,10 +139,10 @@ int main(int argc, char* argv[])
         bodyMat.copyTo(bodyUMat);
 
         // Create tune task with head as target (features cached)
-        pqtr::Hold<tune::Task> tuneTask = tune::make(headUMat);
+        pqtr::Hold<geos::Task> tuneTask = geos::make(headUMat);
 
         // Compute metrics
-        tune::Data metrics = tuneTask->diff(bodyUMat);
+        geos::Data metrics = tuneTask->diff(bodyUMat);
         std::cout << "  Spectral loss:  " << std::fixed << std::setprecision(4) << metrics.spectral
                   << " (" << std::setprecision(2) << (metrics.spectral * 100) << "%)" << std::endl;
         std::cout << "  Frequency loss: " << std::fixed << std::setprecision(4) << metrics.frequency
@@ -160,7 +160,7 @@ int main(int argc, char* argv[])
         // 6. Save tune.json using data layer
         std::cout << "\n[6] Saving tune.json (baseline)..." << std::endl;
         std::string tuneJsonPath = OUTPUT_DIR + "tune.json";
-        if (!data::tune::save(metrics, tuneJsonPath))
+        if (!data::geos::save(metrics, tuneJsonPath))
         {
             throw std::runtime_error("Failed to save tune.json");
         }
@@ -175,7 +175,7 @@ int main(int argc, char* argv[])
         // Test 1: Empty link (no dials set) - should be same as baseline
         {
             cv::UMat view1 = body.view();
-            tune::Data loss1 = tuneTask->diff(view1);
+            geos::Data loss1 = tuneTask->diff(view1);
             std::cout << "  Empty link:     spectral=" << std::fixed << std::setprecision(4)
                       << loss1.spectral << std::endl;
         }
@@ -184,7 +184,7 @@ int main(int argc, char* argv[])
         link.colorCorrection().exposure().set(0.5f);
         {
             cv::UMat view2 = body.view();
-            tune::Data loss2 = tuneTask->diff(view2);
+            geos::Data loss2 = tuneTask->diff(view2);
             std::cout << "  +exposure=0.5:  spectral=" << std::fixed << std::setprecision(4)
                       << loss2.spectral << std::endl;
         }
@@ -197,7 +197,7 @@ int main(int argc, char* argv[])
         link.toneMapping().clippingPoint().black().set(0.5f);
         {
             cv::UMat view3 = body.view();
-            tune::Data loss3 = tuneTask->diff(view3);
+            geos::Data loss3 = tuneTask->diff(view3);
             std::cout << "  +tonemap=0.5:   spectral=" << std::fixed << std::setprecision(4)
                       << loss3.spectral << " <-- tone_map is the culprit if high" << std::endl;
 
@@ -239,7 +239,7 @@ int main(int argc, char* argv[])
         link.selectiveColour().magenta().luminance(0.5f);
         {
             cv::UMat view4 = body.view();
-            tune::Data loss4 = tuneTask->diff(view4);
+            geos::Data loss4 = tuneTask->diff(view4);
             std::cout << "  All 35 @ 0.5:   spectral=" << std::fixed << std::setprecision(4)
                       << loss4.spectral << " <-- this is what GEOS starts with" << std::endl;
 
@@ -257,22 +257,22 @@ int main(int argc, char* argv[])
         std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
                   << metrics.spectral << std::endl;
 
-        tune::GeosMode mode = parseMode(argc, argv);
-        const char* modeName = (mode == tune::GeosMode::FULL_35D) ? "FULL_35D" :
-                               (mode == tune::GeosMode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
+        geos::Mode mode = parseMode(argc, argv);
+        const char* modeName = (mode == geos::Mode::FULL_35D) ? "FULL_35D" :
+                               (mode == geos::Mode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
         std::cout << "  Mode: " << modeName << std::endl;
 
-        tune::Config config;
+        geos::Config config;
         config.skip_edge = false;  // Enable edge/sharpness optimization
         config.geos_max_iter = 500;
         config.geos_multi_starts = 5;
         config.geos_mode = mode;
-        config.skip_lut = (mode == tune::GeosMode::LINEAR_ONLY);  // True linear baseline
+        config.skip_lut = (mode == geos::Mode::LINEAR_ONLY);  // True linear baseline
 
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
-        tune::Result result = tuneTask->run(body, link, config,
-            [&phaseNames](const tune::Progress& p) {
-                if (p.stage == tune::Progress::Stage::GEOS)
+        geos::Result result = tuneTask->run(body, link, config,
+            [&phaseNames](const geos::Progress& p) {
+                if (p.stage == geos::Progress::Stage::GEOS)
                 {
                     std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
@@ -280,7 +280,7 @@ int main(int argc, char* argv[])
                               << "  r=" << std::setprecision(3) << p.dome.r
                               << "     " << std::flush;
                 }
-                else if (p.stage == tune::Progress::Stage::EDGE)
+                else if (p.stage == geos::Progress::Stage::EDGE)
                 {
                     std::cout << "\r  [EDGE] "
                               << std::setw(3) << p.iteration << "/" << p.max_iterations
@@ -315,6 +315,15 @@ int main(int argc, char* argv[])
         std::string optDiffPath = OUTPUT_DIR + "diff_optimized.png";
         cv::imwrite(optDiffPath, optDiffMat);
         std::cout << "  Saved: " << optDiffPath << std::endl;
+
+        // 10. Save optimized link settings
+        std::cout << "\n[10] Saving link.json (optimized dials)..." << std::endl;
+        std::string linkPath = OUTPUT_DIR + "link.json";
+        if (!data::link::save(link, linkPath))
+        {
+            throw std::runtime_error("Failed to save link.json");
+        }
+        std::cout << "  Saved: " << linkPath << std::endl;
 
         std::cout << "\n[OK] All outputs saved to " << OUTPUT_DIR << std::endl;
         return 0;

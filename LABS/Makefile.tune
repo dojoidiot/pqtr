@@ -1,7 +1,12 @@
 # Tune Makefile
-# Builds tune test harness
+# Builds tune binary and tests (tune-fast and tune-full)
 #
-# Usage: make -f Makefile.tune
+# Usage:
+#   make -f Makefile.tune           # Build bin/tune and tests
+#   make -f Makefile.tune tune      # Build bin/tune only
+#   make -f Makefile.tune test-fast # Run fast geos test
+#   make -f Makefile.tune test-full # Run full geos test (takes ~60s)
+#   make -f Makefile.tune test-rnd  # Run R&D harness (outputs to tmp/var/tune/)
 
 # Compiler
 CXX = g++
@@ -23,40 +28,98 @@ LDFLAGS = -L$(OPENCV_LIB) -L./lib
 LIBS = ./lib/labs.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 
 # Directories
-SRC_DIR = src/test/tune
-TMP_DIR = tmp/tune
-BIN_DIR = $(TMP_DIR)/bin
-OBJ_DIR = $(TMP_DIR)/obj
-OUT_DIR = tmp/var/tune
+MAIN_SRC = src/main
+TEST_SRC = src/test/geos
+TMP_DIR = tmp/obj/tune
+BIN_DIR = bin
+TEST_BIN_DIR = tmp/bin/geos
+VAR_DIR = tmp/var/tune
 
-# Source and target
-SRC = $(SRC_DIR)/tune.cpp
-OBJ = $(OBJ_DIR)/tune.o
-BIN = $(BIN_DIR)/tune
+# Binary sources
+TUNE_SRC = $(MAIN_SRC)/tune.cpp
+TUNE_OBJ = $(TMP_DIR)/tune.o
+TUNE_BIN = $(BIN_DIR)/tune
+
+# Test sources
+FAST_SRC = $(TEST_SRC)/fast.cpp
+FAST_OBJ = $(TMP_DIR)/fast.o
+FAST_BIN = $(TEST_BIN_DIR)/tune-fast
+
+FULL_SRC = $(TEST_SRC)/full.cpp
+FULL_OBJ = $(TMP_DIR)/full.o
+FULL_BIN = $(TEST_BIN_DIR)/tune-full
+
+TUNE_TEST_SRC = $(TEST_SRC)/tune.cpp
+TUNE_TEST_OBJ = $(TMP_DIR)/tune_test.o
+TUNE_TEST_BIN = $(TEST_BIN_DIR)/tune-test
 
 # Test input
 TEST_RAW = var/pics/DSC00202.ARW
 
-.PHONY: all clean test
+.PHONY: all clean tune test-fast test-full test test-rnd
 
-all: $(BIN)
+all: $(TUNE_BIN) $(FAST_BIN) $(FULL_BIN) $(TUNE_TEST_BIN)
 
-$(BIN): $(OBJ) | $(BIN_DIR)
+tune: $(TUNE_BIN)
+
+# Main tune binary
+$(TUNE_BIN): $(TUNE_OBJ) | $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-$(OBJ): $(SRC) | $(OBJ_DIR)
+$(TUNE_OBJ): $(TUNE_SRC) | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
+# Tune-fast test binary
+$(FAST_BIN): $(FAST_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(FAST_OBJ): $(FAST_SRC) | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Tune-full test binary
+$(FULL_BIN): $(FULL_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(FULL_OBJ): $(FULL_SRC) | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Tune-test binary (original test harness)
+$(TUNE_TEST_BIN): $(TUNE_TEST_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(TUNE_TEST_OBJ): $(TUNE_TEST_SRC) | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Directory creation
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
 
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
+$(TMP_DIR):
+	mkdir -p $(TMP_DIR)
+
+$(TEST_BIN_DIR):
+	mkdir -p $(TEST_BIN_DIR)
 
 clean:
-	rm -rf $(TMP_DIR)
+	rm -rf $(TMP_DIR) $(TEST_BIN_DIR) $(TUNE_BIN)
 
-test: $(BIN)
-	@mkdir -p $(OUT_DIR)
-	@echo "Running tune test..."
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BIN)
+# Run fast test (linear-only mode, ~10s)
+test-fast: $(FAST_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Tune Fast Test ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(FAST_BIN) $(TEST_RAW) $(VAR_DIR)
+
+# Run full test (blockwise mode, ~60s)
+test-full: $(FULL_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Tune Full Test ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(FULL_BIN) $(TEST_RAW) $(VAR_DIR)
+
+# Default test
+test: test-fast
+
+# R&D test harness (full pipeline with all outputs to tmp/var/tune/)
+test-rnd: $(TUNE_TEST_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Tune R&D Test Harness ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TUNE_TEST_BIN)

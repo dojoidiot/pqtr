@@ -1,11 +1,11 @@
 // diff.cpp
-// Loss metric computation helpers for tune optimization
+// Loss metric computation helpers for geos optimization
 
 #include "diff.hpp"
 #include <opencv2/imgproc.hpp>
 #include <cmath>
 
-namespace tune::internal
+namespace geos::internal
 {
 
     cv::UMat resizeProxy(const cv::UMat& image, int size)
@@ -213,4 +213,4 @@ namespace tune::internal
         return static_cast<float>(stddev[0] * stddev[0]);
     }
 
-} // namespace tune::internal
+} // namespace geos::internal

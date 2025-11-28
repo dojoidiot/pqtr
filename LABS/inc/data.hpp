@@ -2,16 +2,16 @@
 // Data persistence API for LABS
 //
 // Provides serialization for all LABS data types:
-// - tune::Data (loss metrics)
+// - geos::Data (loss metrics)
 // - 3D LUT (17³ color transform)
-// - pipe::Link (edit steps) - future
-// - tune::Result (optimization results) - future
+// - pipe::Link (edit steps)
+// - geos::Result (optimization results) - future
 //
 // See data.md for format specification.
 
 #pragma once
 
-#include <tune.hpp>
+#include <geos.hpp>
 #include <pipe.hpp>
 #include <string>
 #include <vector>
@@ -55,23 +55,43 @@ namespace data
     } // namespace lut
 
     // ============================================================
-    // Tune Data (Loss Metrics)
+    // Geos Data (Loss Metrics)
     // ============================================================
 
-    namespace tune
+    namespace geos
     {
         // Serialize to JSON string
-        std::string toJson(const ::tune::Data& d);
+        std::string toJson(const ::geos::Data& d);
 
         // Deserialize from JSON string
-        ::tune::Data fromJson(const std::string& json);
+        ::geos::Data fromJson(const std::string& json);
 
         // Save to file
-        bool save(const ::tune::Data& d, const std::string& path);
+        bool save(const ::geos::Data& d, const std::string& path);
 
         // Load from file
-        ::tune::Data load(const std::string& path);
+        ::geos::Data load(const std::string& path);
 
-    } // namespace tune
+    } // namespace geos
+
+    // ============================================================
+    // Link Serialization (Edit Steps)
+    // ============================================================
+
+    namespace link
+    {
+        // Serialize link to JSON string
+        std::string toJson(pipe::Body::Link& link);
+
+        // Deserialize JSON string into link (modifies link in-place)
+        bool fromJson(pipe::Body::Link& link, const std::string& json);
+
+        // Save link to file
+        bool save(pipe::Body::Link& link, const std::string& path);
+
+        // Load link from file (modifies link in-place)
+        bool load(pipe::Body::Link& link, const std::string& path);
+
+    } // namespace link
 
 } // namespace data

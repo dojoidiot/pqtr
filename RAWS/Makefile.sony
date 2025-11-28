@@ -1,113 +1,87 @@
-# Makefile for Sony RAW processing pipeline
-# Structure:
-#   src/main/part/ - Sony decoder and processing modules
-#   src/test/ - Test program with full pipeline
+# Sony Test Makefile
+# Builds sony test binaries
+#
+# Usage:
+#   make -f Makefile.sony           # Build all test binaries
+#   make -f Makefile.sony test      # Run sony decoder test
+#   make -f Makefile.sony test-dist # Run distortion check
 
 # Compiler
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -O2
+CXXFLAGS = -std=c++17 -Wall -O2
 
-# OpenCV paths (relative to RAWS/)
-OPENCV_ROOT ?= ../LABS/lib/opencv
+# OpenCV paths
+OPENCV_ROOT = ../LABS/lib/opencv
 OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/core/include \
                  -I$(OPENCV_ROOT)/modules/imgproc/include \
                  -I$(OPENCV_ROOT)/modules/imgcodecs/include
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
-# Build output directory
-TMP_DIR = ./tmp
-BUILD_DIR = $(TMP_DIR)/sony
-OBJ_DIR = $(BUILD_DIR)/obj
+# Include paths
+INCLUDES = $(OPENCV_INCLUDE) \
+           -I./inc \
+           -I./src/main/part \
+           -I../LABS/inc
 
-# Include and library flags
-INCLUDES = $(OPENCV_INCLUDE) -Isrc/main/part -Isrc/main/part/sony -Isrc/main -I../LABS/inc
-LDFLAGS = -L$(OPENCV_LIB)
-LIBS = -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+# Library flags
+LDFLAGS = -L$(OPENCV_LIB) -L./lib
+LIBS = ./lib/RAWS.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
 
-# Source files - Sony implementation
-SONY_DECODER = src/main/part/sony.cpp
-SONY_MODS = src/main/part/sony/prepare.cpp \
-            src/main/part/sony/process.cpp \
-            src/main/part/sony/blc.cpp \
-            src/main/part/sony/blc_bayer.cpp \
-            src/main/part/sony/wb_gain.cpp \
-            src/main/part/sony/wb_bayer.cpp \
-            src/main/part/sony/demosaic.cpp \
-            src/main/part/sony/color_matrix.cpp \
-            src/main/part/sony/undistort.cpp \
-            src/main/part/sony/crop.cpp \
-            src/main/part/sony/gamma_oetf.cpp
+# Directories
+TEST_SRC = src/test/sony
+TMP_DIR = tmp/obj/sony
+TEST_BIN_DIR = tmp/bin/sony
+VAR_DIR = tmp/var/sony
 
-# Test program
-TEST_SONY = src/test/sony.cpp
+# Test sources
+SONY_SRC = $(TEST_SRC)/sony.cpp
+SONY_OBJ = $(TMP_DIR)/sony.o
+SONY_BIN = $(TEST_BIN_DIR)/sony
 
-# Build objects
-SONY_OBJECTS = $(OBJ_DIR)/sony_decoder.o \
-               $(OBJ_DIR)/prepare.o \
-               $(OBJ_DIR)/process.o \
-               $(OBJ_DIR)/blc.o \
-               $(OBJ_DIR)/blc_bayer.o \
-               $(OBJ_DIR)/wb_gain.o \
-               $(OBJ_DIR)/wb_bayer.o \
-               $(OBJ_DIR)/demosaic.o \
-               $(OBJ_DIR)/color_matrix.o \
-               $(OBJ_DIR)/undistort.o \
-               $(OBJ_DIR)/crop.o \
-               $(OBJ_DIR)/gamma_oetf.o \
-               $(OBJ_DIR)/sony_test.o
+DIST_SRC = $(TEST_SRC)/distortion.cpp
+DIST_OBJ = $(TMP_DIR)/distortion.o
+DIST_BIN = $(TEST_BIN_DIR)/distortion
 
-SONY_TEST = $(BUILD_DIR)/sony
+# Test input
+TEST_RAW = var/sony.ARW
 
-# Distortion check tool
-DISTORTION_CHECK = $(TMP_DIR)/distortion_check
+.PHONY: all clean test test-dist
 
-# Default target
-all: $(SONY_TEST) $(DISTORTION_CHECK)
+all: $(SONY_BIN) $(DIST_BIN)
 
-# Create build directories
-$(BUILD_DIR):
-	mkdir -p $(BUILD_DIR)
-
-$(OBJ_DIR):
-	mkdir -p $(OBJ_DIR)
-
-# Link sony test
-$(SONY_TEST): $(SONY_OBJECTS) | $(BUILD_DIR)
+# Sony decoder test binary
+$(SONY_BIN): $(SONY_OBJ) | $(TEST_BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
 
-# Compile src/main/part/ decoder
-$(OBJ_DIR)/sony_decoder.o: src/main/part/sony.cpp | $(OBJ_DIR)
+$(SONY_OBJ): $(SONY_SRC) | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile src/main/part/sony/ files
-$(OBJ_DIR)/%.o: src/main/part/sony/%.cpp | $(OBJ_DIR)
+# Distortion check binary
+$(DIST_BIN): $(DIST_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(DIST_OBJ): $(DIST_SRC) | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-# Compile test file
-$(OBJ_DIR)/sony_test.o: src/test/sony.cpp | $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+# Directory creation
+$(TMP_DIR):
+	mkdir -p $(TMP_DIR)
 
-# Distortion check tool (standalone)
-$(DISTORTION_CHECK): src/test/distortion_check.cpp | $(TMP_DIR)
-	$(CXX) $(CXXFLAGS) $(OPENCV_INCLUDE) $(LDFLAGS) -o $@ $< $(LIBS)
+$(TEST_BIN_DIR):
+	mkdir -p $(TEST_BIN_DIR)
 
-# Clean
 clean:
-	rm -rf $(TMP_DIR)
+	rm -rf $(TMP_DIR) $(TEST_BIN_DIR)
 
-# Phony targets
-.PHONY: all clean test
+# Run sony decoder test
+test: $(SONY_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Sony Decoder Test ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(SONY_BIN) $(TEST_RAW)
 
-# Test target: run decoder then check distortion
-test: $(SONY_TEST) $(DISTORTION_CHECK)
-	$(SONY_TEST) var/sony.ARW
-	$(DISTORTION_CHECK)
-
-# Dependencies (headers)
-$(OBJ_DIR)/sony_decoder.o: src/main/part/sony.h
-$(OBJ_DIR)/sony_test.o: src/main/part/sony.h
-$(OBJ_DIR)/blc.o: src/main/part/sony.h
-$(OBJ_DIR)/wb_gain.o: src/main/part/sony.h
-$(OBJ_DIR)/demosaic.o: src/main/part/sony.h
-$(OBJ_DIR)/gamma_oetf.o:
+# Run distortion check
+test-dist: $(DIST_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Distortion Check ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(DIST_BIN)

@@ -1,4 +1,4 @@
-// tune.hpp
+// geos.hpp
 // Public API for automatic style matching optimization
 //
 // Unified module providing:
@@ -20,7 +20,7 @@
 #include <functional>
 #include <cmath>
 
-namespace tune
+namespace geos
 {
 
     // GPU-accelerated image matrix (BGR 8-bit).
@@ -54,7 +54,7 @@ namespace tune
     // ============================================================
 
     // GEOS optimization strategy
-    enum class GeosMode
+    enum class Mode
     {
         BLOCKWISE,   // 4-phase: A(10) → B(3) → AB(13) → C(24) selective
         FULL_35D,    // Single-phase: all 37 dials simultaneously
@@ -70,7 +70,7 @@ namespace tune
         int geos_multi_starts = 5;     // Number of random initializations
         float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
-        GeosMode geos_mode = GeosMode::BLOCKWISE;  // Optimization strategy
+        Mode geos_mode = Mode::BLOCKWISE;  // Optimization strategy
     };
 
     // ============================================================
@@ -119,7 +119,7 @@ namespace tune
 
     // Task holds cached target image features for efficient repeated comparisons.
     // Ownership: Hold<Task> owns the task; returned Views share underlying data.
-    // Created via tune::make(target), destroyed via RAII.
+    // Created via geos::make(target), destroyed via RAII.
     class Task
     {
     public:
@@ -144,4 +144,4 @@ namespace tune
     // Factory: create Task with target image (features cached for reuse)
     pqtr::Hold<Task> make(View target);
 
-} // namespace tune
+} // namespace geos
