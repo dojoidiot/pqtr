@@ -182,6 +182,48 @@ output = bilinear_blend(LUTs, px.x, px.y)
 
 ---
 
+## RAWS: Per-Image Color Matrix
+
+**Current:** RAWS uses a hardcoded color matrix (prepare.cpp:544-547).
+
+**Problem:** Baseline output has pink/magenta color cast because the hardcoded matrix is for one specific camera/illuminant combination. The tune optimizer compensates, but baseline is wrong.
+
+### Root Cause
+
+```cpp
+// Hardcoded in RAWS/src/main/part/sony/prepare.cpp
+metadata.color_matrix = cv::Matx33f(
+    1344.0f / 1024.0f, -211.0f / 1024.0f,  -76.0f / 1024.0f,
+      -9.0f / 1024.0f, 1224.0f / 1024.0f, -159.0f / 1024.0f,
+       7.0f / 1024.0f,  -41.0f / 1024.0f, 1090.0f / 1024.0f);
+```
+
+Should read from Sony metadata tag 0x7310 (SR2SubIFD "Color Matrix").
+
+### Fix (in RAWS)
+
+1. Parse tag 0x7310 from SR2SubIFD
+2. Extract 9 × int16 values (fixed-point /1024)
+3. Build cv::Matx33f from actual file values
+4. Fall back to hardcoded only if tag missing
+
+### Impact
+
+| Scenario | Current | Fixed |
+|----------|---------|-------|
+| Baseline output | Pink cast | Correct |
+| Tune convergence | Compensates (works) | Faster (less work) |
+| Cross-camera | Wrong colors | Correct |
+
+### Considerations
+
+- This is a RAWS fix, not LABS
+- Current tune workflow works (optimizer compensates)
+- Fix improves baseline quality and reduces tune iterations
+- Would eliminate need for extreme WB adjustments
+
+---
+
 ## See Also
 
 - [analysis.md](./analysis.md) - Empirical findings and research
