@@ -20,8 +20,9 @@
 
 namespace geos::internal
 {
-    // Total dials: 37 original + 4 split tone = 41
-    constexpr int GEOS_DIAL_COUNT = 41;
+    // Total dials: 37 original + 4 split tone + 4 detail = 45
+    // Detail dials: sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma
+    constexpr int GEOS_DIAL_COUNT = 45;
 
     // ============================================================
     // Block definitions (for BLOCKWISE mode)

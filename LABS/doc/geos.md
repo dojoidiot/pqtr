@@ -15,22 +15,24 @@ GeoS is the optimizer-independent model for style matching. It defines the space
 
 ## The Search Space
 
-All dial optimization happens in a 17D hypercube where each dial is a dimension in [0, 1].
+All dial optimization happens in a 45D hypercube where each dial is a dimension in [0, 1].
 
 ```
 Dial 1:  [0 ─────────────────── 1]
 Dial 2:  [0 ─────────────────── 1]
   ...
-Dial 17: [0 ─────────────────── 1]
+Dial 45: [0 ─────────────────── 1]
 ```
 
 Every point in this hypercube represents a complete set of dial settings.
+
+**45 style dials:** ColorCorrection (3) + ToneMapping (7) + GlobalColor (3) + SplitTone (4) + SelectiveColor (24) + Detail (4)
 
 ---
 
 ## The Feature Space
 
-The 17 dials produce an image. That image is reduced to 10 features:
+The 45 dials produce an image. That image is reduced to 10 features:
 
 ```
 v = [
@@ -75,7 +77,7 @@ These 10 features are normalized to a unit vector on a 10D hypersphere.
 Each dial can affect multiple features. Each feature is affected by multiple dials.
 
 ```
-17 dials ──┬──► 10 features
+45 dials ──┬──► 10 features
            │
         coupled
 ```
@@ -97,7 +99,7 @@ The loss is the cosine distance between candidate and target feature vectors:
 Loss = 1 - |⟨ψ_candidate | ψ_target⟩|²
 ```
 
-One angle. Measured in 10D feature space. Driven by 17 coupled dials.
+One angle. Measured in 10D feature space. Driven by 45 coupled dials.
 
 - Loss = 0 → identical style (parallel vectors)
 - Loss = 1 → orthogonal styles (maximum difference)
@@ -113,11 +115,11 @@ One angle. Measured in 10D feature space. Driven by 17 coupled dials.
 
 ## The Covariance Matrix
 
-The covariance matrix Σ is 17×17—dial-to-dial correlations in the search space.
+The covariance matrix Σ is 45×45—dial-to-dial correlations in the search space.
 
 ```
-Search space:       17D hypercube (dials)
-Covariance matrix:  17×17 (dial correlations)
+Search space:       45D hypercube (dials)
+Covariance matrix:  45×45 (dial correlations)
 Feature space:      10D hypersphere (where loss is computed)
 ```
 
@@ -140,21 +142,22 @@ Some optimizers ignore this (SPSA). Others learn it (CMA-ES).
 
 GeoS defines the space and loss. Optimizers navigate:
 
-| | SPSA | CMA-ES |
-|--|------|--------|
-| Search space | Hypercube [0,1]^17 | Hypercube [0,1]^17 |
+| | SPSA | ACEO (CMA-ES) |
+|--|------|---------------|
+| Search space | Hypercube [0,1]^45 | Hypercube [0,1]^45 |
 | Loss function | Cosine in 10D feature space | Cosine in 10D feature space |
-| Dial coupling | Implicit (felt through loss) | Explicit (learned Σ matrix) |
-| Perturbation shape | Random hypercube corners (±1 per dial) | Ellipsoidal (adapted to coupling) |
-| Variance model | None (uniform) | Learned Σ |
+| Dial coupling | Implicit (felt through loss) | Explicit (prior Σ matrix) |
+| Perturbation shape | Random hypercube corners (±1 per dial) | Ellipsoidal (eigenspace) |
+| Variance model | None (uniform) | Prior + learned |
+| Covariance output | Builds 45×45 matrix via `--save-cov` | Refines in eigenspace |
 
-Same space. Same loss. Same coupling. Different navigation.
+Same space. Same loss. Same coupling. Different navigation. Complementary roles: SPSA explores and builds covariance; ACEO uses it for efficient search.
 
 ```
 ┌─────────────────────────────────────────┐
 │              GEOS (space)               │
 │                                         │
-│   17D hypercube [0,1]^17 (dials)        │
+│   45D hypercube [0,1]^45 (dials)        │
 │   10D hypersphere (features)            │
 │   Many-to-many coupling                 │
 │   Cosine loss = one angle to target     │
@@ -162,9 +165,8 @@ Same space. Same loss. Same coupling. Different navigation.
 ├─────────────────────────────────────────┤
 │           OPTIMIZER (strategy)          │
 │                                         │
-│   SPSA: ignores covariance              │
-│   CMA-ES: learns covariance             │
-│   (future): other strategies            │
+│   SPSA: ignores covariance, phased      │
+│   ACEO: eigenspace from prior Σ         │
 │                                         │
 └─────────────────────────────────────────┘
 ```
@@ -189,7 +191,7 @@ This captures nonlinear per-hue saturation boosts, S-curve effects, and channel-
 
 The GeoS dome is visualized as a geodesic orb.
 
-**Structure:** Any geodesic sphere. Map 17 dial values to triangles, distributed as evenly as possible across the surface.
+**Structure:** Any geodesic sphere. Map dial values to triangles, distributed as evenly as possible across the surface.
 
 **Color:** Dial value [0,1] maps to the visible spectrum:
 
@@ -200,7 +202,7 @@ The GeoS dome is visualized as a geodesic orb.
 red  orange yellow green blue violet
 ```
 
-**Update:** Push 17 new values, orb recolors. During optimization, the orb shifts. Convergence = colors stabilize.
+**Update:** Push new dial values, orb recolors. During optimization, the orb shifts. Convergence = colors stabilize.
 
 No optimizer logic in the visualization. Just dial state → color. The dome shows **what**; the optimizer decides **how**.
 
@@ -208,13 +210,13 @@ No optimizer logic in the visualization. Just dial state → color. The dome sho
 
 ## Status
 
-**GeoS model**: Defined. 17D dial hypercube → 10D feature hypersphere → cosine loss.
+**GeoS model**: Defined. 45D dial hypercube → 10D feature hypersphere → cosine loss.
 
-**Current optimizer**: SPSA. Works. 0.05% loss, ~65 seconds. No covariance awareness.
+**SPSA optimizer**: Phased optimization with full 45D exploration. Builds covariance matrix via `--save-cov`.
 
-**Validated**: ACEO (Adaptive Covariance Evolver Optimiser) with pre-trained Σ from sample pics. Empirical covariance analysis shows 359 strong dial correlations (|r| > 0.3), max r = 0.979. Strong covariance detected.
+**ACEO optimizer**: 12D eigenspace search using prior covariance. Uses `etc/aceo_full.json` (identity fallback for bootstrapping).
 
-**Next step**: Implement ACEO optimizer using prior covariance matrix from `etc/aceo.json`.
+**SPSA + ACEO pair**: SPSA bootstraps covariance (explores all dials), ACEO refines (efficient eigenspace navigation). The `bin/cvar.sh` script automates this workflow.
 
 ---
 

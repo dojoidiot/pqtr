@@ -1,23 +1,27 @@
-# ACEO: Adaptive Covariance Evolver Optimiser
+# ACEO: Adaptive Covariance Evolving Optimiser
 
 [back](../README.md)
 
 ## Overview
 
-ACEO is a covariance-aware optimization strategy for the LABS dial system. Based on CMA-ES (Covariance Matrix Adaptation Evolution Strategy), ACEO learns the covariance structure of the 41-dial search space and adapts its search to align with the loss landscape.
+ACEO is a covariance-aware optimization strategy for the LABS dial system. Based on CMA-ES (Covariance Matrix Adaptation Evolution Strategy), ACEO learns the covariance structure of the 45-dial search space and adapts its search to align with the loss landscape.
+
+**Full ACEO** includes all 45 style dials in a unified eigenspace optimization.
 
 ## Empirical Findings
 
 Covariance analysis was performed on 10 sample images using SPSA optimization with `--skip-lut`. The results strongly support covariance-aware optimization.
 
-### Results Summary
+### Results Summary (Historical - 36 dials)
 
 | Metric | Value |
 |--------|-------|
 | Images analyzed | 10 |
-| Variable dials | 36 (5 fixed: exposure, temperature, tint, white_point, black_point) |
+| Variable dials | 36 (original subset) |
 | Strong correlations (|r| > 0.3) | **359 pairs** |
 | Maximum correlation | **r = 0.979** |
+
+*Note: Full ACEO now uses all 45 dials. New covariance analysis pending.*
 
 ### Top Dial Correlations
 
@@ -88,20 +92,50 @@ Run full optimizations on a corpus of images, record dial values, compute covari
 
 ## Prior Covariance Matrix
 
-The empirical correlation matrix is stored in `etc/aceo.json`. This 36×36 matrix covers all variable dials and can be used to:
+The empirical correlation matrix is stored in `etc/aceo_full.json`. This 45×45 matrix covers all style dials and can be used to:
 
 1. Initialize CMA-ES covariance matrix
 2. Transform search space to decorrelate dials
 3. Guide step directions during optimization
 
-## SPSA vs ACEO Trade-offs
+**Bootstrapping:** When `etc/aceo_full.json` doesn't exist, ACEO uses identity matrix (no prior correlations) and can accumulate covariance during runs.
+
+## SPSA + ACEO: Complementary Pair
+
+SPSA and ACEO form a complementary optimization pair. SPSA explores the full dial space and builds covariance; ACEO uses that covariance as a prior for efficient eigenspace search.
+
+### SPSA Covariance Contribution
+
+SPSA now accumulates dial samples during optimization using Welford's online algorithm. This captures the full 45D search space because:
+
+- **SCENE_LINEAR mode** explores dials 0,1,2,8,9 (exposure, WB, clipping)
+- **DISPLAY mode** explores dials 3-7, 10-44 (contrast, color, style)
+- Combined samples from both phases produce a complete covariance matrix
+
+### The Bootstrap Workflow
+
+```bash
+# Phase 1: SPSA bootstrap (explores full 45D space)
+tune img1.ARW preview --save-area /tmp --optimizer spsa --save-cov tmp/cov.json
+tune img2.ARW preview --save-area /tmp --optimizer spsa --save-cov tmp/cov.json
+
+# Phase 2: ACEO refinement (uses SPSA-built prior)
+tune img3.ARW preview --save-area /tmp --optimizer aceo --with-cov tmp/cov.json --save-cov tmp/cov.json
+```
+
+The `bin/cvar.sh` script automates this workflow.
+
+### Why This Works
 
 | | SPSA | ACEO |
 |--|------|------|
 | Evaluations per iteration | 2 | λ (population, typically 10-20) |
-| Covariance adaptation | None | Learned/Prior |
+| Covariance contribution | Builds 45×45 correlation matrix | Uses prior, refines in eigenspace |
+| Search pattern | Phased blocks (full dial coverage) | 12D eigenspace projection |
 | Memory | O(n) | O(n²) for covariance matrix |
-| Best when | Weak coupling | Strong coupling |
+| Role | Bootstrap exploration | Efficient refinement |
+
+SPSA's phased optimization naturally explores all dials. ACEO's eigenspace projection requires a prior to know which directions matter. Together: SPSA builds the map, ACEO navigates it.
 
 ## Decision Criteria
 
@@ -113,26 +147,48 @@ The empirical correlation matrix is stored in `etc/aceo.json`. This 36×36 matri
 
 **Conclusion**: ACEO will improve convergence quality over SPSA.
 
+## Out of Scope
+
+**Geometric dials (6)** are excluded from ACEO optimization:
+- crop_top, crop_right, crop_bottom, crop_left
+- scale (zoom)
+- tiltAngle (rotation)
+
+These are user composition choices, not style parameters. The user frames the shot; ACEO matches the style.
+
 ## Status
 
 **Implemented.** ACEO optimizer available via `--optimizer aceo` flag in tune.
 
-### Implementation Details (v2 - Eigenspace)
+### Implementation Details (Full ACEO - 45 dials)
 
-The 36D dial space has only ~8 effective dimensions:
+Full ACEO optimizes all 45 style dials in a unified eigenspace:
 
-| Variance Captured | Dimensions |
-|-------------------|------------|
-| 80% | 4 |
-| 95% | 6 |
-| 99% | 8 |
+| Block | Dials | Count |
+|-------|-------|-------|
+| ColorCorrection | exposure, temperature, tint | 3 |
+| ToneMapping | contrast, highlights, shadows, toe, shoulder, black, white | 7 |
+| GlobalColor | vibrance, saturation, density | 3 |
+| SplitTone | shadow_temp, shadow_tint, highlight_temp, highlight_tint | 4 |
+| SelectiveColor | 8 hues × (hue, sat, lum) | 24 |
+| Detail | sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma | 4 |
+| **Total** | | **45** |
 
-- `src/main/part/geos/aceo.hpp` - CMA-ES algorithm interface
+The 45D dial space is expected to have ~12 effective dimensions (99% variance):
+
+| Variance Captured | Dimensions (expected) |
+|-------------------|----------------------|
+| 80% | ~5 |
+| 95% | ~8 |
+| 99% | ~12 |
+
+- `src/main/part/geos/aceo.hpp` - ACEO interface, 45-dial mapping
 - `src/main/part/geos/aceo.cpp` - Eigenspace implementation:
-  - Jacobi eigendecomposition of prior correlation
-  - Project 36D → 8D eigenspace
+  - Jacobi eigendecomposition of prior correlation (45×45)
+  - Project 45D → 12D eigenspace
   - CMA-ES with eigenvalue-weighted sampling
   - CSA (Cumulative Step-size Adaptation)
+  - Online covariance accumulator (Welford's algorithm)
 
 ### Performance Comparison
 
@@ -160,12 +216,49 @@ ACEO uses **eigenspace** aligned with **dial correlation structure** - captures 
 
 3. **Hybrid**: ACEO for exploration, SPSA for refinement
 
+### Online Covariance Accumulator
+
+ACEO includes a built-in covariance accumulator using Welford's algorithm for numerically stable online computation:
+
+```cpp
+struct CovarianceAccumulator {
+    void update(const VectorN& sample);       // Add sample (45D)
+    bool getCorrelation(MatrixN& corr);       // Extract correlation matrix (45×45)
+    bool blendWithPrior(prior, alpha, result); // Mix accumulated + prior
+    bool saveToJson(const std::string& path); // Persist to file
+};
+```
+
+During optimization, top-μ samples from each generation are accumulated. This enables:
+- Learning covariance from optimization runs (no external scripts)
+- Adaptive eigenspace (blend prior + observed)
+- Building better priors from ACEO-optimized samples
+- Bootstrapping from identity when no prior exists
+
+**Usage:**
+```bash
+# Bootstrap: run ACEO with identity prior, save learned covariance
+tune img1.ARW preview --save-area ./out --optimizer aceo --save-cov tmp/cov1.json
+
+# Chain: blend with prior, accumulate more samples
+tune img2.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov1.json --save-cov tmp/cov2.json
+tune img3.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov2.json --save-cov tmp/cov3.json
+
+# Final becomes the production prior
+cp tmp/cov3.json etc/aceo_full.json
+
+# Subsequent runs use etc/aceo_full.json automatically
+tune photo.ARW preview --save-area ./out --optimizer aceo
+```
+
+**Blending:** When `--with-cov` is specified, accumulated samples are blended with the prior using α = min(1, n/500) where n is the sample count. More samples = more weight on accumulated.
+
 ## Files
 
-- `etc/aceo.json` - Prior covariance matrix (36×36)
-- `opt/cov.sh` - Covariance measurement script
-- `tmp/opt/cov_matrix.json` - Raw measurement data
-- `tmp/opt/cov_report.txt` - Human-readable report
+- `etc/aceo_full.json` - Prior covariance matrix (45×45)
+- `etc/aceo.json` - Legacy prior (36×36, historical)
+- `bin/cvar.sh` - Covariance builder script (SPSA bootstrap → ACEO refinement)
+- `opt/cov.sh` - Legacy covariance measurement script
 
 ## See Also
 

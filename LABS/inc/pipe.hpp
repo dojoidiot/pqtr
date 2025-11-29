@@ -45,7 +45,9 @@ namespace pipe
     };
 
     // ============================================================
-    // BODY - Processing pipeline with 6 golden modules (47 dials)
+    // BODY - Processing pipeline with 6 golden modules (51 dials)
+    // Style dials: 45 (optimized by geos)
+    // Geometric dials: 6 (user composition, not optimized)
     // ============================================================
 
     class Body

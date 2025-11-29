@@ -3,8 +3,12 @@
 //
 // Unified module providing:
 // - Loss measurement (spectral + frequency metrics)
-// - GEOS optimizer (35 color/tone dials via SPSA)
+// - GEOS optimizer (45 style dials via SPSA or ACEO)
 // - Edge optimizer (4 detail dials via golden section)
+//
+// SPSA explores full dial space and builds covariance.
+// ACEO uses prior covariance for efficient eigenspace search.
+// Together they form a complementary optimization pair.
 //
 // PIMPL design caches target image features for efficient
 // repeated comparisons during optimization.
@@ -45,7 +49,7 @@ namespace geos
     struct Result
     {
         Data loss;             // Final loss values
-        int geos_iterations;   // SPSA iterations used
+        int geos_iterations;   // Optimizer iterations (SPSA or ACEO)
         int edge_evaluations;  // Golden section evaluations
     };
 
@@ -57,7 +61,7 @@ namespace geos
     enum class Mode
     {
         BLOCKWISE,     // 4-phase: A(10) → B(7) → AB(17) → C(24) selective
-        FULL_35D,      // Single-phase: all 41 dials simultaneously
+        FULL_35D,      // Single-phase: all 45 dials simultaneously
         LINEAR_ONLY,   // Linear ops only: skip ToneMapping (dials 3-9)
         SCENE_LINEAR,  // Scene-referred: exposure(0), temp(1), tint(2), black(8), white(9) only
         DISPLAY        // Display-referred: skip scene-linear dials, optimize rest + LUT
@@ -75,12 +79,16 @@ namespace geos
         bool skip_geos = false;        // Skip color/tone optimization
         bool skip_edge = false;        // Skip sharpness optimization
         bool skip_lut = false;         // Skip LUT curve estimation (for true linear-only)
-        int geos_max_iter = 200;       // Max SPSA iterations (was 500, reduced with early-stop)
+        int geos_max_iter = 200;       // Max optimizer iterations (with early-stop)
         int geos_multi_starts = 5;     // Number of random initializations
         float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
         Mode geos_mode = Mode::BLOCKWISE;  // Optimization strategy
         Optimizer optimizer = Optimizer::SPSA;  // Algorithm selection (SPSA or ACEO)
+
+        // Covariance options (SPSA builds, ACEO uses)
+        std::string aceo_with_cov;     // Path to prior covariance (blend with accumulated)
+        std::string aceo_save_cov;     // Path to save accumulated covariance after run
     };
 
     // ============================================================

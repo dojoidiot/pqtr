@@ -14,11 +14,147 @@
 #include <algorithm>
 #include <cmath>
 #include <iostream>
+#include <fstream>
 
 namespace geos::internal
 {
     // ============================================================
-    // Dial mapping: 41 dials <-> theta vector [0,1]^41
+    // Covariance accumulator (Welford's online algorithm)
+    // ============================================================
+    // Accumulates dial samples to build correlation matrix.
+    // SPSA explores full 45D space, making it ideal for bootstrapping
+    // the covariance prior that ACEO will use.
+
+    using MatrixN = std::array<float, GEOS_DIAL_COUNT * GEOS_DIAL_COUNT>;  // 45x45
+    using VectorN = std::array<float, GEOS_DIAL_COUNT>;                     // 45
+
+    struct CovarianceAccumulator
+    {
+        int n = 0;                    // Sample count
+        VectorN mean;                 // Running mean
+        MatrixN M2;                   // Sum of squared deviations (for covariance)
+
+        CovarianceAccumulator()
+        {
+            mean.fill(0.0f);
+            M2.fill(0.0f);
+        }
+
+        // Add a sample using Welford's online algorithm
+        void update(const Theta& sample)
+        {
+            n++;
+            VectorN delta;
+            VectorN delta2;
+
+            // Update mean and compute deltas
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                delta[i] = sample[i] - mean[i];
+                mean[i] += delta[i] / static_cast<float>(n);
+                delta2[i] = sample[i] - mean[i];
+            }
+
+            // Update M2 (outer product of deltas)
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                for (int j = 0; j < GEOS_DIAL_COUNT; j++)
+                {
+                    M2[i * GEOS_DIAL_COUNT + j] += delta[i] * delta2[j];
+                }
+            }
+        }
+
+        // Get covariance matrix (n-1 normalization for unbiased estimate)
+        bool getCovariance(MatrixN& cov) const
+        {
+            if (n < 2) return false;
+
+            float invN = 1.0f / static_cast<float>(n - 1);
+            for (int i = 0; i < GEOS_DIAL_COUNT * GEOS_DIAL_COUNT; i++)
+            {
+                cov[i] = M2[i] * invN;
+            }
+            return true;
+        }
+
+        // Get correlation matrix (normalized covariance)
+        bool getCorrelation(MatrixN& corr) const
+        {
+            MatrixN cov;
+            if (!getCovariance(cov)) return false;
+
+            // Extract standard deviations from diagonal
+            VectorN stddev;
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                float var = cov[i * GEOS_DIAL_COUNT + i];
+                stddev[i] = var > 1e-10f ? std::sqrt(var) : 1e-5f;
+            }
+
+            // Normalize: corr[i,j] = cov[i,j] / (std[i] * std[j])
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                for (int j = 0; j < GEOS_DIAL_COUNT; j++)
+                {
+                    corr[i * GEOS_DIAL_COUNT + j] = cov[i * GEOS_DIAL_COUNT + j] / (stddev[i] * stddev[j]);
+                }
+            }
+            return true;
+        }
+
+        // Save to JSON file
+        bool saveToJson(const std::string& path) const
+        {
+            MatrixN corr;
+            if (!getCorrelation(corr))
+            {
+                std::cerr << "[SPSA-COV] Not enough samples to save (n=" << n << ")" << std::endl;
+                return false;
+            }
+
+            std::ofstream file(path);
+            if (!file.is_open())
+            {
+                std::cerr << "[SPSA-COV] Failed to open: " << path << std::endl;
+                return false;
+            }
+
+            file << "{\n";
+            file << "  \"sample_count\": " << n << ",\n";
+            file << "  \"source\": \"spsa\",\n";
+            file << "  \"mean\": [";
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                if (i > 0) file << ", ";
+                file << mean[i];
+            }
+            file << "],\n";
+            file << "  \"correlation_matrix\": [\n";
+            for (int i = 0; i < GEOS_DIAL_COUNT; i++)
+            {
+                file << "    [";
+                for (int j = 0; j < GEOS_DIAL_COUNT; j++)
+                {
+                    if (j > 0) file << ", ";
+                    file << corr[i * GEOS_DIAL_COUNT + j];
+                }
+                file << "]";
+                if (i < GEOS_DIAL_COUNT - 1) file << ",";
+                file << "\n";
+            }
+            file << "  ]\n";
+            file << "}\n";
+
+            std::cerr << "[SPSA-COV] Saved covariance (" << n << " samples) to: " << path << std::endl;
+            return true;
+        }
+    };
+
+    // Global covariance accumulator for SPSA runs
+    static CovarianceAccumulator g_spsaCovAccum;
+    // ============================================================
+    // Dial mapping: 45 dials <-> theta vector [0,1]^45
     // ============================================================
     //
     // Index layout:
@@ -47,6 +183,10 @@ namespace geos::internal
     //   [32-34] blue H/S/L         |
     //   [35-37] purple H/S/L       |
     //   [38-40] magenta H/S/L      |
+    //   [41]    sharpen_amount     |
+    //   [42]    sharpen_radius     | Detail (4)
+    //   [43]    denoise_luma       |
+    //   [44]    denoise_chroma     |
 
     using Theta = std::array<float, GEOS_DIAL_COUNT>;
 
@@ -93,6 +233,12 @@ namespace geos::internal
         readHSL(link.selectiveColour().blue(), 32);
         readHSL(link.selectiveColour().purple(), 35);
         readHSL(link.selectiveColour().magenta(), 38);
+
+        // Detail (4)
+        theta[41] = link.detail().sharpen().amount();
+        theta[42] = link.detail().sharpen().radius();
+        theta[43] = link.detail().denoise().luminance().get();
+        theta[44] = link.detail().denoise().chroma().get();
     }
 
     // Write theta values to link dials
@@ -138,6 +284,12 @@ namespace geos::internal
         writeHSL(link.selectiveColour().blue(), 32);
         writeHSL(link.selectiveColour().purple(), 35);
         writeHSL(link.selectiveColour().magenta(), 38);
+
+        // Detail (4)
+        link.detail().sharpen().amount(theta[41]);
+        link.detail().sharpen().radius(theta[42]);
+        link.detail().denoise().luminance().set(theta[43]);
+        link.detail().denoise().chroma().set(theta[44]);
     }
 
     // Initialize theta to neutral (0.5 for all dials)
@@ -262,6 +414,9 @@ namespace geos::internal
             }
             clipTheta(theta, blockStart, blockSize);
             writeDials(link, theta);
+
+            // Accumulate covariance sample (full theta vector)
+            g_spsaCovAccum.update(theta);
 
             float newLoss = evaluateLoss(body, targetStyle);
 
@@ -659,6 +814,9 @@ namespace geos::internal
             }
             writeDials(link, theta);
 
+            // Accumulate covariance sample
+            g_spsaCovAccum.update(theta);
+
             float newLoss = evaluateLoss(body, targetStyle);
 
             // Track best - check for MEANINGFUL improvement
@@ -830,6 +988,9 @@ namespace geos::internal
                 }
                 writeDials(link, theta);
 
+                // Accumulate covariance sample
+                g_spsaCovAccum.update(theta);
+
                 float newLoss = evaluateLossRegional(body, *targetFeatures, LossMode::SAMPLED);
 
                 // Track meaningful improvement
@@ -934,27 +1095,42 @@ namespace geos::internal
             std::cerr << "[WARNING] Non-deterministic loss evaluation detected!" << std::endl;
         }
 
+        // Don't reset accumulator - accumulate across multiple calls
+        // (LINEAR + DISPLAY in two-link architecture)
+        // The accumulator is reset implicitly when the process starts
+
+        int result = 0;
+
         // Dispatch based on mode
         if (config.geos_mode == Mode::FULL_35D)
         {
-            return optimizeFull41D(body, link, targetStyle, targetLaplacianVar, config, progress);
+            result = optimizeFull41D(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
         else if (config.geos_mode == Mode::LINEAR_ONLY)
         {
-            return optimizeLinearOnly(body, link, targetStyle, targetLaplacianVar, config, progress);
+            result = optimizeLinearOnly(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
         else if (config.geos_mode == Mode::SCENE_LINEAR)
         {
-            return optimizeSceneLinear(body, link, targetStyle, targetLaplacianVar, config, progress);
+            result = optimizeSceneLinear(body, link, targetStyle, targetLaplacianVar, config, progress);
         }
         else if (config.geos_mode == Mode::DISPLAY)
         {
-            return optimizeDisplay(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated, targetFeatures);
+            result = optimizeDisplay(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated, targetFeatures);
         }
         else
         {
-            return optimizeBlockwise(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated);
+            result = optimizeBlockwise(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated);
         }
+
+        // Save covariance if requested
+        if (!config.aceo_save_cov.empty())
+        {
+            std::cerr << "[SPSA-COV] Accumulated " << g_spsaCovAccum.n << " samples" << std::endl;
+            g_spsaCovAccum.saveToJson(config.aceo_save_cov);
+        }
+
+        return result;
     }
 
 } // namespace geos::internal

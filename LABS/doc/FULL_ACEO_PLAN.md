@@ -35,17 +35,50 @@ All already captured in tune.json!
 | GlobalColor | 3 | vibrance, saturation, density |
 | SplitTone | 4 | shadow_temp, shadow_tint, highlight_temp, highlight_tint |
 | SelectiveColor | 24 | 8 hues × (hue_shift, saturation, luminance) |
-| Detail/Edge | 4 | sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma |
+| Detail | 4 | sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma |
 
-**Note:** tune.json already contains all 45 dials in the `detail` module.
+**Note:** tune.json already contains all 45 dials.
+
+## Out of Scope
+
+**Geometric dials (6)** are excluded from optimization:
+- crop_top, crop_right, crop_bottom, crop_left
+- scale (zoom)
+- tiltAngle (rotation)
+
+These are user composition choices, not style parameters. The user frames the shot; ACEO matches the style.
 
 ## Implementation Steps
 
-### Phase 1: Extend Covariance Measurement (SPSA-derived)
-- [ ] Modify `opt/cov.sh` to capture all 45 dials
-- [ ] Include edge dials in the measurement
-- [ ] Run on existing SPSA-optimized tune.json files
-- [ ] Generate `etc/aceo_full_v1.json` (45×45 matrix)
+### Phase 0: Online Covariance Accumulator ✓ DONE
+
+Added `CovarianceAccumulator` to `aceo.cpp`:
+- [x] Welford's algorithm for numerically stable online mean/covariance
+- [x] Collects top-μ samples each generation during optimization
+- [x] `blendWithPrior()` for adaptive eigenspace
+- [x] `saveToJson()` for persisting learned covariance
+
+**Usage:**
+```bash
+ACEO_SAVE_COV=tmp/aceo_learned.json tune photo.ARW preview --optimizer aceo
+```
+
+This replaces the need for external Python scripts (`opt/cov.sh`).
+
+### Phase 1: Extend to 45 Dials ✓ DONE
+
+Code changes complete:
+- [x] Update `ACEO_DIAL_MAP` in `aceo.hpp` to include all 45 dials
+- [x] Add scene-linear dials: exposure, temperature, tint, black_point, white_point
+- [x] Add detail dials: sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma
+- [x] Update `GEOS_DIAL_COUNT` from 41 to 45 in `spsa.hpp`
+- [x] Add detail dials to `readDials()`/`writeDials()` in `spsa.cpp`
+- [x] Update `aceo.cpp` types: `VectorN` (45), `MatrixN` (45×45), `EIGEN_DIM=12`
+- [x] Identity fallback when `etc/aceo_full.json` not found (bootstrapping)
+
+Remaining:
+- [ ] Run ACEO on multiple images, save covariance
+- [ ] Generate `etc/aceo_full.json` (45×45 matrix)
 - [ ] Analyze eigenstructure (expect ~12D for 99% variance)
 
 ### Phase 1b: Refine Covariance (ACEO-derived)
@@ -90,16 +123,19 @@ src/main/tune.cpp               # CLI (add --full-aceo mode)
 
 ```
 Read doc/FULL_ACEO_PLAN.md for the plan.
-Current state: Plan created, implementation not started.
-Next step: Phase 1 - Extend covariance measurement to 45 dials.
+Current state: Phase 0+1 complete (45 dials), need to generate covariance.
+Next step: Run ACEO on images, save covariance to etc/aceo_full.json.
 
 Key context:
-- ACEO eigenspace optimizer exists (36 dials, 8D eigenspace)
+- Full ACEO implemented: 45 dials, 12D eigenspace
+- Online CovarianceAccumulator (Welford's algorithm)
+- Identity matrix used when etc/aceo_full.json not found (bootstrapping)
+- Geometric dials (6) excluded - user composition choices
 - Currently SPSA beats ACEO on numbers (0.09% vs 0.19%)
-- But SPSA has poor visual acceptance despite good numbers
 - Hypothesis: holistic 45-dial optimization will find better perceptual trade-offs
-- The covariance captures dial correlations across images
-- Eigenspace reduces dimensionality while preserving structure
+
+To bootstrap covariance:
+  ACEO_SAVE_COV=etc/aceo_full.json tune photo.ARW preview --optimizer aceo
 ```
 
 ## Open Questions

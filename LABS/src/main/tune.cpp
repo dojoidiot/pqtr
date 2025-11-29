@@ -17,16 +17,26 @@
 //   --threshold <value>     Stop when spectral loss below this (default: 0.005 = 0.5%)
 //   --size <pixels>         Working size for optimization (default: 1080)
 //   --mode <mode>           Optimization mode: blockwise, full35d, linear (default: blockwise)
+//   --optimizer <algo>      Optimizer: spsa, aceo (default: spsa)
 //   --skip-lut              Skip 3D LUT estimation (pure dial optimization)
 //   --logs                  Verbose progress output (dome.r, edge.ratio)
 //   --fine                  Save intermediate images + meta.json
 //   --fine-area <dir>       Directory for --fine outputs (default: --save-area)
+//
+// ACEO Covariance Options:
+//   --with-cov <path>       Load prior covariance to blend with
+//   --save-cov <path>       Save accumulated covariance after run
 //
 // Examples:
 //   tune photo.ARW preview --save-area ./out                # Match camera JPEG
 //   tune photo.ARW reference.png --save-area ./out          # Match external reference
 //   tune photo.ARW preview --save-area ./out --mode linear  # Linear ops only
 //   tune photo.ARW preview --save-area ./out --logs --fine  # Verbose + intermediates
+//
+// ACEO Covariance Chaining:
+//   tune img1.ARW preview --save-area ./out --optimizer aceo --save-cov tmp/cov1.json
+//   tune img2.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov1.json --save-cov tmp/cov2.json
+//   tune img3.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov2.json --save-cov etc/aceo_full.json
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -53,6 +63,9 @@ void printUsage(const char* prog)
     std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
     std::cerr << "  --fine                  Save intermediate images + meta.json\n";
     std::cerr << "  --fine-area <dir>       Directory for --fine outputs (default: --save-area)\n";
+    std::cerr << "\nACEO covariance options:\n";
+    std::cerr << "  --with-cov <path>       Load prior covariance to blend with\n";
+    std::cerr << "  --save-cov <path>       Save accumulated covariance after run\n";
 }
 
 int main(int argc, char** argv)
@@ -75,6 +88,8 @@ int main(int argc, char** argv)
     std::string targetPath = argv[2];
     std::string saveArea;
     std::string fineArea;
+    std::string withCov;   // ACEO: prior covariance path
+    std::string saveCov;   // ACEO: save covariance path
     float threshold = 0.005f;
     int workingSize = 1080;
     geos::Mode mode = geos::Mode::BLOCKWISE;
@@ -106,6 +121,8 @@ int main(int argc, char** argv)
             if (o == "aceo" || o == "ACEO") optimizer = geos::Optimizer::ACEO;
             else optimizer = geos::Optimizer::SPSA;
         }
+        else if (arg == "--with-cov" && i + 1 < argc) withCov = argv[++i];
+        else if (arg == "--save-cov" && i + 1 < argc) saveCov = argv[++i];
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
@@ -133,6 +150,8 @@ int main(int argc, char** argv)
         std::cout << "Mode: " << modeName << std::endl;
         std::cout << "Optimizer: " << optimizerName << std::endl;
         std::cout << "Working size: " << workingSize << "px" << std::endl;
+        if (!withCov.empty()) std::cout << "With covariance: " << withCov << std::endl;
+        if (!saveCov.empty()) std::cout << "Save covariance: " << saveCov << std::endl;
         if (logs) std::cout << "Logs: enabled" << std::endl;
         if (fine) std::cout << "Fine area: " << fineArea << std::endl;
 
@@ -261,6 +280,8 @@ int main(int argc, char** argv)
         linearConfig.geos_threshold = threshold;
         linearConfig.geos_mode = geos::Mode::SCENE_LINEAR;
         linearConfig.optimizer = optimizer;
+        linearConfig.aceo_with_cov = withCov;
+        linearConfig.aceo_save_cov = saveCov;
 
         geos::Result linearResult = geosTask->run(body, linearLink, linearConfig, progressCallback);
         std::cout << std::endl;
@@ -300,6 +321,8 @@ int main(int argc, char** argv)
         displayConfig.geos_threshold = threshold;
         displayConfig.geos_mode = geos::Mode::DISPLAY;
         displayConfig.optimizer = optimizer;
+        displayConfig.aceo_with_cov = withCov;
+        displayConfig.aceo_save_cov = saveCov;
 
         geos::Result displayResult = geosTask->run(body, displayLink, displayConfig, progressCallback);
         std::cout << std::endl;

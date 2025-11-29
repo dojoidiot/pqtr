@@ -1,14 +1,24 @@
 // aceo.cpp
-// ACEO: Adaptive Covariance Evolver Optimiser
+// ACEO: Adaptive Covariance Evolver Optimiser (Full ACEO - 45 dials)
 //
-// Key insight: The 36D dial space has only ~6 effective dimensions (95% variance).
+// Key insight: The 45D dial space has only ~12 effective dimensions (99% variance).
 // We exploit this by:
 //   1. Eigendecompose the prior correlation matrix
-//   2. Optimize in reduced eigenspace (6D instead of 36D)
+//   2. Optimize in reduced eigenspace (12D instead of 45D)
 //   3. Transform solutions back to dial space
 //
 // This dramatically reduces the search space complexity and allows
 // the optimizer to follow the natural structure of the loss landscape.
+//
+// Full ACEO includes ALL style dials:
+//   - ColorCorrection (3): exposure, temperature, tint
+//   - ToneMapping (7): contrast, highlights, shadows, toe, shoulder, black, white
+//   - GlobalColor (3): vibrance, saturation, density
+//   - SplitTone (4): shadow_temp, shadow_tint, highlight_temp, highlight_tint
+//   - SelectiveColor (24): 8 hues × (H/S/L)
+//   - Detail (4): sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma
+//
+// Geometric dials (6) excluded - user composition choices.
 
 #include "aceo.hpp"
 #include "spsa.hpp"  // For readDials/writeDials/Theta
@@ -24,21 +34,171 @@
 namespace geos::internal
 {
     // ============================================================
-    // Reduced dimensionality (captures 95% variance)
+    // Reduced dimensionality (captures 99% variance)
     // ============================================================
-    constexpr int EIGEN_DIM = 8;  // Top 8 eigenvectors (99% variance)
+    constexpr int EIGEN_DIM = 12;  // Top 12 eigenvectors for 45D (99% variance)
 
-    using Matrix36 = std::array<float, ACEO_DIAL_COUNT * ACEO_DIAL_COUNT>;
-    using Vector36 = std::array<float, ACEO_DIAL_COUNT>;
-    using VectorK = std::array<float, EIGEN_DIM>;
-    using MatrixK = std::array<float, ACEO_DIAL_COUNT * EIGEN_DIM>;  // 36 x K projection matrix
+    using MatrixN = std::array<float, ACEO_DIAL_COUNT * ACEO_DIAL_COUNT>;  // 45x45
+    using VectorN = std::array<float, ACEO_DIAL_COUNT>;                     // 45
+    using VectorK = std::array<float, EIGEN_DIM>;                           // 12
+    using MatrixNK = std::array<float, ACEO_DIAL_COUNT * EIGEN_DIM>;        // 45x12 projection
+
+    // ============================================================
+    // Online Covariance Accumulator (Welford's algorithm)
+    // ============================================================
+    // Numerically stable online computation of mean and covariance.
+    // Can be used to:
+    //   1. Accumulate samples during optimization
+    //   2. Adapt eigenspace based on observed dial correlations
+    //   3. Save learned covariance for future runs
+
+    struct CovarianceAccumulator
+    {
+        int n = 0;                    // Sample count
+        VectorN mean;                 // Running mean
+        MatrixN M2;                   // Sum of squared deviations (for covariance)
+
+        CovarianceAccumulator()
+        {
+            mean.fill(0.0f);
+            M2.fill(0.0f);
+        }
+
+        // Add a sample using Welford's online algorithm
+        void update(const VectorN& sample)
+        {
+            n++;
+            VectorN delta;
+            VectorN delta2;
+
+            // Update mean and compute deltas
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                delta[i] = sample[i] - mean[i];
+                mean[i] += delta[i] / static_cast<float>(n);
+                delta2[i] = sample[i] - mean[i];
+            }
+
+            // Update M2 (outer product of deltas)
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                for (int j = 0; j < ACEO_DIAL_COUNT; j++)
+                {
+                    M2[i * ACEO_DIAL_COUNT + j] += delta[i] * delta2[j];
+                }
+            }
+        }
+
+        // Get covariance matrix (n-1 normalization for unbiased estimate)
+        bool getCovariance(MatrixN& cov) const
+        {
+            if (n < 2) return false;
+
+            float invN = 1.0f / static_cast<float>(n - 1);
+            for (int i = 0; i < ACEO_DIAL_COUNT * ACEO_DIAL_COUNT; i++)
+            {
+                cov[i] = M2[i] * invN;
+            }
+            return true;
+        }
+
+        // Get correlation matrix (normalized covariance)
+        bool getCorrelation(MatrixN& corr) const
+        {
+            MatrixN cov;
+            if (!getCovariance(cov)) return false;
+
+            // Extract standard deviations from diagonal
+            VectorN stddev;
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                float var = cov[i * ACEO_DIAL_COUNT + i];
+                stddev[i] = var > 1e-10f ? std::sqrt(var) : 1e-5f;
+            }
+
+            // Normalize: corr[i,j] = cov[i,j] / (std[i] * std[j])
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                for (int j = 0; j < ACEO_DIAL_COUNT; j++)
+                {
+                    corr[i * ACEO_DIAL_COUNT + j] = cov[i * ACEO_DIAL_COUNT + j] / (stddev[i] * stddev[j]);
+                }
+            }
+            return true;
+        }
+
+        // Blend with prior covariance: result = alpha * accumulated + (1-alpha) * prior
+        bool blendWithPrior(const MatrixN& prior, float alpha, MatrixN& result) const
+        {
+            MatrixN accumulated;
+            if (!getCorrelation(accumulated))
+            {
+                // Not enough samples, use prior
+                result = prior;
+                return true;
+            }
+
+            alpha = std::clamp(alpha, 0.0f, 1.0f);
+            for (int i = 0; i < ACEO_DIAL_COUNT * ACEO_DIAL_COUNT; i++)
+            {
+                result[i] = alpha * accumulated[i] + (1.0f - alpha) * prior[i];
+            }
+            return true;
+        }
+
+        // Save to JSON file
+        bool saveToJson(const std::string& path) const
+        {
+            MatrixN corr;
+            if (!getCorrelation(corr))
+            {
+                std::cerr << "[ACEO-COV] Not enough samples to save (n=" << n << ")" << std::endl;
+                return false;
+            }
+
+            std::ofstream file(path);
+            if (!file.is_open())
+            {
+                std::cerr << "[ACEO-COV] Failed to open: " << path << std::endl;
+                return false;
+            }
+
+            file << "{\n";
+            file << "  \"sample_count\": " << n << ",\n";
+            file << "  \"mean\": [";
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                if (i > 0) file << ", ";
+                file << mean[i];
+            }
+            file << "],\n";
+            file << "  \"correlation_matrix\": [\n";
+            for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            {
+                file << "    [";
+                for (int j = 0; j < ACEO_DIAL_COUNT; j++)
+                {
+                    if (j > 0) file << ", ";
+                    file << corr[i * ACEO_DIAL_COUNT + j];
+                }
+                file << "]";
+                if (i < ACEO_DIAL_COUNT - 1) file << ",";
+                file << "\n";
+            }
+            file << "  ]\n";
+            file << "}\n";
+
+            std::cerr << "[ACEO-COV] Saved covariance (" << n << " samples) to: " << path << std::endl;
+            return true;
+        }
+    };
 
     // ============================================================
     // Eigendecomposition using Jacobi method
     // ============================================================
 
     // Jacobi rotation for symmetric eigenvalue decomposition
-    void jacobiRotate(Matrix36& A, Matrix36& V, int p, int q)
+    void jacobiRotate(MatrixN& A, MatrixN& V, int p, int q)
     {
         const int n = ACEO_DIAL_COUNT;
         float app = A[p * n + p];
@@ -80,7 +240,7 @@ namespace geos::internal
 
     // Full Jacobi eigendecomposition
     // Returns eigenvalues in diagonal of A, eigenvectors in columns of V
-    void jacobi(Matrix36& A, Matrix36& V, int maxIter = 100)
+    void jacobi(MatrixN& A, MatrixN& V, int maxIter = 100)
     {
         const int n = ACEO_DIAL_COUNT;
 
@@ -119,18 +279,18 @@ namespace geos::internal
 
     struct EigenSpace
     {
-        std::array<float, ACEO_DIAL_COUNT> eigenvalues;      // All 36 eigenvalues (descending)
+        std::array<float, ACEO_DIAL_COUNT> eigenvalues;      // All 45 eigenvalues (descending)
         std::array<int, ACEO_DIAL_COUNT> eigenOrder;         // Indices sorted by eigenvalue
-        MatrixK projection;                                   // Top K eigenvectors (36 x K)
-        Vector36 mean;                                        // Mean in dial space (0.5)
+        MatrixNK projection;                                  // Top K eigenvectors (45 x K)
+        VectorN mean;                                         // Mean in dial space (0.5)
         bool valid = false;
     };
 
-    bool computeEigenSpace(const Matrix36& correlation, EigenSpace& es)
+    bool computeEigenSpace(const MatrixN& correlation, EigenSpace& es)
     {
         // Copy correlation matrix (Jacobi modifies in-place)
-        Matrix36 A = correlation;
-        Matrix36 V;
+        MatrixN A = correlation;
+        MatrixN V;
 
         // Compute eigendecomposition
         jacobi(A, V, 200);
@@ -175,7 +335,7 @@ namespace geos::internal
     }
 
     // Project dial-space vector to eigenspace: z = P^T (x - mean)
-    void projectToEigen(const EigenSpace& es, const Vector36& x, VectorK& z)
+    void projectToEigen(const EigenSpace& es, const VectorN& x, VectorK& z)
     {
         for (int k = 0; k < EIGEN_DIM; k++)
         {
@@ -189,7 +349,7 @@ namespace geos::internal
     }
 
     // Unproject eigenspace vector to dial-space: x = mean + P z
-    void unprojectFromEigen(const EigenSpace& es, const VectorK& z, Vector36& x)
+    void unprojectFromEigen(const EigenSpace& es, const VectorK& z, VectorN& x)
     {
         for (int i = 0; i < ACEO_DIAL_COUNT; i++)
         {
@@ -206,13 +366,22 @@ namespace geos::internal
     // JSON parsing for prior covariance
     // ============================================================
 
-    bool loadPriorCovariance(const std::string& path, Matrix36& matrix)
+    // Initialize identity matrix (for bootstrapping when no prior exists)
+    void initIdentity(MatrixN& matrix)
+    {
+        matrix.fill(0.0f);
+        for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+            matrix[i * ACEO_DIAL_COUNT + i] = 1.0f;
+    }
+
+    bool loadPriorCovariance(const std::string& path, MatrixN& matrix)
     {
         std::ifstream file(path);
         if (!file.is_open())
         {
-            std::cerr << "[ACEO] Failed to open: " << path << std::endl;
-            return false;
+            std::cerr << "[ACEO] Prior not found: " << path << ", using identity (bootstrapping)" << std::endl;
+            initIdentity(matrix);
+            return true;  // Not a failure - use identity for bootstrapping
         }
 
         std::string content((std::istreambuf_iterator<char>(file)),
@@ -263,18 +432,19 @@ namespace geos::internal
     }
 
     // ============================================================
-    // Dial conversion
+    // Dial conversion (Full ACEO: identity mapping, all 45 dials)
     // ============================================================
 
-    void aceoToTheta(const Vector36& aceo, Theta& theta)
+    void aceoToTheta(const VectorN& aceo, Theta& theta)
     {
-        theta.fill(0.5f);
+        // Full ACEO: direct copy (ACEO_DIAL_MAP is identity [0..44])
         for (int i = 0; i < ACEO_DIAL_COUNT; i++)
             theta[ACEO_DIAL_MAP[i]] = aceo[i];
     }
 
-    void thetaToAceo(const Theta& theta, Vector36& aceo)
+    void thetaToAceo(const Theta& theta, VectorN& aceo)
     {
+        // Full ACEO: direct copy (ACEO_DIAL_MAP is identity [0..44])
         for (int i = 0; i < ACEO_DIAL_COUNT; i++)
             aceo[i] = theta[ACEO_DIAL_MAP[i]];
     }
@@ -298,8 +468,9 @@ namespace geos::internal
         std::normal_distribution<float> normal(0.0f, 1.0f);
 
         // Load prior covariance
-        Matrix36 priorCorr;
-        std::string priorPath = "etc/aceo.json";
+        // Priority: --with-cov flag > etc/aceo_full.json > identity (bootstrapping)
+        MatrixN priorCorr;
+        std::string priorPath = config.aceo_with_cov.empty() ? "etc/aceo_full.json" : config.aceo_with_cov;
         if (!loadPriorCovariance(priorPath, priorCorr))
         {
             std::cerr << "[ACEO] Failed to load prior, falling back to SPSA" << std::endl;
@@ -341,41 +512,27 @@ namespace geos::internal
 
         float muEff = 1.0f / std::inner_product(weights.begin(), weights.end(), weights.begin(), 0.0f);
 
-        // Adaptation parameters
-        float cc = (4.0f + muEff / EIGEN_DIM) / (EIGEN_DIM + 4.0f + 2.0f * muEff / EIGEN_DIM);
+        // Adaptation parameters (CSA for step-size adaptation)
+        // cc, c1, cmu reserved for full covariance adaptation (future)
         float cs = (muEff + 2.0f) / (EIGEN_DIM + muEff + 5.0f);
-        float c1 = 2.0f / ((EIGEN_DIM + 1.3f) * (EIGEN_DIM + 1.3f) + muEff);
-        float cmu = std::min(1.0f - c1, 2.0f * (muEff - 2.0f + 1.0f / muEff) / ((EIGEN_DIM + 2.0f) * (EIGEN_DIM + 2.0f) + muEff));
         float damps = 1.0f + 2.0f * std::max(0.0f, std::sqrt((muEff - 1.0f) / (EIGEN_DIM + 1.0f)) - 1.0f) + cs;
         float chiN = std::sqrt(static_cast<float>(EIGEN_DIM)) * (1.0f - 1.0f / (4.0f * EIGEN_DIM) + 1.0f / (21.0f * EIGEN_DIM * EIGEN_DIM));
 
         // Initialize mean in eigenspace (project current dials)
         Theta startTheta;
         readDials(link, startTheta);
-        Vector36 startAceo;
+        VectorN startAceo;
         thetaToAceo(startTheta, startAceo);
 
         VectorK mean;
         projectToEigen(es, startAceo, mean);
 
-        // Evolution paths
-        VectorK ps, pc;
+        // Evolution path for step-size adaptation (CSA)
+        VectorK ps;
         ps.fill(0.0f);
-        pc.fill(0.0f);
 
-        // Covariance matrix in eigenspace (start with identity * eigenvalue scaling)
-        std::array<float, EIGEN_DIM * EIGEN_DIM> C;
-        C.fill(0.0f);
-        for (int k = 0; k < EIGEN_DIM; k++)
-        {
-            // Scale by eigenvalue for proper step sizes
-            float ev = es.eigenvalues[es.eigenOrder[k]];
-            C[k * EIGEN_DIM + k] = 1.0f;  // Identity - let sigma handle scaling
-        }
-
-        // Cholesky of C (initially identity)
-        std::array<float, EIGEN_DIM * EIGEN_DIM> B;
-        B = C;  // For identity, B = C
+        // Note: Full CMA-ES covariance adaptation (C matrix, pc path) reserved for future.
+        // Current implementation uses fixed prior eigenspace with CSA step-size adaptation.
 
         // Evaluate initial loss
         float initialLoss = evaluateLoss(body, targetStyle);
@@ -385,11 +542,16 @@ namespace geos::internal
 
         VectorK bestMean = mean;
         float bestLoss = initialLoss;
+        VectorN bestAceoSample;  // Track best dial config for accumulator
 
         // Population storage
         std::vector<VectorK> population(lambda);
+        std::vector<VectorN> populationAceo(lambda);  // Dial-space samples for covariance
         std::vector<float> fitness(lambda);
         std::vector<int> ranking(lambda);
+
+        // Online covariance accumulator - collects good samples during optimization
+        CovarianceAccumulator covAccum;
 
         int maxGen = config.geos_max_iter / lambda;
         int evalCount = 0;
@@ -408,12 +570,11 @@ namespace geos::internal
                 }
 
                 // Unproject to dial space
-                Vector36 aceo;
-                unprojectFromEigen(es, population[i], aceo);
+                unprojectFromEigen(es, population[i], populationAceo[i]);
 
                 // Evaluate
                 Theta theta;
-                aceoToTheta(aceo, theta);
+                aceoToTheta(populationAceo[i], theta);
                 writeDials(link, theta);
                 fitness[i] = evaluateLoss(body, targetStyle);
                 evalCount++;
@@ -432,6 +593,7 @@ namespace geos::internal
                     }
                     bestLoss = fitness[i];
                     bestMean = population[i];
+                    bestAceoSample = populationAceo[i];
                 }
             }
 
@@ -439,6 +601,13 @@ namespace geos::internal
             std::iota(ranking.begin(), ranking.end(), 0);
             std::sort(ranking.begin(), ranking.end(),
                       [&](int a, int b) { return fitness[a] < fitness[b]; });
+
+            // Accumulate covariance from top mu samples (good dial configurations)
+            for (int i = 0; i < mu; i++)
+            {
+                int idx = ranking[i];
+                covAccum.update(populationAceo[idx]);
+            }
 
             // Update mean
             VectorK oldMean = mean;
@@ -505,7 +674,7 @@ namespace geos::internal
         }
 
         // Restore best solution
-        Vector36 bestAceo;
+        VectorN bestAceo;
         unprojectFromEigen(es, bestMean, bestAceo);
         Theta bestTheta;
         aceoToTheta(bestAceo, bestTheta);
@@ -513,6 +682,54 @@ namespace geos::internal
 
         float finalLoss = evaluateLoss(body, targetStyle);
         std::cerr << "[ACEO-EIGEN] Final loss: " << finalLoss << " (evals=" << evalCount << ")" << std::endl;
+
+        // Log covariance accumulator stats
+        std::cerr << "[ACEO-COV] Accumulated " << covAccum.n << " samples" << std::endl;
+
+        // Save accumulated covariance if --save-cov specified
+        if (!config.aceo_save_cov.empty() && covAccum.n >= 10)
+        {
+            // If --with-cov was specified, blend accumulated with prior
+            if (!config.aceo_with_cov.empty())
+            {
+                MatrixN blended;
+                // Weight: more samples = more weight on accumulated
+                float alpha = std::min(1.0f, static_cast<float>(covAccum.n) / 500.0f);
+                if (covAccum.blendWithPrior(priorCorr, alpha, blended))
+                {
+                    // Save blended result
+                    std::ofstream file(config.aceo_save_cov);
+                    if (file.is_open())
+                    {
+                        file << "{\n";
+                        file << "  \"sample_count\": " << covAccum.n << ",\n";
+                        file << "  \"blend_alpha\": " << alpha << ",\n";
+                        file << "  \"prior\": \"" << config.aceo_with_cov << "\",\n";
+                        file << "  \"correlation_matrix\": [\n";
+                        for (int i = 0; i < ACEO_DIAL_COUNT; i++)
+                        {
+                            file << "    [";
+                            for (int j = 0; j < ACEO_DIAL_COUNT; j++)
+                            {
+                                if (j > 0) file << ", ";
+                                file << blended[i * ACEO_DIAL_COUNT + j];
+                            }
+                            file << "]";
+                            if (i < ACEO_DIAL_COUNT - 1) file << ",";
+                            file << "\n";
+                        }
+                        file << "  ]\n";
+                        file << "}\n";
+                        std::cerr << "[ACEO-COV] Saved blended covariance (α=" << alpha << ") to: " << config.aceo_save_cov << std::endl;
+                    }
+                }
+            }
+            else
+            {
+                // No prior, save accumulated directly
+                covAccum.saveToJson(config.aceo_save_cov);
+            }
+        }
 
         return evalCount;
     }
