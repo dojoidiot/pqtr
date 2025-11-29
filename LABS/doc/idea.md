@@ -8,11 +8,13 @@ Theoretical enhancements not yet in scope. For empirical findings, see [analysis
 
 ## Luminance-Split LUTs
 
+**Status:** ❌ ATTEMPTED 2024-11. Soft blending approach failed - creates color artifacts.
+
 **Current:** Single 17³ 3D LUT estimated via global binning.
 
 **Problem:** Camera processing is spatially variant - same RGB produces different outputs based on scene luminance. Global binning averages these, creating errors for all regions. See [analysis.md](./analysis.md#lut-covariance-problem-key-insight) for details.
 
-### Approach
+### Attempted Approach (Failed)
 
 Estimate 3 separate LUTs based on pixel luminance:
 
@@ -25,7 +27,23 @@ LUT_highlights (L > 0.7)
 output = blend(LUT_s(px), LUT_m(px), LUT_h(px), px.L)
 ```
 
-### Benefits
+### Why It Failed
+
+1. **Color discontinuities at boundaries**: LUTs trained on different luminance regions have incompatible color mappings. Blending them creates visible color shifts (e.g., green artifacts on steel beams in bridge test image).
+
+2. **Sparse training data**: Shadows LUT has no data for bright colors, highlights LUT has no data for dark colors. Fallback to midtones doesn't help because midtones LUT learned different transforms.
+
+3. **The fundamental problem**: Luminance-split assumes camera processing varies smoothly with luminance. In reality, camera processing is content-aware (faces, sky, foliage) not just luminance-aware. Splitting by luminance doesn't capture these content-dependent variations.
+
+### Alternative Approaches (Not Yet Tried)
+
+1. **4D LUT**: Add luminance as 4th dimension instead of separate LUTs. Single 9×9×9×9 LUT with native interpolation. More complex but avoids blending artifacts.
+
+2. **Residual correction**: Keep single LUT, add per-luminance-band residual adjustments (smaller corrections on top of global LUT).
+
+3. **Different loss function**: Instead of fixing the LUT, improve dial optimization to better handle what the LUT can't capture.
+
+### Benefits (Theoretical)
 
 | Aspect | Single LUT | Luminance-Split |
 |--------|------------|-----------------|
@@ -37,8 +55,7 @@ output = blend(LUT_s(px), LUT_m(px), LUT_h(px), px.L)
 ### Considerations
 
 - 3× storage increase acceptable (44KB vs 15KB in tune.json)
-- Soft blending at boundaries prevents discontinuities
-- Captures most common spatial variance without regional complexity
+- ~~Soft blending at boundaries prevents discontinuities~~ **FALSE - creates artifacts**
 - May not help with face/sky detection (content-aware, not luminance-aware)
 
 ---
