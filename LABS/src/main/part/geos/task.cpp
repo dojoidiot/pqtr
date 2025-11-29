@@ -9,6 +9,7 @@
 #include <geos.hpp>
 #include "diff.hpp"
 #include "spsa.hpp"
+#include "aceo.hpp"
 #include "edge.hpp"
 #include <opencv2/imgproc.hpp>
 #include <iostream>
@@ -116,9 +117,24 @@ namespace geos
             if (!config.skip_geos)
             {
                 bool lutEstimated = link.lutCurve().isEstimated();
-                // Pass regional features for DISPLAY mode
-                result.geos_iterations = optimizeGeos(
-                    body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
+
+                // Dispatch based on optimizer selection
+                // ACEO only works for modes with its 36 variable dials (DISPLAY, FULL_35D)
+                // For SCENE_LINEAR (5 dials) and LINEAR_ONLY (partial), fall back to SPSA
+                bool useAceo = (config.optimizer == Optimizer::ACEO) &&
+                               (config.geos_mode == Mode::DISPLAY || config.geos_mode == Mode::FULL_35D);
+
+                if (useAceo)
+                {
+                    result.geos_iterations = optimizeAceo(
+                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
+                }
+                else
+                {
+                    // Default: SPSA - Pass regional features for DISPLAY mode
+                    result.geos_iterations = optimizeGeos(
+                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
+                }
             }
 
             // Stage 3: Edge (Sharpness)

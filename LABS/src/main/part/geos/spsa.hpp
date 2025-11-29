@@ -147,6 +147,27 @@ namespace geos::internal
     constexpr float CONVERGE_THRESHOLD = 0.005f;  // 0.5% (tighter with LUT)
 
     // ============================================================
+    // Shared dial utilities (used by both SPSA and ACEO)
+    // ============================================================
+
+    // Dial values as float array
+    using Theta = std::array<float, GEOS_DIAL_COUNT>;
+
+    // Read current dial values from link into theta
+    void readDials(pipe::Body::Link& link, Theta& theta);
+
+    // Write theta values to link dials
+    void writeDials(pipe::Body::Link& link, const Theta& theta);
+
+    // Initialize theta to neutral (0.5 for all dials)
+    void initNeutral(Theta& theta);
+
+    // Compute loss for current body state (global only)
+    float evaluateLoss(
+        pipe::Body& body,
+        const StyleFeatures& targetStyle);
+
+    // ============================================================
     // Optimizer entry point
     // ============================================================
 

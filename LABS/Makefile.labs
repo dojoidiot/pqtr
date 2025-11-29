@@ -56,6 +56,7 @@ MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
 GEOS_SRCS = $(SRC_DIR)/part/geos/task.cpp \
             $(SRC_DIR)/part/geos/diff.cpp \
             $(SRC_DIR)/part/geos/spsa.cpp \
+            $(SRC_DIR)/part/geos/aceo.cpp \
             $(SRC_DIR)/part/geos/edge.cpp \
             $(SRC_DIR)/part/geos/data.cpp
 
@@ -79,6 +80,7 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
 GEOS_OBJS = $(OBJ_DIR)/geos/task.o \
             $(OBJ_DIR)/geos/diff.o \
             $(OBJ_DIR)/geos/spsa.o \
+            $(OBJ_DIR)/geos/aceo.o \
             $(OBJ_DIR)/geos/edge.o \
             $(OBJ_DIR)/geos/data.o
 

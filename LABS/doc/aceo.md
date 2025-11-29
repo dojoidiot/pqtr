@@ -115,12 +115,50 @@ The empirical correlation matrix is stored in `etc/aceo.json`. This 36×36 matri
 
 ## Status
 
-**Validated.** Empirical covariance measurement complete. Prior matrix available in `etc/aceo.json`.
+**Implemented.** ACEO optimizer available via `--optimizer aceo` flag in tune.
 
-Next steps:
-1. Implement ACEO optimizer in `src/main/part/geos/`
-2. Use prior covariance for warm start
-3. Compare convergence quality against SPSA baseline
+### Implementation Details (v2 - Eigenspace)
+
+The 36D dial space has only ~8 effective dimensions:
+
+| Variance Captured | Dimensions |
+|-------------------|------------|
+| 80% | 4 |
+| 95% | 6 |
+| 99% | 8 |
+
+- `src/main/part/geos/aceo.hpp` - CMA-ES algorithm interface
+- `src/main/part/geos/aceo.cpp` - Eigenspace implementation:
+  - Jacobi eigendecomposition of prior correlation
+  - Project 36D → 8D eigenspace
+  - CMA-ES with eigenvalue-weighted sampling
+  - CSA (Cumulative Step-size Adaptation)
+
+### Performance Comparison
+
+| Image | ACEO | SPSA |
+|-------|------|------|
+| DSC00202 | 0.19% (220 evals) | 0.09% (100 evals) |
+
+### Why SPSA Wins (currently)
+
+SPSA uses **phased optimization** aligned with **loss function structure**:
+1. Phase 1: ToneMapping (exposure/contrast)
+2. Phase 2: GlobalColor (saturation/density)
+3. Phase 3: Regional refinement
+
+ACEO uses **eigenspace** aligned with **dial correlation structure** - captures how dials move together across images, but not how they affect the loss.
+
+### Path to ACEO Victory
+
+1. **Phased eigenspace**: Map eigenvectors to phases
+   - PC1-2 dominate ToneMapping dials
+   - PC3-4 dominate GlobalColor dials
+
+2. **Adaptive eigenspace**: Learn image-specific structure
+   - Start with prior, adapt based on observed gradients
+
+3. **Hybrid**: ACEO for exploration, SPSA for refinement
 
 ## Files
 

@@ -63,6 +63,13 @@ namespace geos
         DISPLAY        // Display-referred: skip scene-linear dials, optimize rest + LUT
     };
 
+    // Optimizer algorithm selection
+    enum class Optimizer
+    {
+        SPSA,   // Simultaneous Perturbation Stochastic Approximation (default)
+        ACEO    // Adaptive Covariance Evolver Optimiser (CMA-ES with prior)
+    };
+
     struct Config
     {
         bool skip_geos = false;        // Skip color/tone optimization
@@ -73,6 +80,7 @@ namespace geos
         float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
         Mode geos_mode = Mode::BLOCKWISE;  // Optimization strategy
+        Optimizer optimizer = Optimizer::SPSA;  // Algorithm selection (SPSA or ACEO)
     };
 
     // ============================================================

@@ -48,6 +48,7 @@ void printUsage(const char* prog)
     std::cerr << "  --threshold <value>     Stop when spectral loss below (default: 0.005)\n";
     std::cerr << "  --size <pixels>         Working size (default: 1080)\n";
     std::cerr << "  --mode <mode>           blockwise, full35d, linear (default: blockwise)\n";
+    std::cerr << "  --optimizer <algo>      spsa, aceo (default: spsa)\n";
     std::cerr << "  --skip-lut              Skip 3D LUT estimation\n";
     std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
     std::cerr << "  --fine                  Save intermediate images + meta.json\n";
@@ -77,6 +78,7 @@ int main(int argc, char** argv)
     float threshold = 0.005f;
     int workingSize = 1080;
     geos::Mode mode = geos::Mode::BLOCKWISE;
+    geos::Optimizer optimizer = geos::Optimizer::SPSA;
     bool skipLut = false;
     bool logs = false;
     bool fine = false;
@@ -98,6 +100,12 @@ int main(int argc, char** argv)
             else if (m == "linear" || m == "lin") mode = geos::Mode::LINEAR_ONLY;
             else mode = geos::Mode::BLOCKWISE;
         }
+        else if (arg == "--optimizer" && i + 1 < argc)
+        {
+            std::string o = argv[++i];
+            if (o == "aceo" || o == "ACEO") optimizer = geos::Optimizer::ACEO;
+            else optimizer = geos::Optimizer::SPSA;
+        }
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
@@ -116,12 +124,14 @@ int main(int argc, char** argv)
     {
         const char* modeName = (mode == geos::Mode::FULL_35D) ? "FULL_35D" :
                                (mode == geos::Mode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
+        const char* optimizerName = (optimizer == geos::Optimizer::ACEO) ? "ACEO" : "SPSA";
 
         std::cout << "=== TUNE ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
         std::cout << "Target: " << targetPath << std::endl;
         std::cout << "Save area: " << saveArea << std::endl;
         std::cout << "Mode: " << modeName << std::endl;
+        std::cout << "Optimizer: " << optimizerName << std::endl;
         std::cout << "Working size: " << workingSize << "px" << std::endl;
         if (logs) std::cout << "Logs: enabled" << std::endl;
         if (fine) std::cout << "Fine area: " << fineArea << std::endl;
@@ -250,6 +260,7 @@ int main(int argc, char** argv)
         linearConfig.geos_max_iter = 150;  // Fewer iterations for 5 dials
         linearConfig.geos_threshold = threshold;
         linearConfig.geos_mode = geos::Mode::SCENE_LINEAR;
+        linearConfig.optimizer = optimizer;
 
         geos::Result linearResult = geosTask->run(body, linearLink, linearConfig, progressCallback);
         std::cout << std::endl;
@@ -288,6 +299,7 @@ int main(int argc, char** argv)
         displayConfig.geos_max_iter = 350;  // More iterations for 36 dials
         displayConfig.geos_threshold = threshold;
         displayConfig.geos_mode = geos::Mode::DISPLAY;
+        displayConfig.optimizer = optimizer;
 
         geos::Result displayResult = geosTask->run(body, displayLink, displayConfig, progressCallback);
         std::cout << std::endl;
