@@ -74,6 +74,7 @@ struct PanelVisibility {
     bool info = false;         // RAW metadata
     bool link_editor = false;  // Slider equalizer
     bool embedded = false;     // Embedded camera preview
+    bool geos = false;         // GeoS dome visualization
 };
 
 // ============================================================
@@ -195,6 +196,7 @@ struct State {
         float info_w = 0.15f, info_h = 0.35f;
         float editor_w = 0.40f, editor_h = 0.35f;
         float embedded_w = 0.26f, embedded_h = 0.455f;
+        float geos_w = 0.20f, geos_h = 0.40f;
     } panel_sizes;
 
     // Image textures

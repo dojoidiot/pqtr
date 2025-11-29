@@ -17,6 +17,7 @@
 #include "part/projects.hpp"
 #include "part/workarea.hpp"
 #include "part/linkeditor.hpp"
+#include "part/geos.hpp"
 
 namespace {
 
@@ -110,6 +111,15 @@ void render_menu_bar(desk::State& state, int display_w) {
     ImGui::EndDisabled();
 
     ImGui::EndDisabled();  // End folder_set disable
+
+    // GeoS dome button (always available)
+    ImGui::SameLine();
+    if (ImGui::Button(state.panels.geos ? "GeoS [x]" : "GeoS [ ]")) {
+        state.panels.geos = !state.panels.geos;
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Geodesic Spectrum visualization");
+    }
 
     // Separator
     ImGui::SameLine();
@@ -336,6 +346,32 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
         ImVec2 win_size = ImGui::GetWindowSize();
         state.panel_sizes.embedded_w = win_size.x / display_w;
         state.panel_sizes.embedded_h = win_size.y / content_h;
+
+        ImGui::End();
+    }
+
+    // GeoS Dome Panel - CENTER RIGHT (between embedded and editor)
+    if (state.panels.geos) {
+        ImVec2 size(display_w * state.panel_sizes.geos_w, content_h * state.panel_sizes.geos_h);
+        if (size.x < 200) size.x = 200;
+        if (size.y < 250) size.y = 250;
+
+        // Position: right side, centered vertically
+        ImVec2 pos(display_w - size.x - PANEL_MARGIN,
+                   content_y + (content_h - size.y) * 0.5f);
+
+        ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(size, ImGuiCond_Always);
+
+        ImGui::Begin("GeoS", &state.panels.geos,
+                     ImGuiWindowFlags_NoCollapse);
+
+        desk::render_geos_panel();
+
+        // Update fractions if user resized
+        ImVec2 win_size = ImGui::GetWindowSize();
+        state.panel_sizes.geos_w = win_size.x / display_w;
+        state.panel_sizes.geos_h = win_size.y / content_h;
 
         ImGui::End();
     }
@@ -616,6 +652,7 @@ int main(int argc, char** argv) {
     // Cleanup
     desk::unload_texture(state);
     desk::unload_embedded_texture(state);
+    desk::cleanup_geos();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

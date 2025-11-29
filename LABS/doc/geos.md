@@ -212,16 +212,16 @@ No optimizer logic in the visualization. Just dial state → color. The dome sho
 
 **Current optimizer**: SPSA. Works. 0.05% loss, ~65 seconds. No covariance awareness.
 
-**Proposed**: CMA-ES with pre-trained Σ from sample pics. Hypothesis: if dials covary strongly, this will converge faster.
+**Validated**: ACEO (Adaptive Covariance Evolver Optimiser) with pre-trained Σ from sample pics. Empirical covariance analysis shows 359 strong dial correlations (|r| > 0.3), max r = 0.979. Strong covariance detected.
 
-**Next step**: Measure empirical covariance from existing batch runs to validate the hypothesis before implementing CMA-ES.
+**Next step**: Implement ACEO optimizer using prior covariance matrix from `etc/aceo.json`.
 
 ---
 
 ## See Also
 
 - [spsa.md](./spsa.md) - SPSA optimization strategy
-- [cmaes.md](./cmaes.md) - CMA-ES optimization strategy (proposed)
+- [aceo.md](./aceo.md) - ACEO optimization strategy (validated)
 - [edge.md](./edge.md) - Frequency loss (sharpness)
 - [tune.md](./tune.md) - Orchestrates GeoS + Edge
 - [diff.md](./diff.md) - Loss metrics implementation
