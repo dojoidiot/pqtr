@@ -4,6 +4,8 @@
 #include "diff.hpp"
 #include <opencv2/imgproc.hpp>
 #include <cmath>
+#include <iostream>
+#include <cstdio>
 
 namespace geos::internal
 {
@@ -102,6 +104,18 @@ namespace geos::internal
         return convertToSafeLCH_impl(bgr).lch;
     }
 
+    // Helper: compute percentile from a flattened cv::Mat
+    static float computePercentile(const cv::Mat& data, float p)
+    {
+        cv::Mat flat = data.reshape(1, data.total());
+        cv::Mat sorted;
+        cv::sort(flat, sorted, cv::SORT_ASCENDING);
+
+        int idx = static_cast<int>(p * (sorted.total() - 1));
+        idx = std::max(0, std::min(idx, static_cast<int>(sorted.total() - 1)));
+        return sorted.at<float>(idx);
+    }
+
     // Internal helper: extract style from LCH with pre-computed Lab a/b means
     StyleFeatures extractStyleImpl(const cv::UMat& lch, float mu_a, float mu_b)
     {
@@ -158,10 +172,48 @@ namespace geos::internal
         cv::multiply(H - mu_H, C - mu_C, HC_prod);
         float cov_HC = static_cast<float>(cv::mean(HC_prod)[0]);
 
-        // Build 12D feature vector (was 10D, now includes mu_a, mu_b for color cast)
-        features.v = {sigma1, sigma2, sigma3, mu_L, mu_C, std_L, std_C, skew_L, cov_LC, cov_HC, mu_a, mu_b};
+        // Histogram percentiles for tone curve shape
+        float L_p10 = computePercentile(L, 0.10f);
+        float L_p25 = computePercentile(L, 0.25f);
+        float L_p75 = computePercentile(L, 0.75f);
+        float L_p90 = computePercentile(L, 0.90f);
+        float C_p50 = computePercentile(C, 0.50f);
+        float C_p90 = computePercentile(C, 0.90f);
 
-        // Normalize to unit hypersphere
+        // Shadow chroma: mean chroma where L < L_p25 (dark pixels)
+        // This directly measures color preservation in shadows
+        float C_shadow = 0.0f;
+        int shadowCount = 0;
+        for (int row = 0; row < L.rows; row++)
+        {
+            const float* lPtr = L.ptr<float>(row);
+            const float* cPtr = C.ptr<float>(row);
+            for (int col = 0; col < L.cols; col++)
+            {
+                if (lPtr[col] < L_p25)
+                {
+                    C_shadow += cPtr[col];
+                    shadowCount++;
+                }
+            }
+        }
+        if (shadowCount > 0)
+            C_shadow /= shadowCount;
+
+        // Build 19D feature vector
+        features.v = {
+            sigma1, sigma2, sigma3,           // [0-2]  SVD
+            mu_L, mu_C,                       // [3-4]  means
+            std_L, std_C,                     // [5-6]  stds
+            skew_L,                           // [7]    skewness
+            cov_LC, cov_HC,                   // [8-9]  covariances
+            mu_a, mu_b,                       // [10-11] color cast
+            L_p10, L_p25, L_p75, L_p90,       // [12-15] L percentiles (tone curve)
+            C_p50, C_p90,                     // [16-17] C percentiles (saturation)
+            C_shadow                          // [18]   shadow chroma
+        };
+
+        // Normalize to unit hypersphere (kept for backward compat, not used in loss)
         float norm = 0.0f;
         for (float f : features.v)
             norm += f * f;
@@ -195,13 +247,83 @@ namespace geos::internal
         return extractStyleImpl(lchResult.lch, lchResult.mu_a, lchResult.mu_b);
     }
 
+    // Feature names for diagnostic output
+    const char* FEATURE_NAMES[STYLE_DIM] = {
+        "sigma1", "sigma2", "sigma3",  // [0-2]
+        "mu_L", "mu_C",                // [3-4]
+        "std_L", "std_C",              // [5-6]
+        "skew_L",                      // [7]
+        "cov_LC", "cov_HC",            // [8-9]
+        "mu_a", "mu_b",                // [10-11]
+        "L_p10", "L_p25", "L_p75", "L_p90",  // [12-15]
+        "C_p50", "C_p90",              // [16-17]
+        "C_shadow"                     // [18]
+    };
+
+    // Diagnostic: compute per-feature errors (unweighted absolute difference)
+    std::array<float, STYLE_DIM> perFeatureError(const StyleFeatures& target, const StyleFeatures& candidate)
+    {
+        std::array<float, STYLE_DIM> errors;
+        for (int i = 0; i < STYLE_DIM; i++)
+        {
+            errors[i] = std::abs(target.v[i] - candidate.v[i]);
+        }
+        return errors;
+    }
+
+    // Diagnostic: print per-feature analysis
+    void printFeatureAnalysis(const StyleFeatures& target, const StyleFeatures& candidate)
+    {
+        auto errors = perFeatureError(target, candidate);
+        float totalWeightedLoss = 0.0f;
+        float totalWeight = 0.0f;
+
+        std::cout << "\n[FEATURE ANALYSIS]\n";
+        std::cout << "Feature        Target    Output    Error     Weight   Contrib\n";
+        std::cout << "--------------------------------------------------------------\n";
+
+        for (int i = 0; i < STYLE_DIM; i++)
+        {
+            float w = FEATURE_WEIGHTS[i];
+            float contrib = w * errors[i] * errors[i];
+            totalWeightedLoss += contrib;
+            totalWeight += w;
+
+            printf("%-12s   %7.4f   %7.4f   %7.4f   %5.2f    %7.4f\n",
+                   FEATURE_NAMES[i],
+                   target.v[i],
+                   candidate.v[i],
+                   errors[i],
+                   w,
+                   contrib);
+        }
+
+        float avgLoss = std::sqrt(totalWeightedLoss / totalWeight);
+        std::cout << "--------------------------------------------------------------\n";
+        printf("Weighted L2 loss: %.4f (%.2f%%)\n\n", avgLoss, avgLoss * 100.0f);
+    }
+
+    // Weighted L2 loss on raw features (replaces geodesic)
+    // This preserves magnitude information that distinguishes flat from punchy
     float geodesicLoss(const StyleFeatures& a, const StyleFeatures& b)
     {
-        float dot = 0.0f;
-        for (int i = 0; i < STYLE_DIM; i++)
-            dot += a.psi[i] * b.psi[i];
+        float sumWeightedSq = 0.0f;
+        float sumWeights = 0.0f;
 
-        return 1.0f - dot * dot;
+        for (int i = 0; i < STYLE_DIM; i++)
+        {
+            float diff = a.v[i] - b.v[i];
+            float w = FEATURE_WEIGHTS[i];
+            sumWeightedSq += w * diff * diff;
+            sumWeights += w;
+        }
+
+        // Normalize by sum of weights and return sqrt for L2 distance
+        // Scale to roughly same range as old geodesic [0, 1]
+        float loss = std::sqrt(sumWeightedSq / sumWeights);
+
+        // Clamp to [0, 1] for consistency with old API
+        return std::min(1.0f, loss);
     }
 
     std::pair<float, float> computeDome(const StyleFeatures& target, const StyleFeatures& candidate)
@@ -273,7 +395,7 @@ namespace geos::internal
         cv::UMat proxy = resizeProxy(target);
         tf.lch = convertToSafeLCH(proxy);
 
-        // Extract global features using BGR (full 12D with mu_a, mu_b)
+        // Extract global features using BGR (full 18D with percentiles)
         tf.global = extractStyleFromBGR(proxy);
 
         // Extract regional features (4x4 grid = 16 cells)
@@ -296,7 +418,7 @@ namespace geos::internal
         // Resize candidate to proxy
         cv::UMat candProxy = resizeProxy(candidate);
 
-        // Global loss (always computed) - use BGR for full 12D features
+        // Global loss (always computed) - use BGR for full 18D features
         StyleFeatures candGlobal = extractStyleFromBGR(candProxy);
         float globalLoss = geodesicLoss(target.global, candGlobal);
 
@@ -349,7 +471,7 @@ namespace geos::internal
         // Resize candidate to proxy
         cv::UMat candProxy = resizeProxy(candidate);
 
-        // Global loss - use BGR for full 12D features
+        // Global loss - use BGR for full 18D features
         StyleFeatures candGlobal = extractStyleFromBGR(candProxy);
         ra.global = geodesicLoss(target.global, candGlobal);
 

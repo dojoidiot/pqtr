@@ -101,7 +101,7 @@ Parts are modular libraries in `src/main/part/`. They expose a public API using 
     *   **HEAD**: Decodes the RAW file into scene-referred linear space.
     *   **BODY**: A sequence of configurable **edit steps** with 6 modules each.
     *   **TAIL**: Renders the final image to **PNG** (lossless format).
-*   [**`geos`**](./doc/geos.md): The optimizer library. 45 style dials, 12D feature space, three optimizer modes (SPSA, ACEO, HYBRID). See [tldr.md](./doc/tldr.md) for overview.
+*   [**`geos`**](./doc/geos.md): The optimizer library. 45 style dials, 19D feature space, weighted L2 loss, three optimizer modes (SPSA, ACEO, HYBRID). See [tldr.md](./doc/tldr.md) for overview.
 
 ## Headless Tools (Programs)
 
@@ -130,10 +130,12 @@ See [out_of_scope.md](./doc/mods/out_of_scope.md) for detailed module ideas.
 ## Success Criteria
 
 1.  **RAW to PNG Handoff Works Seamlessly**: Linear RGB validated, no data loss.
-2.  **Pipe Produces Perceptually Accurate Output**: All dials functional.
-3.  **Diff Provides Accurate Loss Metrics**: Spectral (geodesic) + frequency (Laplacian). **Achieved: 0.05% spectral loss.**
+2.  **Pipe Produces Perceptually Accurate Output**: All 45 dials functional.
+3.  **Diff Provides Accurate Loss Metrics**: 19D weighted L2 loss + frequency (Laplacian).
 4.  **Tune Optimizes All Roles**: 45 dials via SPSA/ACEO/HYBRID; optional 3D LUT.
 5.  **Performance Targets Met**: `tune`: ~65 seconds total.
+
+**Current limitation**: Pipeline capability gap discovered. Camera JPEGs apply base tone curves that our flat baseline cannot match. See [base_curve.md](./doc/base_curve.md) for solution.
 
 ## Documentation Standards
 
@@ -148,11 +150,13 @@ Reference [docs.md](./doc/docs.md) for the review template and criteria.
 
 ## Documentation
 
-- [tldr.md](./doc/tldr.md) - Quick overview (45 dials, 12D features, 3 optimizers)
+- [tldr.md](./doc/tldr.md) - Quick overview (45 dials, 19D features, 3 optimizers)
+- [todo.md](./doc/todo.md) - Current status and next steps
 - [code.md](./doc/code.md) - Code management (building, testing, tmp/ conventions)
-- [geos.md](./doc/geos.md) - GeoS model (feature space, loss function)
+- [geos.md](./doc/geos.md) - GeoS model (19D feature space, weighted L2 loss)
 - [aceo.md](./doc/aceo.md) - ACEO optimizer (eigenspace, covariance)
 - [spsa.md](./doc/spsa.md) - SPSA optimizer (phased, gradient-free)
+- [base_curve.md](./doc/base_curve.md) - Per-camera base curve learning
 
 ## Research
 

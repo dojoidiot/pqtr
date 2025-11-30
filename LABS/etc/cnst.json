@@ -1,0 +1,26 @@
+{
+  "description": "Feature weights for style matching loss",
+  "training_images": 11,
+  "average_loss": 0.0652,
+  "weights": {
+    "sigma1": 0.81,
+    "sigma2": 0.79,
+    "sigma3": 0.71,
+    "mu_L": 1.62,
+    "mu_C": 2.70,
+    "std_L": 5.00,
+    "std_C": 3.74,
+    "skew_L": 5.00,
+    "cov_LC": 0.50,
+    "cov_HC": 0.50,
+    "mu_a": 4.81,
+    "mu_b": 5.00,
+    "L_p10": 5.00,
+    "L_p25": 5.00,
+    "L_p75": 5.00,
+    "L_p90": 5.00,
+    "C_p50": 5.00,
+    "C_p90": 3.12,
+    "C_shadow": 5.00
+  }
+}

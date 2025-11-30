@@ -111,13 +111,31 @@ namespace geos::internal
     // Block-specific parameters (lower dims = can be more aggressive)
     // Tuned for 17³ LUT which gives ~1.4% starting loss (vs 4.2% with 9³)
     // Smaller a0/c0 for finer adjustments at lower loss values
-    constexpr PhaseParams BLOCK_3D  = { 0.08f, 0.03f, 0.602f, 0.101f, 10.0f };
-    constexpr PhaseParams BLOCK_5D  = { 0.10f, 0.04f, 0.602f, 0.101f, 10.0f };  // Scene-linear (5 dials)
-    constexpr PhaseParams BLOCK_7D  = { 0.06f, 0.025f, 0.602f, 0.101f, 15.0f }; // GlobalColor + SplitTone
-    constexpr PhaseParams BLOCK_10D = { 0.05f, 0.02f, 0.602f, 0.101f, 20.0f };
-    constexpr PhaseParams BLOCK_17D = { 0.025f, 0.01f, 0.602f, 0.101f, 40.0f }; // Joint A+B (was 13D)
-    constexpr PhaseParams BLOCK_24D = { 0.02f, 0.008f, 0.602f, 0.101f, 50.0f };  // Selective: careful
-    constexpr PhaseParams BLOCK_41D = { 0.01f, 0.005f, 0.602f, 0.101f, 80.0f }; // Full: very careful
+    // Default block-specific parameters (can be overridden via Config)
+    constexpr PhaseParams DEFAULT_3D  = { 0.08f, 0.03f, 0.602f, 0.101f, 10.0f };
+    constexpr PhaseParams DEFAULT_5D  = { 0.20f, 0.12f, 0.602f, 0.101f, 10.0f };
+    constexpr PhaseParams DEFAULT_7D  = { 0.12f, 0.06f, 0.602f, 0.101f, 15.0f };
+    constexpr PhaseParams DEFAULT_10D = { 0.15f, 0.08f, 0.602f, 0.101f, 20.0f };
+    constexpr PhaseParams DEFAULT_17D = { 0.08f, 0.04f, 0.602f, 0.101f, 40.0f };
+    constexpr PhaseParams DEFAULT_24D = { 0.02f, 0.008f, 0.602f, 0.101f, 50.0f };
+    constexpr PhaseParams DEFAULT_41D = { 0.15f, 0.10f, 0.602f, 0.101f, 30.0f };
+
+    // Helper: get params from config if set (a0 > 0), else use default
+    inline PhaseParams getParams(const geos::PhaseParams& cfg, const PhaseParams& def) {
+        if (cfg.a0 > 0.0f) {
+            return { cfg.a0, cfg.c0, cfg.alpha, cfg.gamma, cfg.A };
+        }
+        return def;
+    }
+
+    // Backward compatibility aliases (used throughout spsa.cpp)
+    #define BLOCK_3D  DEFAULT_3D
+    #define BLOCK_5D  DEFAULT_5D
+    #define BLOCK_7D  DEFAULT_7D
+    #define BLOCK_10D DEFAULT_10D
+    #define BLOCK_17D DEFAULT_17D
+    #define BLOCK_24D DEFAULT_24D
+    #define BLOCK_41D DEFAULT_41D
 
     // ============================================================
     // Iteration split (BLOCKWISE mode)

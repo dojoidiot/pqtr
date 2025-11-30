@@ -314,7 +314,7 @@ namespace geos::internal
     {
         View candidate = body.view();
         cv::UMat candProxy = resizeProxy(candidate);
-        StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
+        StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 18D features
         return geodesicLoss(targetStyle, candStyle);
     }
 
@@ -329,7 +329,7 @@ namespace geos::internal
         View candidate = body.view();
         cv::UMat candProxy = resizeProxy(candidate);
 
-        // Spectral loss (color/tone) - use BGR for full 12D features
+        // Spectral loss (color/tone) - use BGR for full 18D features
         StyleFeatures candStyle = extractStyleFromBGR(candProxy);
         float spectral = geodesicLoss(targetStyle, candStyle);
 
@@ -496,7 +496,7 @@ namespace geos::internal
             if (progress)
             {
                 cv::UMat candProxy = resizeProxy(body.view());
-                StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
+                StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 18D features
                 auto [r, th] = computeDome(targetStyle, candStyle);
 
                 float candVar = laplacianVariance(candProxy);

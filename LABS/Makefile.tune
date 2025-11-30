@@ -22,7 +22,7 @@ OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
 # Include paths
-INCLUDES = $(OPENCV_INCLUDE) -I./inc
+INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part/geos -I./src/main/part/pipe
 
 # Library flags
 LDFLAGS = -L$(OPENCV_LIB) -L./lib
@@ -62,10 +62,18 @@ BATCH_SRC = $(TEST_SRC)/batch.cpp
 BATCH_OBJ = $(OBJ_DIR)/batch.o
 BATCH_BIN = $(TEST_BIN_DIR)/batch
 
+DIAG_SRC = $(TEST_SRC)/diag.cpp
+DIAG_OBJ = $(OBJ_DIR)/diag.o
+DIAG_BIN = $(TEST_BIN_DIR)/diag
+
+TRAIN_SRC = $(TEST_SRC)/train.cpp
+TRAIN_OBJ = $(OBJ_DIR)/train.o
+TRAIN_BIN = $(TEST_BIN_DIR)/train
+
 # Test input
 TEST_RAW = var/pics/DSC00202.ARW
 
-.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch
+.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds
 
 LABS_VAR_DIR = tmp/var/labs
 
@@ -161,3 +169,126 @@ $(BATCH_OBJ): $(BATCH_SRC) | $(OBJ_DIR)
 test-batch: $(BATCH_BIN)
 	@echo "=== Batch Test (this will take a while) ==="
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BATCH_BIN)
+
+# Diagnostic binary
+$(DIAG_BIN): $(DIAG_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(DIAG_OBJ): $(DIAG_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Run diagnostic (analyze per-feature errors across all images)
+diag: $(DIAG_BIN)
+	@echo "=== Feature Loss Diagnostic ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(DIAG_BIN)
+
+# Training binary
+$(TRAIN_BIN): $(TRAIN_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(TRAIN_OBJ): $(TRAIN_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Run weight training (analyze errors and suggest optimal weights)
+train: $(TRAIN_BIN)
+	@echo "=== Weight Training ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TRAIN_BIN)
+
+# Batch tune all images (run before train)
+batch-tune:
+	@echo "=== Batch Tune (all images) ==="
+	@mkdir -p tmp/var/pics
+	@for img in var/pics/*.ARW; do \
+		name=$$(basename "$$img" .ARW); \
+		echo "Processing $$name..."; \
+		mkdir -p "tmp/var/pics/$$name"; \
+		LD_LIBRARY_PATH=$(OPENCV_LIB) timeout 600 $(TUNE_BIN) "$$img" preview \
+			--save-area "tmp/var/pics/$$name" \
+			--fine --fine-area "tmp/var/pics/$$name" \
+			--mode blockwise --optimizer spsa 2>&1 | tail -3; \
+	done
+	@echo "=== Batch complete ==="
+
+# Greedy training sources
+GREEDY_SRC = $(TEST_SRC)/train_greedy.cpp
+GREEDY_OBJ = $(OBJ_DIR)/train_greedy.o
+GREEDY_BIN = $(TEST_BIN_DIR)/train_greedy
+
+# Phase params training sources
+PRMS_SRC = $(TEST_SRC)/train_prms.cpp
+PRMS_OBJ = $(OBJ_DIR)/train_prms.o
+PRMS_BIN = $(TEST_BIN_DIR)/train_prms
+
+# Greedy training binary
+$(GREEDY_BIN): $(GREEDY_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(GREEDY_OBJ): $(GREEDY_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Phase params training binary
+$(PRMS_BIN): $(PRMS_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(PRMS_OBJ): $(PRMS_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Greedy training: rank images, analyze worst, suggest weights
+train-greedy: $(GREEDY_BIN)
+	@echo "=== Greedy Training (worst-first optimization) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(GREEDY_BIN)
+
+# Phase params training: grid search a0/c0 for optimal SPSA params
+train-prms: $(PRMS_BIN)
+	@echo "=== Phase Params Training (SPSA hyperparameters) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(PRMS_BIN)
+
+# Exhaustive training sources
+EXHAUSTIVE_SRC = $(TEST_SRC)/train_exhaustive.cpp
+EXHAUSTIVE_OBJ = $(OBJ_DIR)/train_exhaustive.o
+EXHAUSTIVE_BIN = $(TEST_BIN_DIR)/train_exhaustive
+
+# Sweep diagnostic sources
+SWEEP_SRC = $(TEST_SRC)/sweep.cpp
+SWEEP_OBJ = $(OBJ_DIR)/sweep.o
+SWEEP_BIN = $(TEST_BIN_DIR)/sweep
+
+# Exhaustive training binary
+$(EXHAUSTIVE_BIN): $(EXHAUSTIVE_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(EXHAUSTIVE_OBJ): $(EXHAUSTIVE_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Sweep diagnostic binary
+$(SWEEP_BIN): $(SWEEP_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(SWEEP_OBJ): $(SWEEP_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Exhaustive training: no time limit, find global optimum
+train-exhaustive: $(EXHAUSTIVE_BIN)
+	@echo "=== Exhaustive Training (unlimited time) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(EXHAUSTIVE_BIN)
+
+# Sweep diagnostic: understand loss landscape for individual dials
+sweep: $(SWEEP_BIN)
+	@echo "=== Dial Sweep Diagnostic ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(SWEEP_BIN)
+
+# Bounds diagnostic sources
+BOUNDS_SRC = $(TEST_SRC)/bounds.cpp
+BOUNDS_OBJ = $(OBJ_DIR)/bounds.o
+BOUNDS_BIN = $(TEST_BIN_DIR)/bounds
+
+$(BOUNDS_BIN): $(BOUNDS_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(BOUNDS_OBJ): $(BOUNDS_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Bounds diagnostic: find achievable feature min/max
+bounds: $(BOUNDS_BIN)
+	@echo "=== Feature Bounds Diagnostic ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BOUNDS_BIN)

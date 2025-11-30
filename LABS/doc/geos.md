@@ -1,13 +1,13 @@
-# GeoS: Geodesic Spectrum
+# GeoS: Style Matching System
 
 [back](../README.md)
 
 ## The Name
 
-**GeoS = Geodesic Spectrum**
+**GeoS = Geometric Style Space**
 
-- **Geodesic**: The angular loss on the hypersphere. The geometry of the search.
-- **Spectrum**: The color mapping. The feature fingerprint. The style space.
+- **Geometric**: The structured loss landscape. The geometry of optimization.
+- **Style**: The color/tone fingerprint. The feature space.
 
 GeoS is the optimizer-independent model for style matching. It defines the space, the loss, and the visualization. Optimizers plug in underneath.
 
@@ -30,52 +30,54 @@ Every point in this hypercube represents a complete set of dial settings.
 
 ---
 
-## The Feature Space
+## The Feature Space (19D)
 
-The 45 dials produce an image. That image is reduced to 12 features:
+The 45 dials produce an image. That image is reduced to **19 features**:
 
 ```
-v = [
-    σ₁, σ₂, σ₃,           # Singular values (energy distribution)
-    μ_L, μ_C,             # Mean lightness/chroma
-    std_L, std_C,         # Contrast/saturation spread
-    skew_L,               # High-key vs low-key distribution
-    cov(L, C),            # Brightness-saturation correlation
-    cov(H_safe, C),       # Hue-saturation correlation (color harmony)
-    μ_a, μ_b              # Lab a/b means (color cast penalty)
-]
+[0-2]   σ₁, σ₂, σ₃       # SVD singular values (energy distribution)
+[3]     μ_L               # Mean luminance (brightness)
+[4]     μ_C               # Mean chroma (saturation)
+[5]     std_L             # Luminance std (CONTRAST - critical)
+[6]     std_C             # Chroma std (saturation spread)
+[7]     skew_L            # Luminance skewness (high-key vs low-key)
+[8-9]   cov_LC, cov_HC    # Correlations (color harmony)
+[10-11] μ_a, μ_b          # Lab a*/b* means (COLOR CAST - critical)
+[12-15] L_p10, L_p25, L_p75, L_p90  # Luminance percentiles (TONE CURVE)
+[16-17] C_p50, C_p90      # Chroma percentiles (saturation level)
+[18]    C_shadow          # Shadow chroma (preserve color in darks)
 ```
 
-These 12 features are normalized to a unit vector on a 12D hypersphere.
+### Feature Groups
 
-The **μ_a** and **μ_b** features (added in v2) directly penalize color cast:
-- **μ_a**: Green-magenta axis. Positive = magenta cast, negative = green cast.
-- **μ_b**: Blue-yellow axis. Positive = yellow cast, negative = blue cast.
+| Index | Features | Purpose |
+|-------|----------|---------|
+| 0-2 | σ₁, σ₂, σ₃ | Energy/contrast magnitude via SVD |
+| 3-4 | μ_L, μ_C | Mean brightness and saturation |
+| 5-7 | std_L, std_C, skew_L | Contrast, saturation spread, key |
+| 8-9 | cov_LC, cov_HC | Color harmony correlations |
+| 10-11 | μ_a, μ_b | Color cast (Lab a*/b* axes) |
+| 12-15 | L_p10, L_p25, L_p75, L_p90 | Tone curve shape |
+| 16-17 | C_p50, C_p90 | Saturation levels |
+| 18 | C_shadow | Shadow color preservation |
+
+### Critical Features (High Weight)
+
+- **std_L** (index 5): Contrast. Camera JPEGs have more contrast than flat RAW.
+- **L percentiles** (12-15): Tone curve shape. Where are shadows/highlights?
+- **μ_a, μ_b** (10-11): Color cast. Pink/green or yellow/blue shifts.
 
 ### Feature Extraction
 
-1. **Color Space Transform**: Convert to LCH (Lightness, Chroma, Hue). Apply chroma-weighting to hue: $H_{safe} = H \cdot \tanh(k \cdot C)$ to suppress noise in achromatic regions.
+1. **Color Space Transform**: Convert to LCH and Lab color spaces.
 
 2. **Spectral Decomposition**: SVD on image matrix extracts singular values (energy distribution).
 
-3. **Statistical Descriptors**: Compute means, standard deviations, skewness, and covariances.
+3. **Statistical Descriptors**: Means, standard deviations, skewness, covariances.
 
-4. **Hypersphere Projection**: Normalize to unit length: $|\psi\rangle = \frac{\vec{v}}{||\vec{v}||_2}$
+4. **Percentiles**: Luminance at 10th, 25th, 75th, 90th percentiles for tone curve.
 
-### What Features Capture
-
-| Feature | Meaning |
-|---------|---------|
-| σ₁, σ₂, σ₃ | Energy/contrast magnitude |
-| μ_L | Average brightness |
-| μ_C | Average saturation |
-| std_L | Contrast spread |
-| std_C | Saturation spread |
-| skew_L | High-key vs low-key |
-| cov(L, C) | Do bright areas have more saturation? |
-| cov(H_safe, C) | Which hues carry the most color? |
-| μ_a | Green-magenta cast (Lab a* axis) |
-| μ_b | Blue-yellow cast (Lab b* axis) |
+5. **Shadow Analysis**: Chroma in darkest 25% of pixels.
 
 ---
 
@@ -84,39 +86,50 @@ The **μ_a** and **μ_b** features (added in v2) directly penalize color cast:
 Each dial can affect multiple features. Each feature is affected by multiple dials.
 
 ```
-45 dials ──┬──► 12 features
+45 dials ──┬──► 19 features
            │
         coupled
 ```
 
 Examples:
-- Exposure dial → affects μ_L, std_L, skew_L, σ₁σ₂σ₃
-- Saturation dial → affects μ_C, std_C, cov(L,C), cov(H,C)
-- Contrast dial → affects std_L, σ₁σ₂σ₃, skew_L
+- Exposure dial → affects μ_L, std_L, skew_L, σ₁σ₂σ₃, L percentiles
+- Saturation dial → affects μ_C, std_C, cov_LC, cov_HC, C percentiles
+- Contrast dial → affects std_L, σ₁σ₂σ₃, skew_L, L percentiles
 
-The mapping is many-to-many. This is why dials are dependent—they all pull on the same 10 features from different directions.
+The mapping is many-to-many. This is why dials are dependent—they all pull on the same 19 features from different directions.
 
 ---
 
 ## The Loss
 
-The loss is the cosine distance between candidate and target feature vectors:
+**Weighted L2 loss** in 19D feature space:
 
 ```
-Loss = 1 - |⟨ψ_candidate | ψ_target⟩|²
+Loss = Σ weights[i] × (feature[i] - target[i])²
 ```
 
-One angle. Measured in 12D feature space. Driven by 45 coupled dials.
+Each feature has a learned weight from `etc/cnst.json`. Critical features (std_L, percentiles, color cast) have high weights (~5.0).
 
-- Loss = 0 → identical style (parallel vectors)
-- Loss = 1 → orthogonal styles (maximum difference)
+- Loss = 0 → identical style
+- Loss > 0 → style difference, weighted by feature importance
+
+### Why Weighted L2?
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Cosine (geodesic) | Scale-invariant, elegant | All features equal weight |
+| L2 (Euclidean) | Simple | Some features matter more |
+| **Weighted L2** | Feature importance from training | Needs weight training |
+
+We train weights via batch analysis: features with high variance across images get higher weights.
 
 ### Properties
 
 - **Non-negativity:** Loss ≥ 0
-- **Identity:** Loss = 0 iff identical style vectors
+- **Identity:** Loss = 0 iff all weighted feature differences are zero
 - **Symmetry:** Loss(a, b) = Loss(b, a)
 - **Smoothness:** Continuous first and second derivatives (suitable for optimization)
+- **Interpretability:** Each term shows which feature contributes most to error
 
 ---
 
@@ -127,12 +140,20 @@ The covariance matrix Σ is 45×45—dial-to-dial correlations in the search spa
 ```
 Search space:       45D hypercube (dials)
 Covariance matrix:  45×45 (dial correlations)
-Feature space:      12D hypersphere (where loss is computed)
+Feature space:      19D (where loss is computed)
 ```
 
 It captures: when dial A moves toward its optimum, which other dials tend to move with it?
 
 The features tell us how far off we are. The dial covariance tells us how to step efficiently.
+
+### Trained Artifacts
+
+| File | Purpose |
+|------|---------|
+| `etc/cnst.json` | Feature weights (19 values) |
+| `etc/prms.json` | SPSA phase params (a0, c0 per block) |
+| `etc/cvar.json` | 45×45 covariance matrix for ACEO |
 
 ### Contribution to Variance
 
@@ -141,7 +162,7 @@ We don't know each dial's contribution to variance at starting state. It depends
 - Specific image content
 - The target being matched
 
-Some optimizers ignore this (SPSA). Others learn it (CMA-ES).
+Some optimizers ignore this (SPSA). Others learn it (CMA-ES/ACEO).
 
 ---
 
@@ -152,7 +173,7 @@ GeoS defines the space and loss. Optimizers navigate:
 | | SPSA | ACEO | HYBRID |
 |--|------|------|--------|
 | Search space | Hypercube [0,1]^45 | Hypercube [0,1]^45 | Hypercube [0,1]^45 |
-| Loss function | Cosine in 12D feature space | Cosine in 12D feature space | Cosine in 12D feature space |
+| Loss function | Weighted L2 in 19D feature space | Weighted L2 in 19D feature space | Weighted L2 in 19D feature space |
 | Dial coupling | Implicit (felt through loss) | Explicit (prior Σ matrix) | Both (ACEO→SPSA) |
 | Perturbation shape | Random hypercube corners | Ellipsoidal (eigenspace) | Ellipsoidal→Random |
 | Variance model | None (uniform) | Prior + learned | Prior then uniform |
@@ -168,9 +189,9 @@ Same space. Same loss. Same coupling. Different navigation strategies:
 │              GEOS (space)               │
 │                                         │
 │   45D hypercube [0,1]^45 (dials)        │
-│   12D hypersphere (features)            │
+│   19D feature space                     │
 │   Many-to-many coupling                 │
-│   Cosine loss = one angle to target     │
+│   Weighted L2 loss                      │
 │                                         │
 ├─────────────────────────────────────────┤
 │           OPTIMIZER (strategy)          │
@@ -221,23 +242,35 @@ No optimizer logic in the visualization. Just dial state → color. The dome sho
 
 ## Status
 
-**GeoS model**: Defined. 45D dial hypercube → 12D feature hypersphere → cosine loss.
+**GeoS model**: Defined. 45D dial hypercube → 19D feature space → weighted L2 loss.
 
-**Feature vector v2**: Added μ_a and μ_b (Lab a/b means) for direct color cast penalty.
+**Feature vector v3**: 19 features including percentiles, shadow chroma, and color cast.
 
 **Optimizers**:
 - **SPSA**: Phased optimization with full 45D exploration. Builds covariance via `--save-cov`.
-- **ACEO**: 12D eigenspace search using prior covariance from `etc/aceo_full.json`.
+- **ACEO**: Eigenspace search using prior covariance from `etc/cvar.json`.
 - **HYBRID**: ACEO for direction/pop, then SPSA for polish. Best of both worlds.
 
-**Workflow**: The `bin/cvar.sh` script automates SPSA bootstrap → ACEO/HYBRID refinement.
+**Current limitation**: Pipeline capability gap discovered.
+```
+Target std_L:   0.2244 (camera JPEG contrast)
+Max achievable: 0.1303 (our dials at extremes)
+Gap:            42% unreachable
+```
+
+**Root cause**: Camera JPEGs apply a base tone curve (per picture style) BEFORE adjustments. We start from flat baseline.
+
+**Next step**: Learn per-camera base curves to expand achievable range. See [base_curve.md](./base_curve.md).
 
 ---
 
 ## See Also
 
+- [tldr.md](./tldr.md) - Quick overview
 - [spsa.md](./spsa.md) - SPSA optimization strategy
-- [aceo.md](./aceo.md) - ACEO optimization strategy (validated)
+- [aceo.md](./aceo.md) - ACEO optimization strategy
 - [edge.md](./edge.md) - Frequency loss (sharpness)
 - [tune.md](./tune.md) - Orchestrates GeoS + Edge
 - [diff.md](./diff.md) - Loss metrics implementation
+- [base_curve.md](./base_curve.md) - Per-camera base curve learning
+- [todo.md](./todo.md) - Current status and next steps

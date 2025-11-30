@@ -15,11 +15,21 @@ namespace geos::internal
     // Constants
     constexpr int PROXY_SIZE = 512;
     constexpr float CHROMA_WEIGHT_K = 0.1f;
-    constexpr int STYLE_DIM = 12;  // Feature vector dimension (was 10, added mu_a, mu_b)
+    constexpr int STYLE_DIM = 19;  // Feature vector dimension (12 + 6 percentiles + 1 shadow chroma)
     constexpr int IDX_MU_L = 3;    // Brightness axis in style vector
     constexpr int IDX_MU_C = 4;    // Color axis in style vector
-    constexpr int IDX_MU_A = 10;   // Lab a* axis (green-magenta) - NEW for color cast
-    constexpr int IDX_MU_B = 11;   // Lab b* axis (blue-yellow) - NEW for color cast
+    constexpr int IDX_STD_L = 5;   // Contrast (L standard deviation)
+    constexpr int IDX_STD_C = 6;   // Chroma spread
+    constexpr int IDX_MU_A = 10;   // Lab a* axis (green-magenta)
+    constexpr int IDX_MU_B = 11;   // Lab b* axis (blue-yellow)
+    // Histogram percentiles for tone curve shape
+    constexpr int IDX_L_P10 = 12;  // Black point (crushed shadows)
+    constexpr int IDX_L_P25 = 13;  // Shadow region
+    constexpr int IDX_L_P75 = 14;  // Highlight region
+    constexpr int IDX_L_P90 = 15;  // White point (stretched highlights)
+    constexpr int IDX_C_P50 = 16;  // Chroma median (saturation level)
+    constexpr int IDX_C_P90 = 17;  // Chroma peak (max saturation)
+    constexpr int IDX_C_SHADOW = 18;  // Shadow chroma (mean C where L < L_p25)
 
     // Regional analysis grid (4x4 = 16 cells)
     constexpr int GRID_SIZE = 4;
@@ -29,17 +39,40 @@ namespace geos::internal
     // Indices: 0,3,12,15 (corners) + 5,6,9,10 (center quad)
     constexpr std::array<int, 8> SAMPLED_CELLS = {0, 3, 5, 6, 9, 10, 12, 15};
 
-    // Style feature vector (12 dimensions)
-    // [0-2]  SVD singular values (sigma1, sigma2, sigma3)
-    // [3-4]  LCH means (mu_L, mu_C)
-    // [5-6]  LCH stds (std_L, std_C)
-    // [7]    Luminance skewness (skew_L)
-    // [8-9]  Covariances (cov_LC, cov_HC)
-    // [10-11] Lab a/b means (mu_a, mu_b) - directly penalize color cast
+    // Feature weights for weighted L2 loss (TRAINED on 11 images)
+    // Higher weight = more important for matching
+    constexpr std::array<float, STYLE_DIM> FEATURE_WEIGHTS = {
+        0.8f, 0.8f, 0.7f,   // [0-2]  sigma1, sigma2, sigma3 (shape)
+        1.6f,               // [3]    mu_L (brightness)
+        2.7f,               // [4]    mu_C (saturation)
+        5.0f,               // [5]    std_L (contrast - critical!)
+        3.7f,               // [6]    std_C (chroma spread)
+        5.0f,               // [7]    skew_L (tone curve asymmetry - critical!)
+        0.5f, 0.5f,         // [8-9]  cov_LC, cov_HC (correlations)
+        4.8f, 5.0f,         // [10-11] mu_a, mu_b (color cast)
+        5.0f,               // [12]   L_p10 (black point - critical!)
+        5.0f,               // [13]   L_p25 (shadow region - critical!)
+        5.0f,               // [14]   L_p75 (highlight region - critical!)
+        5.0f,               // [15]   L_p90 (white point - critical!)
+        5.0f,               // [16]   C_p50 (chroma median - critical!)
+        3.1f,               // [17]   C_p90 (chroma peak)
+        5.0f                // [18]   C_shadow (shadow chroma - critical!)
+    };
+
+    // Style feature vector (19 dimensions)
+    // [0-2]   SVD singular values (sigma1, sigma2, sigma3)
+    // [3-4]   LCH means (mu_L, mu_C)
+    // [5-6]   LCH stds (std_L, std_C)
+    // [7]     Luminance skewness (skew_L)
+    // [8-9]   Covariances (cov_LC, cov_HC)
+    // [10-11] Lab a/b means (mu_a, mu_b) - color cast
+    // [12-15] Luminance percentiles (L_p10, L_p25, L_p75, L_p90) - tone curve
+    // [16-17] Chroma percentiles (C_p50, C_p90) - saturation level
+    // [18]    Shadow chroma (mean C where L < L_p25) - preserve color in shadows
     struct StyleFeatures
     {
         std::array<float, STYLE_DIM> v;   // Raw feature vector
-        std::array<float, STYLE_DIM> psi; // Normalized (unit hypersphere)
+        std::array<float, STYLE_DIM> psi; // Normalized (for backward compat, but not used in loss)
     };
 
     // Pre-computed target features (global + regional)
@@ -72,6 +105,11 @@ namespace geos::internal
 
     // Geodesic loss: 1 - |<a|b>|^2
     float geodesicLoss(const StyleFeatures& a, const StyleFeatures& b);
+
+    // Diagnostic: per-feature error analysis
+    extern const char* FEATURE_NAMES[STYLE_DIM];
+    std::array<float, STYLE_DIM> perFeatureError(const StyleFeatures& target, const StyleFeatures& candidate);
+    void printFeatureAnalysis(const StyleFeatures& target, const StyleFeatures& candidate);
 
     // Compute dome compass coordinates (r, theta)
     std::pair<float, float> computeDome(const StyleFeatures& target, const StyleFeatures& candidate);

@@ -75,6 +75,16 @@ namespace geos
         HYBRID  // ACEO for direction (pop), then SPSA for polish (photographic quality)
     };
 
+    // SPSA phase parameters (learnable)
+    struct PhaseParams
+    {
+        float a0 = 0.0f;     // Initial learning rate (0 = use default)
+        float c0 = 0.0f;     // Initial perturbation size (0 = use default)
+        float alpha = 0.602f;  // Learning rate decay exponent
+        float gamma = 0.101f;  // Perturbation decay exponent
+        float A = 20.0f;       // Stability constant
+    };
+
     struct Config
     {
         bool skip_geos = false;        // Skip color/tone optimization
@@ -91,6 +101,13 @@ namespace geos
         // Covariance options (SPSA builds, ACEO uses)
         std::string aceo_with_cov;     // Path to prior covariance (blend with accumulated)
         std::string aceo_save_cov;     // Path to save accumulated covariance after run
+
+        // Trained phase params (optional - 0 values use compiled defaults)
+        // Load from etc/prms.json for trained values
+        PhaseParams prms_10d;  // Block A: ColorCorrection + ToneMapping
+        PhaseParams prms_17d;  // Joint A+B refinement
+        PhaseParams prms_7d;   // Block B: GlobalColor + SplitTone
+        PhaseParams prms_24d;  // Block C: SelectiveColour
     };
 
     // ============================================================

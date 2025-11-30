@@ -14,31 +14,32 @@ Image style has three independent dimensions. Each requires different handling:
 
 | Role | Dials | Who/What | Metric | Time |
 |------|-------|----------|--------|------|
-| **Color/Tone** | 17 + LUT | SPSA optimizer | Spectral (geodesic) | ~5min |
-| **Sharpness** | 2 | Edge optimizer | Frequency (Laplacian) | ~2s |
+| **Color/Tone** | 41 + LUT | SPSA/ACEO/HYBRID | Weighted L2 (19D) | ~5min |
+| **Sharpness** | 4 | Detail optimizer | Frequency (Laplacian) | ~2s |
 | **Geometry** | 6 | User | Visual judgment | - |
 
-**Total: 25 dials = 17 + 2 + 6** (plus 17³ LUT for nonlinear color)
+**Total: 51 dials = 41 + 4 + 6** (plus 17³ LUT for nonlinear color)
 
 ### Role 1: Color/Tone (Automated)
 
 The "vibe" or "mood" of an image - warm/cool, saturated/muted, high-key/low-key, contrast, color harmony.
 
-**Dials (17):**
+**Dials (41):**
 - Color Correction: exposure, temperature, tint (3)
 - Tone Mapping: contrast, highlights, shadows, toe pivot, shoulder pivot, white point, black point (7)
 - Global Color: vibrance, saturation, color density (3)
-- Split Tone: shadow hue/sat, highlight hue/sat (4)
+- Split Tone: shadow temp/tint, highlight temp/tint (4)
+- Selective Color: 8 hues × 3 HSL adjustments (24)
 - **17³ 3D LUT** captures nonlinear camera color science
 
-**Method:** 3D LUT estimation + SPSA with spectral loss. Content-invariant.
+**Method:** 3D LUT estimation + SPSA/ACEO/HYBRID with 19D weighted L2 loss. Content-invariant.
 
 ### Role 2: Sharpness (Automated)
 
 The texture quality - crisp edges vs soft/dreamy, noise reduction level.
 
-**Dials (2):**
-- Detail: sharpen amount, sharpen radius
+**Dials (4):**
+- Detail: sharpen amount, sharpen radius, denoise luma, denoise chroma
 
 **Method:** Golden section search with Laplacian variance. Luminance-only sharpening preserves color accuracy.
 
@@ -71,7 +72,7 @@ The complete tune workflow transforms scene-referred RAW into camera-matched out
 │              DIFF ──► metrics (spectral + frequency loss)       │
 │                │                                                │
 │                ▼                                                │
-│              TUNE ──► edit steps (17 color + 2 detail dials)    │
+│              TUNE ──► edit steps (41 color + 4 detail dials)    │
 │                │                                                │
 │                ▼                                                │
 │              BODY (with edit steps) ──► TAIL ──► tail.png       │
@@ -133,7 +134,7 @@ Color/tone and sharpness styles transfer across different scenes. A "golden hour
 ### Full Optimization (Color + Sharpness)
 
 ```bash
-# Optimize all 19 creative dials (17 color + 2 sharpness)
+# Optimize all 45 style dials (41 color + 4 detail)
 # Outputs: tune.json (contains dials + 3D LUT)
 ./tune source.ARW reference.png --save-area ./output
 
@@ -180,7 +181,7 @@ Tune produces **two separate links** to separate concerns:
 │                   │                                             │
 │                   ▼                                             │
 │          LINK 2: Display-Referred (36 dials + LUT)              │
-│              tone curves, color, split tone                     │
+│              tone curves, color, split tone, selective          │
 │              17³ LUT for residual correction                    │
 │                   │                                             │
 │                   ▼                                             │
@@ -194,7 +195,7 @@ Tune produces **two separate links** to separate concerns:
 | Link | Domain | Dials | LUT | Purpose |
 |------|--------|-------|-----|---------|
 | **Scene-Linear** | Linear light | 5 | No | Exposure, white balance, clipping |
-| **Display** | Display-referred | 36 | Yes | Tone mapping, color grading |
+| **Display** | Display-referred | 36 | Yes | Tone mapping, color grading, selective color |
 
 **Benefits:**
 - Scene-linear ops are physically meaningful (stops, kelvin)
@@ -224,16 +225,16 @@ Tune produces **two separate links** to separate concerns:
 
 ## Stage 1: GeoS Color/Tone Optimizer
 
-Optimizes dials + 17³ LUT using spectral loss (geodesic distance on hypersphere).
+Optimizes dials + 17³ LUT using weighted L2 loss in 19D feature space.
 
 **See [geos.md](./geos.md) for full theory and algorithm.**
 
 | Aspect | Value |
 |--------|-------|
 | **Dials** | 5 scene-linear + 36 display + 17³ LUT |
-| **Algorithm** | 3D LUT estimation + SPSA (Simultaneous Perturbation Stochastic Approximation) |
-| **Phases** | Scene-Linear → LUT Estimation → Display (HUGE → MIDS → TINY) |
-| **Loss** | Spectral (geodesic) + Regional (4×4 grid) |
+| **Algorithm** | 3D LUT estimation + SPSA/ACEO/HYBRID |
+| **Phases** | Scene-Linear → LUT Estimation → Display (phased step sizes) |
+| **Loss** | Weighted L2 in 19D feature space |
 | **Time** | ~5 minutes |
 | **Multi-start** | 5 random initializations |
 
@@ -511,7 +512,7 @@ The tune API provides rich feedback for GUI visualization during optimization.
 
 ### Dome Compass (GEOS Stage)
 
-The 10D style hypersphere is projected to a 2D dome compass:
+The 19D style space is projected to a 2D dome compass:
 
 ```
         N (target)
@@ -533,18 +534,18 @@ The 10D style hypersphere is projected to a 2D dome compass:
 
 **Computing dome coordinates:**
 ```cpp
-// Given unit vectors ψ_ref and ψ_cand in R^10
-float dot = inner_product(psi_ref, psi_cand);
-float r = std::sqrt(1.0f - dot * dot);  // = √(spectral_loss)
-
-// Residual in tangent plane
-float residual[10];
-for (int i = 0; i < 10; i++)
-    residual[i] = psi_cand[i] - dot * psi_ref[i];
+// Given feature vectors in R^19
+// Compute normalized weighted difference
+float weighted_loss = 0.0f;
+for (int i = 0; i < 19; i++) {
+    float diff = features[i] - target[i];
+    weighted_loss += weights[i] * diff * diff;
+}
+float r = std::sqrt(weighted_loss);
 
 // Project onto semantic axes (μ_L and μ_C from style vector)
-float x = residual[3];  // Brightness axis
-float y = residual[4];  // Color axis
+float x = (features[3] - target[3]) * weights[3];  // Brightness axis
+float y = (features[4] - target[4]) * weights[4];  // Color axis
 float theta = std::atan2(y, x);
 ```
 
@@ -600,10 +601,12 @@ tune::Result result = task->run(body, link, config,
 
 | What | How | Time |
 |------|-----|------|
-| **Style** (45 dials) | SPSA/ACEO/HYBRID + 12D spectral loss | ~5min |
+| **Style** (45 dials) | SPSA/ACEO/HYBRID + 19D weighted L2 loss | ~5min |
 | **Geometry** (6 dials) | User sets manually | - |
 
 The user's responsibility is simple: **frame your shot**. The tool handles the rest.
+
+**Current limitation**: Pipeline capability gap (42% contrast shortfall). See [base_curve.md](./base_curve.md).
 
 ---
 
@@ -625,8 +628,10 @@ See [libs.md](./libs.md) for full source structure.
 
 ## See Also
 
-- [geos.md](./geos.md) - GeoS: Spectral loss theory + SPSA algorithm (color/tone)
+- [tldr.md](./tldr.md) - Quick overview
+- [geos.md](./geos.md) - GeoS: 19D feature space + SPSA/ACEO/HYBRID algorithm (color/tone)
 - [edge.md](./edge.md) - Edge: Frequency loss theory + golden section algorithm (sharpness)
 - [diff.md](./diff.md) - Loss metrics redirect
 - [data.md](./data.md) - Style sidecar format
-- [test.md](./test.md) - Test cases
+- [base_curve.md](./base_curve.md) - Per-camera base curve learning
+- [todo.md](./todo.md) - Current status and next steps

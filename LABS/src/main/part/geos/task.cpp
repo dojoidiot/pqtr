@@ -28,7 +28,7 @@ namespace geos
         explicit TaskImpl(View targetImg)
             : m_targetProxy(resizeProxy(targetImg))
             , m_targetLCH(convertToSafeLCH(m_targetProxy))
-            , m_targetStyle(extractStyleFromBGR(m_targetProxy))  // Use BGR for full 12D features (incl. mu_a, mu_b)
+            , m_targetStyle(extractStyleFromBGR(m_targetProxy))  // Use BGR for full 18D features (incl. percentiles)
             , m_targetLaplacianVar(laplacianVariance(m_targetProxy))
             , m_targetFeatures(extractTargetFeatures(targetImg))
         {
@@ -44,7 +44,7 @@ namespace geos
         Data diff(View candidate) override
         {
             cv::UMat candProxy = resizeProxy(candidate);
-            StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
+            StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 18D features
             float candLaplacianVar = laplacianVariance(candProxy);
 
             Data result;
