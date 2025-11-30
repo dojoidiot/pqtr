@@ -124,9 +124,8 @@ data::link::toJson(result.link, "sunset/tune.json");
 // ./labs another_photo.ARW --tune sunset/tune.json --output styled.png
 ```
 
-**The three roles:**
-- **Color/Tone** (17 dials + 17³ LUT): Automated via 3D LUT + SPSA + spectral loss (~5min)
-- **Sharpness** (2 dials): Automated via Edge + frequency loss (~2s)
+**The roles:**
+- **Style** (45 dials): Automated via SPSA/ACEO/HYBRID + 12D spectral loss (~5min)
 - **Geometry** (6 dials): User-controlled per image
 
 ### Pattern 3: Real-Time Dial Tuning (`pipe` + `diff`)
@@ -177,17 +176,12 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 
 **`tune` Two-Stage Optimization**:
 
-*Stage 1: 3D LUT + SPSA (Color/Tone)*
-- 17³ LUT estimated from image pairs
-- 17 dials optimized via SPSA
+*Full Optimization (45 style dials)*
+- 45 dials optimized via SPSA/ACEO/HYBRID
+- 12D feature vector (spectral + color cast)
 - ~60ms per iteration (2 pipe evaluations + spectral diff)
-- Multi-start (5×) for robustness
-- **Subtotal**: ~5 minutes
-
-*Stage 2: Edge (Sharpness)*
-- 2 dials optimized (L-channel only sharpening)
-- Golden section search, ~10 evaluations per dial
-- **Subtotal**: ~2 seconds
+- Prior covariance from `etc/aceo_full.json`
+- **Total**: ~5 minutes
 
 **Total tune time**: ~5 minutes for complete style transfer (0.05% spectral loss)
 

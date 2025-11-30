@@ -71,7 +71,8 @@ namespace geos
     enum class Optimizer
     {
         SPSA,   // Simultaneous Perturbation Stochastic Approximation (default)
-        ACEO    // Adaptive Covariance Evolver Optimiser (CMA-ES with prior)
+        ACEO,   // Adaptive Covariance Evolver Optimiser (CMA-ES with prior)
+        HYBRID  // ACEO for direction (pop), then SPSA for polish (photographic quality)
     };
 
     struct Config
@@ -79,6 +80,7 @@ namespace geos
         bool skip_geos = false;        // Skip color/tone optimization
         bool skip_edge = false;        // Skip sharpness optimization
         bool skip_lut = false;         // Skip LUT curve estimation (for true linear-only)
+        bool skip_regional = false;    // Skip regional refinement (faster, simpler)
         int geos_max_iter = 200;       // Max optimizer iterations (with early-stop)
         int geos_multi_starts = 5;     // Number of random initializations
         float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)

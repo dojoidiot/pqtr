@@ -5,9 +5,10 @@
 #        ./bin/cvar.sh var/pics
 #
 # Workflow:
-#   1. SPSA bootstrap: First 2 images with SPSA (explores full 45D space)
-#   2. ACEO refinement: Remaining images with ACEO (uses SPSA prior)
+#   1. SPSA bootstrap: First 2 images with SPSA --full (explores full 45D space)
+#   2. ACEO refinement: Remaining images with ACEO --full (uses SPSA prior)
 #
+# Uses --full mode for single-pass 45-dial optimization (no LUT, no two-link).
 # Outputs etc/aceo_full.json as the standard 45-dial covariance model.
 
 set -e
@@ -67,21 +68,23 @@ for IMG in $IMAGES; do
 
     if [ "$N" -le "$BOOT_COUNT" ]; then
         # SPSA bootstrap phase (explores full 45D dial space)
-        echo "[$N/$COUNT] $NAME (SPSA bootstrap)"
+        echo "[$N/$COUNT] $NAME (SPSA --full bootstrap)"
 
         if [ "$N" -eq 1 ]; then
             # First image: no prior
             ./bin/tune "$IMG" preview --save-area /tmp \
+                --full \
                 --optimizer spsa \
                 --save-cov "$TMP_COV" \
-                2>&1 | grep -E "^\[(SPSA|GEOS|BEST)" || true
+                2>&1 | grep -E "^\[(SPSA|GEOS|FULL|BEST)" || true
         else
             # Second image: SPSA writes fresh covariance each run
             # Save to a temp file and we'll merge later
             ./bin/tune "$IMG" preview --save-area /tmp \
+                --full \
                 --optimizer spsa \
                 --save-cov "${TMP_COV}.2" \
-                2>&1 | grep -E "^\[(SPSA|GEOS|BEST)" || true
+                2>&1 | grep -E "^\[(SPSA|GEOS|FULL|BEST)" || true
 
             # Simple merge: use second file (it has independent samples)
             # TODO: proper merge would combine both matrices
@@ -91,9 +94,10 @@ for IMG in $IMAGES; do
         fi
     else
         # ACEO refinement phase (uses SPSA-built prior)
-        echo "[$N/$COUNT] $NAME (ACEO with prior)"
+        echo "[$N/$COUNT] $NAME (ACEO --full with prior)"
 
         ./bin/tune "$IMG" preview --save-area /tmp \
+            --full \
             --optimizer aceo \
             --with-cov "$TMP_COV" \
             --save-cov "$TMP_COV" \

@@ -314,9 +314,37 @@ namespace geos::internal
     {
         View candidate = body.view();
         cv::UMat candProxy = resizeProxy(candidate);
-        cv::UMat candLCH = convertToSafeLCH(candProxy);
-        StyleFeatures candStyle = extractStyle(candLCH);
+        StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
         return geodesicLoss(targetStyle, candStyle);
+    }
+
+    // Compute combined loss: spectral + frequency (for holistic optimization)
+    // Used by --full mode where edge dials are optimized together with color/tone
+    float evaluateCombinedLoss(
+        pipe::Body& body,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        float freqWeight)  // Frequency weight (default 15% - specified in header)
+    {
+        View candidate = body.view();
+        cv::UMat candProxy = resizeProxy(candidate);
+
+        // Spectral loss (color/tone) - use BGR for full 12D features
+        StyleFeatures candStyle = extractStyleFromBGR(candProxy);
+        float spectral = geodesicLoss(targetStyle, candStyle);
+
+        // Frequency loss (sharpness)
+        float candLaplacianVar = laplacianVariance(candProxy);
+        float frequency;
+        if (targetLaplacianVar < 1e-6f)
+            frequency = (candLaplacianVar < 1e-6f) ? 0.0f : 1.0f;
+        else
+            frequency = std::abs(candLaplacianVar - targetLaplacianVar) / targetLaplacianVar;
+
+        // Combined: spectral dominates, frequency contributes
+        // Clamp frequency to reasonable range (can be >1)
+        frequency = std::min(frequency, 2.0f);
+        return spectral + freqWeight * frequency;
     }
 
     // Compute loss with regional support (for DISPLAY mode)
@@ -468,8 +496,7 @@ namespace geos::internal
             if (progress)
             {
                 cv::UMat candProxy = resizeProxy(body.view());
-                cv::UMat candLCH = convertToSafeLCH(candProxy);
-                StyleFeatures candStyle = extractStyle(candLCH);
+                StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
                 auto [r, th] = computeDome(targetStyle, candStyle);
 
                 float candVar = laplacianVariance(candProxy);

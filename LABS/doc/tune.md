@@ -101,7 +101,7 @@ make -f Makefile.tune test
 // Baseline (no edit steps):
 { "spectral": 0.024843, "frequency": 0.814570 }  // 2.5% color, 81% sharpness
 
-// After optimization (17 dials + LUT + edge):
+// After optimization (45 dials):
 { "spectral": 0.000511, "frequency": 0.007 }     // 0.05% color, <1% sharpness
 ```
 
@@ -600,8 +600,7 @@ tune::Result result = task->run(body, link, config,
 
 | What | How | Time |
 |------|-----|------|
-| **Color/Tone** (17 dials + LUT) | 3D LUT + SPSA + spectral loss | ~5min |
-| **Sharpness** (2 dials) | Golden section + frequency loss | ~2s |
+| **Style** (45 dials) | SPSA/ACEO/HYBRID + 12D spectral loss | ~5min |
 | **Geometry** (6 dials) | User sets manually | - |
 
 The user's responsibility is simple: **frame your shot**. The tool handles the rest.

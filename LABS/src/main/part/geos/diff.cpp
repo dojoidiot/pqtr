@@ -24,8 +24,18 @@ namespace geos::internal
         return proxy;
     }
 
-    cv::UMat convertToSafeLCH(const cv::UMat& bgr)
+    // Internal: convert BGR to LCH and also return Lab a/b means for color cast
+    struct LCHResult
     {
+        cv::UMat lch;
+        float mu_a;  // Mean Lab a* (green-magenta axis), signed
+        float mu_b;  // Mean Lab b* (blue-yellow axis), signed
+    };
+
+    LCHResult convertToSafeLCH_impl(const cv::UMat& bgr)
+    {
+        LCHResult result;
+
         cv::UMat lab;
         cv::cvtColor(bgr, lab, cv::COLOR_BGR2Lab);
 
@@ -44,6 +54,11 @@ namespace geos::internal
         // Shift a, b to signed range
         a -= 128.0f;
         b -= 128.0f;
+
+        // Capture Lab a/b means BEFORE any further transformation
+        // Normalize to [-1, 1] range (Lab a/b range is roughly [-128, 127])
+        result.mu_a = static_cast<float>(cv::mean(a)[0]) / 128.0f;
+        result.mu_b = static_cast<float>(cv::mean(b)[0]) / 128.0f;
 
         // Compute Chroma and Hue
         cv::Mat C, H;
@@ -78,12 +93,17 @@ namespace geos::internal
         cv::Mat lch;
         cv::merge(lchChannels, lch);
 
-        cv::UMat result;
-        lch.copyTo(result);
+        lch.copyTo(result.lch);
         return result;
     }
 
-    StyleFeatures extractStyle(const cv::UMat& lch)
+    cv::UMat convertToSafeLCH(const cv::UMat& bgr)
+    {
+        return convertToSafeLCH_impl(bgr).lch;
+    }
+
+    // Internal helper: extract style from LCH with pre-computed Lab a/b means
+    StyleFeatures extractStyleImpl(const cv::UMat& lch, float mu_a, float mu_b)
     {
         StyleFeatures features;
 
@@ -138,8 +158,8 @@ namespace geos::internal
         cv::multiply(H - mu_H, C - mu_C, HC_prod);
         float cov_HC = static_cast<float>(cv::mean(HC_prod)[0]);
 
-        // Build feature vector
-        features.v = {sigma1, sigma2, sigma3, mu_L, mu_C, std_L, std_C, skew_L, cov_LC, cov_HC};
+        // Build 12D feature vector (was 10D, now includes mu_a, mu_b for color cast)
+        features.v = {sigma1, sigma2, sigma3, mu_L, mu_C, std_L, std_C, skew_L, cov_LC, cov_HC, mu_a, mu_b};
 
         // Normalize to unit hypersphere
         float norm = 0.0f;
@@ -149,7 +169,7 @@ namespace geos::internal
 
         if (norm > 1e-6f)
         {
-            for (int i = 0; i < 10; i++)
+            for (int i = 0; i < STYLE_DIM; i++)
                 features.psi[i] = features.v[i] / norm;
         }
         else
@@ -161,10 +181,24 @@ namespace geos::internal
         return features;
     }
 
+    // Legacy API: extract style from pre-converted LCH (mu_a=0, mu_b=0)
+    // Note: This doesn't capture color cast - use extractStyleFromBGR for full features
+    StyleFeatures extractStyle(const cv::UMat& lch)
+    {
+        return extractStyleImpl(lch, 0.0f, 0.0f);
+    }
+
+    // New API: extract style directly from BGR, capturing Lab a/b means for color cast
+    StyleFeatures extractStyleFromBGR(const cv::UMat& bgr)
+    {
+        LCHResult lchResult = convertToSafeLCH_impl(bgr);
+        return extractStyleImpl(lchResult.lch, lchResult.mu_a, lchResult.mu_b);
+    }
+
     float geodesicLoss(const StyleFeatures& a, const StyleFeatures& b)
     {
         float dot = 0.0f;
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < STYLE_DIM; i++)
             dot += a.psi[i] * b.psi[i];
 
         return 1.0f - dot * dot;
@@ -174,15 +208,15 @@ namespace geos::internal
     {
         // Dot product
         float dot = 0.0f;
-        for (int i = 0; i < 10; i++)
+        for (int i = 0; i < STYLE_DIM; i++)
             dot += target.psi[i] * candidate.psi[i];
 
         // Radial distance
         float r = std::sqrt(1.0f - dot * dot);
 
         // Residual in tangent plane
-        std::array<float, 10> residual;
-        for (int i = 0; i < 10; i++)
+        std::array<float, STYLE_DIM> residual;
+        for (int i = 0; i < STYLE_DIM; i++)
             residual[i] = candidate.psi[i] - dot * target.psi[i];
 
         // Project onto semantic axes
@@ -239,10 +273,12 @@ namespace geos::internal
         cv::UMat proxy = resizeProxy(target);
         tf.lch = convertToSafeLCH(proxy);
 
-        // Extract global features
-        tf.global = extractStyle(tf.lch);
+        // Extract global features using BGR (full 12D with mu_a, mu_b)
+        tf.global = extractStyleFromBGR(proxy);
 
         // Extract regional features (4x4 grid = 16 cells)
+        // Note: Regional features use LCH (won't have mu_a/mu_b - they'll be 0)
+        // This is acceptable since global features dominate the loss
         for (int i = 0; i < GRID_CELLS; i++)
         {
             tf.regions[i] = extractCellFeatures(tf.lch, i);
@@ -257,12 +293,11 @@ namespace geos::internal
         LossMode mode,
         float globalWeight)
     {
-        // Resize candidate to proxy and convert to LCH
+        // Resize candidate to proxy
         cv::UMat candProxy = resizeProxy(candidate);
-        cv::UMat candLCH = convertToSafeLCH(candProxy);
 
-        // Global loss (always computed)
-        StyleFeatures candGlobal = extractStyle(candLCH);
+        // Global loss (always computed) - use BGR for full 12D features
+        StyleFeatures candGlobal = extractStyleFromBGR(candProxy);
         float globalLoss = geodesicLoss(target.global, candGlobal);
 
         // GLOBAL_ONLY mode: return just global loss
@@ -270,6 +305,9 @@ namespace geos::internal
         {
             return globalLoss;
         }
+
+        // Convert to LCH for regional analysis
+        cv::UMat candLCH = convertToSafeLCH(candProxy);
 
         // Compute regional losses
         float localSum = 0.0f;
@@ -308,13 +346,15 @@ namespace geos::internal
     {
         RegionalAnalysis ra;
 
-        // Resize candidate to proxy and convert to LCH
+        // Resize candidate to proxy
         cv::UMat candProxy = resizeProxy(candidate);
-        cv::UMat candLCH = convertToSafeLCH(candProxy);
 
-        // Global loss
-        StyleFeatures candGlobal = extractStyle(candLCH);
+        // Global loss - use BGR for full 12D features
+        StyleFeatures candGlobal = extractStyleFromBGR(candProxy);
         ra.global = geodesicLoss(target.global, candGlobal);
+
+        // Convert to LCH for regional analysis
+        cv::UMat candLCH = convertToSafeLCH(candProxy);
 
         // All 16 regional losses
         for (int i = 0; i < GRID_CELLS; i++)

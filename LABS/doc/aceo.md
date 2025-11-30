@@ -116,11 +116,11 @@ SPSA now accumulates dial samples during optimization using Welford's online alg
 
 ```bash
 # Phase 1: SPSA bootstrap (explores full 45D space)
-tune img1.ARW preview --save-area /tmp --optimizer spsa --save-cov tmp/cov.json
-tune img2.ARW preview --save-area /tmp --optimizer spsa --save-cov tmp/cov.json
+tune img1.ARW preview --save-area tmp --optimizer spsa --save-cov tmp/cov.json
+tune img2.ARW preview --save-area tmp --optimizer spsa --save-cov tmp/cov.json
 
 # Phase 2: ACEO refinement (uses SPSA-built prior)
-tune img3.ARW preview --save-area /tmp --optimizer aceo --with-cov tmp/cov.json --save-cov tmp/cov.json
+tune img3.ARW preview --save-area tmp --optimizer aceo --with-cov tmp/cov.json --save-cov tmp/cov.json
 ```
 
 The `bin/cvar.sh` script automates this workflow.
@@ -158,7 +158,10 @@ These are user composition choices, not style parameters. The user frames the sh
 
 ## Status
 
-**Implemented.** ACEO optimizer available via `--optimizer aceo` flag in tune.
+**Implemented.** Three optimizer modes available:
+- `--optimizer spsa` - Phased SPSA (default)
+- `--optimizer aceo` - CMA-ES eigenspace
+- `--optimizer hybrid` - ACEO for direction/pop, then SPSA for polish
 
 ### Implementation Details (Full ACEO - 45 dials)
 
@@ -205,16 +208,24 @@ SPSA uses **phased optimization** aligned with **loss function structure**:
 
 ACEO uses **eigenspace** aligned with **dial correlation structure** - captures how dials move together across images, but not how they affect the loss.
 
-### Path to ACEO Victory
+### HYBRID Mode (Implemented)
 
-1. **Phased eigenspace**: Map eigenvectors to phases
-   - PC1-2 dominate ToneMapping dials
-   - PC3-4 dominate GlobalColor dials
+**The hybrid approach combines ACEO's direction-finding with SPSA's polish:**
 
-2. **Adaptive eigenspace**: Learn image-specific structure
-   - Start with prior, adapt based on observed gradients
+1. **Phase 1: ACEO** (half iterations)
+   - Use eigenspace search for fast convergence to correct "pop"
+   - ACEO excels at finding the right direction
 
-3. **Hybrid**: ACEO for exploration, SPSA for refinement
+2. **Phase 2: SPSA** (remaining iterations)
+   - Polish from ACEO's position
+   - SPSA excels at photographic quality refinement
+
+```bash
+# Use hybrid mode
+tune img.ARW preview --save-area tmp --full --optimizer hybrid --with-cov etc/aceo_full.json
+```
+
+This gives ACEO's speed at finding color vibrancy + SPSA's photographic quality polish.
 
 ### Online Covariance Accumulator
 

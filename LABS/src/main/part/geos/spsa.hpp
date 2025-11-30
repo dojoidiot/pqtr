@@ -168,6 +168,14 @@ namespace geos::internal
         pipe::Body& body,
         const StyleFeatures& targetStyle);
 
+    // Compute combined loss: spectral + frequency (for holistic optimization)
+    // Used by --full mode where edge dials are optimized together with color/tone
+    float evaluateCombinedLoss(
+        pipe::Body& body,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        float freqWeight = 0.15f);
+
     // ============================================================
     // Optimizer entry point
     // ============================================================

@@ -15,8 +15,11 @@ namespace geos::internal
     // Constants
     constexpr int PROXY_SIZE = 512;
     constexpr float CHROMA_WEIGHT_K = 0.1f;
-    constexpr int IDX_MU_L = 3;  // Brightness axis in style vector
-    constexpr int IDX_MU_C = 4;  // Color axis in style vector
+    constexpr int STYLE_DIM = 12;  // Feature vector dimension (was 10, added mu_a, mu_b)
+    constexpr int IDX_MU_L = 3;    // Brightness axis in style vector
+    constexpr int IDX_MU_C = 4;    // Color axis in style vector
+    constexpr int IDX_MU_A = 10;   // Lab a* axis (green-magenta) - NEW for color cast
+    constexpr int IDX_MU_B = 11;   // Lab b* axis (blue-yellow) - NEW for color cast
 
     // Regional analysis grid (4x4 = 16 cells)
     constexpr int GRID_SIZE = 4;
@@ -26,11 +29,17 @@ namespace geos::internal
     // Indices: 0,3,12,15 (corners) + 5,6,9,10 (center quad)
     constexpr std::array<int, 8> SAMPLED_CELLS = {0, 3, 5, 6, 9, 10, 12, 15};
 
-    // Style feature vector (10 dimensions)
+    // Style feature vector (12 dimensions)
+    // [0-2]  SVD singular values (sigma1, sigma2, sigma3)
+    // [3-4]  LCH means (mu_L, mu_C)
+    // [5-6]  LCH stds (std_L, std_C)
+    // [7]    Luminance skewness (skew_L)
+    // [8-9]  Covariances (cov_LC, cov_HC)
+    // [10-11] Lab a/b means (mu_a, mu_b) - directly penalize color cast
     struct StyleFeatures
     {
-        std::array<float, 10> v;   // Raw feature vector
-        std::array<float, 10> psi; // Normalized (unit hypersphere)
+        std::array<float, STYLE_DIM> v;   // Raw feature vector
+        std::array<float, STYLE_DIM> psi; // Normalized (unit hypersphere)
     };
 
     // Pre-computed target features (global + regional)
@@ -55,8 +64,11 @@ namespace geos::internal
     // Convert BGR 8-bit to LCH float with chroma-weighted hue
     cv::UMat convertToSafeLCH(const cv::UMat& bgr);
 
-    // Extract style features from LCH image
+    // Extract style features from LCH image (legacy - doesn't capture color cast)
     StyleFeatures extractStyle(const cv::UMat& lch);
+
+    // Extract style features directly from BGR image (preferred - captures Lab a/b for color cast)
+    StyleFeatures extractStyleFromBGR(const cv::UMat& bgr);
 
     // Geodesic loss: 1 - |<a|b>|^2
     float geodesicLoss(const StyleFeatures& a, const StyleFeatures& b);

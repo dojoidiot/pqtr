@@ -101,13 +101,13 @@ Parts are modular libraries in `src/main/part/`. They expose a public API using 
     *   **HEAD**: Decodes the RAW file into scene-referred linear space.
     *   **BODY**: A sequence of configurable **edit steps** with 6 modules each.
     *   **TAIL**: Renders the final image to **PNG** (lossless format).
-*   [**`geos`**](./doc/geos.md): The optimizer library. Handles **color/tone** (17 dials + 17³ LUT, SPSA + spectral) and **sharpness** (2 dials, golden section + frequency).
+*   [**`geos`**](./doc/geos.md): The optimizer library. 45 style dials, 12D feature space, three optimizer modes (SPSA, ACEO, HYBRID). See [tldr.md](./doc/tldr.md) for overview.
 
 ## Headless Tools (Programs)
 
 Command-line executables in `bin/`:
 
-*   **`tune`**: Automatically optimizes dials to match a reference style. Two-stage: SPSA for color/tone (17 dials + 17³ LUT), golden section for sharpness (2 dials).
+*   **`tune`**: Automatically optimizes 45 style dials to match a reference style. Supports SPSA, ACEO, and HYBRID optimizers. Optional 17³ 3D LUT for nonlinear color transforms.
 *   **`labs`**: Processes RAW to PNG with optional tune.json settings (dials + 3D LUT).
 
 ## RAW Decoding
@@ -132,7 +132,7 @@ See [out_of_scope.md](./doc/mods/out_of_scope.md) for detailed module ideas.
 1.  **RAW to PNG Handoff Works Seamlessly**: Linear RGB validated, no data loss.
 2.  **Pipe Produces Perceptually Accurate Output**: All dials functional.
 3.  **Diff Provides Accurate Loss Metrics**: Spectral (geodesic) + frequency (Laplacian). **Achieved: 0.05% spectral loss.**
-4.  **Tune Optimizes All Roles**: SPSA + LUT for color/tone; golden section for sharpness.
+4.  **Tune Optimizes All Roles**: 45 dials via SPSA/ACEO/HYBRID; optional 3D LUT.
 5.  **Performance Targets Met**: `tune`: ~65 seconds total.
 
 ## Documentation Standards
@@ -145,6 +145,14 @@ All LABS documentation maintains:
 - **Technical Accuracy**: Code examples and counts match implementation
 
 Reference [docs.md](./doc/docs.md) for the review template and criteria.
+
+## Documentation
+
+- [tldr.md](./doc/tldr.md) - Quick overview (45 dials, 12D features, 3 optimizers)
+- [code.md](./doc/code.md) - Code management (building, testing, tmp/ conventions)
+- [geos.md](./doc/geos.md) - GeoS model (feature space, loss function)
+- [aceo.md](./doc/aceo.md) - ACEO optimizer (eigenspace, covariance)
+- [spsa.md](./doc/spsa.md) - SPSA optimizer (phased, gradient-free)
 
 ## Research
 

@@ -156,8 +156,7 @@ Each module contains sub-modules that work together. See [module documentation](
 **Sub-Modules**: Shadow Hue (1), Shadow Sat (1), Highlight Hue (1), Highlight Sat (1)
 **Total**: 4 dials
 
-**GEOS optimizes**: 17 dials + 17³ 3D LUT
-**EDGE optimizes**: 2 sharpness dials
+**GEOS optimizes**: 45 style dials (SPSA/ACEO/HYBRID)
 **User controls**: 6 geometry dials
 
 ---

@@ -176,8 +176,7 @@ mods::tone_map(input, output,
 | `split_tone()` | 4 | all 0.5 |
 | `detail()` | 2 | sharpen amount/radius |
 
-**GEOS optimizes**: 17 dials + 17³ LUT
-**EDGE optimizes**: 2 dials (L-only sharpening)
+**GEOS optimizes**: 45 style dials (SPSA/ACEO/HYBRID, 12D features)
 
 ---
 

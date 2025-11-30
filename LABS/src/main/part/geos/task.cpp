@@ -28,7 +28,7 @@ namespace geos
         explicit TaskImpl(View targetImg)
             : m_targetProxy(resizeProxy(targetImg))
             , m_targetLCH(convertToSafeLCH(m_targetProxy))
-            , m_targetStyle(extractStyle(m_targetLCH))
+            , m_targetStyle(extractStyleFromBGR(m_targetProxy))  // Use BGR for full 12D features (incl. mu_a, mu_b)
             , m_targetLaplacianVar(laplacianVariance(m_targetProxy))
             , m_targetFeatures(extractTargetFeatures(targetImg))
         {
@@ -44,8 +44,7 @@ namespace geos
         Data diff(View candidate) override
         {
             cv::UMat candProxy = resizeProxy(candidate);
-            cv::UMat candLCH = convertToSafeLCH(candProxy);
-            StyleFeatures candStyle = extractStyle(candLCH);
+            StyleFeatures candStyle = extractStyleFromBGR(candProxy);  // Use BGR for full 12D features
             float candLaplacianVar = laplacianVariance(candProxy);
 
             Data result;
@@ -121,27 +120,55 @@ namespace geos
                 // Dispatch based on optimizer selection
                 // ACEO only works for modes with its 36 variable dials (DISPLAY, FULL_35D)
                 // For SCENE_LINEAR (5 dials) and LINEAR_ONLY (partial), fall back to SPSA
-                bool useAceo = (config.optimizer == Optimizer::ACEO) &&
-                               (config.geos_mode == Mode::DISPLAY || config.geos_mode == Mode::FULL_35D);
+                bool canUseAceo = (config.geos_mode == Mode::DISPLAY || config.geos_mode == Mode::FULL_35D);
 
-                if (useAceo)
+                // Pass nullptr for targetFeatures if skip_regional is set
+                const TargetFeatures* features = config.skip_regional ? nullptr : &m_targetFeatures;
+
+                if (config.optimizer == Optimizer::HYBRID && canUseAceo)
+                {
+                    // HYBRID: ACEO for direction (pop), then SPSA for polish
+                    std::cout << "[geos] HYBRID mode: ACEO for pop, SPSA for polish" << std::endl;
+
+                    // Phase 1: ACEO - get to correct pop (fewer iterations)
+                    Config aceoConfig = config;
+                    aceoConfig.geos_max_iter = config.geos_max_iter / 2;  // Half iterations for ACEO
+                    int aceoIters = optimizeAceo(
+                        body, link, m_targetStyle, m_targetLaplacianVar, aceoConfig, progress, lutEstimated, features);
+
+                    // Phase 2: SPSA - polish from ACEO's position (remaining iterations)
+                    Config spsaConfig = config;
+                    spsaConfig.geos_max_iter = config.geos_max_iter - aceoIters;  // Remaining budget
+                    int spsaIters = optimizeGeos(
+                        body, link, m_targetStyle, m_targetLaplacianVar, spsaConfig, progress, lutEstimated, features);
+
+                    result.geos_iterations = aceoIters + spsaIters;
+                    std::cout << "[geos] HYBRID complete: " << aceoIters << " ACEO + " << spsaIters << " SPSA" << std::endl;
+                }
+                else if (config.optimizer == Optimizer::ACEO && canUseAceo)
                 {
                     result.geos_iterations = optimizeAceo(
-                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
+                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, features);
                 }
                 else
                 {
-                    // Default: SPSA - Pass regional features for DISPLAY mode
+                    // Default: SPSA - Pass regional features for DISPLAY mode (unless skipped)
                     result.geos_iterations = optimizeGeos(
-                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, &m_targetFeatures);
+                        body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, features);
                 }
             }
 
             // Stage 3: Edge (Sharpness)
-            if (!config.skip_edge)
+            // Skip separate edge pass in FULL_35D mode - edge dials are optimized holistically
+            bool holisticMode = (config.geos_mode == Mode::FULL_35D);
+            if (!config.skip_edge && !holisticMode)
             {
                 result.edge_evaluations = optimizeEdge(
                     body, link, m_targetLaplacianVar, config, progress);
+            }
+            else if (holisticMode)
+            {
+                std::cout << "[geos] Edge dials optimized holistically (no separate pass)" << std::endl;
             }
 
             // Final loss measurement

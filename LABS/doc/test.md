@@ -253,7 +253,7 @@ After exposure (dial=0.75, +2 EV, ×4):
 
 ## Tune Testing
 
-### Stage 1: SPSA Tests (Color/Tone - 17 dials + 17³ LUT)
+### Stage 1: Optimizer Tests (45 style dials)
 
 | Test Case | Input | Expected Result |
 |-----------|-------|-----------------|
@@ -287,8 +287,7 @@ After exposure (dial=0.75, +2 EV, ×4):
 
 | Role | Dials | Handled By | Test |
 |------|-------|------------|------|
-| Color/Tone | 17 + LUT | GeoS (3D LUT + SPSA) | Spectral loss < 0.1% |
-| Sharpness | 2 | Edge (golden section) | Frequency loss < 1% |
+| Style | 45 | GeoS (SPSA/ACEO/HYBRID) | Spectral loss < 0.1% |
 | Geometry | 6 | User | Not in style sidecars |
 
 ### Performance Tests
@@ -296,14 +295,12 @@ After exposure (dial=0.75, +2 EV, ×4):
 | Test | Target |
 |------|--------|
 | LUT estimation | < 2 seconds |
-| SPSA stage (17 dials) | < 5 minutes |
-| Edge stage (2 dials) | < 5 seconds |
-| Full optimization | < 6 minutes |
+| Full optimization (45 dials) | < 5 minutes |
 | Single pipe evaluation | < 33ms (30fps) |
 
 ### Validation Tests
 
-- [ ] Vibe output contains 19 dials (17 + 2) + 17³ LUT
+- [ ] Vibe output contains 45 style dials
 - [ ] Vibe output does NOT contain geometric dials
 - [ ] Vibe output loads correctly in pipe
 - [ ] Progress callback fires at expected intervals

@@ -534,9 +534,14 @@ namespace geos::internal
         // Note: Full CMA-ES covariance adaptation (C matrix, pc path) reserved for future.
         // Current implementation uses fixed prior eigenspace with CSA step-size adaptation.
 
-        // Evaluate initial loss
-        float initialLoss = evaluateLoss(body, targetStyle);
-        std::cerr << "[ACEO-EIGEN] Initial loss: " << initialLoss << std::endl;
+        // Evaluate initial loss (combined: spectral + frequency for holistic optimization)
+        // In --full mode, we optimize all 45 dials including edge, so use combined loss
+        bool useHolisticLoss = (config.geos_mode == Mode::FULL_35D);
+        float initialLoss = useHolisticLoss
+            ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
+            : evaluateLoss(body, targetStyle);
+        std::cerr << "[ACEO-EIGEN] Initial loss: " << initialLoss
+                  << (useHolisticLoss ? " (holistic: spectral+freq)" : " (spectral only)") << std::endl;
         std::cerr << "[ACEO-EIGEN] Population: λ=" << lambda << " μ=" << mu << std::endl;
         std::cerr << "[ACEO-EIGEN] Eigenspace dim: " << EIGEN_DIM << std::endl;
 
@@ -572,11 +577,13 @@ namespace geos::internal
                 // Unproject to dial space
                 unprojectFromEigen(es, population[i], populationAceo[i]);
 
-                // Evaluate
+                // Evaluate (use combined loss in holistic mode)
                 Theta theta;
                 aceoToTheta(populationAceo[i], theta);
                 writeDials(link, theta);
-                fitness[i] = evaluateLoss(body, targetStyle);
+                fitness[i] = useHolisticLoss
+                    ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
+                    : evaluateLoss(body, targetStyle);
                 evalCount++;
 
                 if (fitness[i] < bestLoss)
@@ -680,8 +687,11 @@ namespace geos::internal
         aceoToTheta(bestAceo, bestTheta);
         writeDials(link, bestTheta);
 
-        float finalLoss = evaluateLoss(body, targetStyle);
-        std::cerr << "[ACEO-EIGEN] Final loss: " << finalLoss << " (evals=" << evalCount << ")" << std::endl;
+        float finalLoss = useHolisticLoss
+            ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
+            : evaluateLoss(body, targetStyle);
+        std::cerr << "[ACEO-EIGEN] Final loss: " << finalLoss << " (evals=" << evalCount << ")"
+                  << (useHolisticLoss ? " [holistic]" : "") << std::endl;
 
         // Log covariance accumulator stats
         std::cerr << "[ACEO-COV] Accumulated " << covAccum.n << " samples" << std::endl;

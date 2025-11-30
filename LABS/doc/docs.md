@@ -60,8 +60,8 @@ Passive voice is acceptable for:
 - **Link** (named collection of modules in pipe)
 - **camera to web** (project scope statement)
 - **tune** (orchestrates geos + edge optimization)
-- **geos** (spectral optimizer: SPSA, 17 color/tone dials + 17³ LUT)
-- **edge** (frequency optimizer: golden section, 2 sharpness dials)
+- **geos** (spectral optimizer: SPSA/ACEO/HYBRID, 45 style dials, 12D features)
+- **edge** (frequency loss: Laplacian variance for sharpness)
 - **diff** (the comparison tool/metric)
 - **HEAD → BODY → TAIL** (pipeline stages)
 - **spectral loss** (geos: geodesic distance for color/tone)
@@ -114,8 +114,7 @@ Passive voice is acceptable for:
 4. Module test coverage (test cases per module)
 5. Tool test sections:
    - Diff: spectral loss tests, frequency loss tests
-   - GeoS: SPSA algorithm tests (color/tone, 17 dials + 17³ LUT)
-   - Edge: golden section optimizer tests (sharpness, 2 dials)
+   - GeoS: optimizer tests (SPSA/ACEO/HYBRID, 45 dials, 12D features)
    - Tune: integration tests, style transfer tests
 6. Running tests (commands, visual inspection)
 
@@ -164,30 +163,33 @@ Passive voice is acceptable for:
 
 #### Items to Verify
 
-**Dial Counts** (current two-link architecture):
+**Dial Counts** (45 style dials):
 
-Scene-Linear Link (5 dials):
-- exposure (1)
-- temperature (1)
-- tint (1)
-- black point (1)
-- white point (1)
+| Block | Dials | Count |
+|-------|-------|-------|
+| ColorCorrection | exposure, temperature, tint | 3 |
+| ToneMapping | contrast, highlights, shadows, toe, shoulder, black, white | 7 |
+| GlobalColor | vibrance, saturation, density | 3 |
+| SplitTone | shadow_temp, shadow_tint, highlight_temp, highlight_tint | 4 |
+| SelectiveColor | 8 hues × (hue, sat, lum) | 24 |
+| Detail | sharpen_amount, sharpen_radius, denoise_luma, denoise_chroma | 4 |
+| **Total** | | **45** |
 
-Display Link (36 dials + LUT):
-- Tone Mapping: 5 dials (contrast, highlights, shadows, toe pivot, shoulder pivot)
-- Global Color: 3 dials (vibrance, saturation, color density)
-- Split Tone: 4 dials (shadow hue/sat, highlight hue/sat)
-- Additional color dials: 24
-- **17³ 3D LUT** for residual correction
+Other (not optimized):
+- Geometric: 6 dials (user-controlled composition)
 
-Other:
-- Geometric: 6 dials (user-controlled)
-- Detail: 2 dials (sharpen amount, sharpen radius)
+**Feature Vector** (12D):
+- σ₁, σ₂, σ₃ (SVD singular values)
+- μ_L, μ_C (LCH means)
+- std_L, std_C (LCH stds)
+- skew_L (luminance skewness)
+- cov_LC, cov_HC (covariances)
+- μ_a, μ_b (Lab a/b means for color cast)
 
-**Summary:**
-- **geos optimizes: 5 scene-linear + 36 display + 17³ LUT**
-- **edge optimizes: 2 detail dials**
-- **User controls: 6 geometry dials**
+**Optimizers:**
+- **SPSA**: Phased optimization, builds covariance
+- **ACEO**: CMA-ES eigenspace using prior covariance
+- **HYBRID**: ACEO for direction/pop, then SPSA for polish
 
 **Color Spaces**:
 - `SCENE_LINEAR_RGB` (camera native)
@@ -221,8 +223,8 @@ Other:
 ### Issue: Dial Count Mismatches
 
 **Problem**: Documentation shows different total than implementation
-**Example**: ❌ "45 dials total"
-**Fix**: ✅ "17 GEOS dials + 17³ LUT + 2 EDGE dials + 6 geometry dials" (verify against actual implementation)
+**Example**: ❌ "17 dials total"
+**Fix**: ✅ "45 style dials (3 color + 7 tone + 3 global + 4 split + 24 selective + 4 detail)" (verify against actual implementation)
 
 ### Issue: Missing Cross-References
 
