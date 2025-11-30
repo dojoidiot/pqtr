@@ -65,7 +65,7 @@ ACEO_SAVE_COV=tmp/aceo_learned.json tune photo.ARW preview --optimizer aceo
 
 This replaces the need for external Python scripts (`opt/cov.sh`).
 
-### Phase 1: Extend to 45 Dials ✓ DONE
+### Phase 1: Extend to 45 Dials ✓ CODE DONE
 
 Code changes complete:
 - [x] Update `ACEO_DIAL_MAP` in `aceo.hpp` to include all 45 dials
@@ -76,7 +76,8 @@ Code changes complete:
 - [x] Update `aceo.cpp` types: `VectorN` (45), `MatrixN` (45×45), `EIGEN_DIM=12`
 - [x] Identity fallback when `etc/aceo_full.json` not found (bootstrapping)
 
-Remaining:
+Data remaining:
+- [ ] `etc/aceo.json` still 41 dials (36 variable + 5 fixed) - needs upgrade to 45
 - [ ] Run ACEO on multiple images, save covariance
 - [ ] Generate `etc/aceo_full.json` (45×45 matrix)
 - [ ] Analyze eigenstructure (expect ~12D for 99% variance)
@@ -123,7 +124,7 @@ src/main/tune.cpp               # CLI (add --full-aceo mode)
 
 ```
 Read doc/FULL_ACEO_PLAN.md for the plan.
-Current state: Phase 0+1 complete (45 dials), need to generate covariance.
+Current state: Phase 0+1 code complete (45 dials), but etc/aceo.json still 41 dials.
 Next step: Run ACEO on images, save covariance to etc/aceo_full.json.
 
 Key context:
