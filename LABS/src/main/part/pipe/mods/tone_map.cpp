@@ -1,6 +1,17 @@
 // tone_map.cpp
 // Tone Mapping Module - Filmic HDR to SDR compression
 // Part of Tone Mapping module (7 dials)
+//
+// LUMINANCE-PRESERVING MODE:
+// All tone adjustments are applied to luminance only. RGB channels are
+// scaled proportionally to preserve hue. This prevents color shifts that
+// occur when per-channel curves have different gains.
+//
+// Algorithm:
+//   1. Compute luminance: L = 0.2126*R + 0.7152*G + 0.0722*B
+//   2. Apply tone curve to L → L_new
+//   3. Compute scale = L_new / L
+//   4. Apply: R_out = R * scale (preserves R:G:B ratios)
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
@@ -12,7 +23,7 @@ namespace pipe
 namespace mods
 {
     // Apply filmic tone mapping for HDR → SDR compression
-    // Input:  CV_32FC3 scene-linear sRGB
+    // Input:  CV_32FC3 scene-linear sRGB (BGR order in OpenCV)
     // Output: CV_32FC3 tone-mapped linear (before gamma)
     //
     // 7 Dials (all 0.0-1.0, ALL NEUTRAL AT 0.5):
@@ -26,12 +37,11 @@ namespace mods
     //
     // At dial 0.5 for all parameters, tone_map is a pass-through (no effect).
     //
-    // Algorithm:
-    //   1. Apply black point adjustment (lift or crush)
-    //   2. Apply extended Reinhard with white point (bypassed at 0.5)
-    //   3. Apply shadows curve with smooth mask (toe)
-    //   4. Apply highlights curve with smooth mask (shoulder)
-    //   5. Apply contrast
+    // LUMINANCE-PRESERVING APPROACH:
+    //   1. Extract luminance from input RGB
+    //   2. Apply all tone operations (black point, Reinhard, shadows, highlights, contrast) to L
+    //   3. Compute scale = L_new / L
+    //   4. Scale each RGB channel by the same factor → preserves R:G:B ratios (hue)
     bool tone_map(
         const cv::UMat &input,
         cv::UMat &output,
@@ -99,152 +109,150 @@ namespace mods
 
         try
         {
-            cv::UMat working;
+            // ================================================================
+            // LUMINANCE-PRESERVING TONE MAPPING
+            // ================================================================
+            //
+            // Extract luminance, apply tone curve to L only, then scale RGB
+            // proportionally. This preserves hue (R:G:B ratios).
 
-            // Step 1: Black point adjustment (lift or crush shadows)
-            // Positive: lift blacks, Negative: crush blacks, Zero: neutral
+            // Step 1: Extract luminance from BGR input
+            // L = 0.0722*B + 0.7152*G + 0.2126*R (Rec. 709 coefficients, BGR order)
+            std::vector<cv::UMat> channels(3);
+            cv::split(input, channels);
+
+            cv::UMat L;
+            cv::addWeighted(channels[0], 0.0722f, channels[1], 0.7152f, 0.0f, L);  // B + G
+            cv::addWeighted(L, 1.0f, channels[2], 0.2126f, 0.0f, L);                // + R
+
+            // Store original luminance for later ratio computation
+            cv::UMat L_orig;
+            L.copyTo(L_orig);
+            cv::max(L_orig, 0.0001f, L_orig);  // Avoid division by zero
+
+            // Step 2: Apply black point adjustment to luminance
             if (std::abs(black_point) > 0.001f)
             {
                 if (black_point > 0)
                 {
                     // Lift: subtract black point, rescale to maintain white
-                    cv::subtract(input, black_point, working);
-                    cv::max(working, 0.0f, working);
+                    cv::subtract(L, black_point, L);
+                    cv::max(L, 0.0f, L);
                     float scale = 1.0f / (1.0f - black_point);
-                    cv::multiply(working, scale, working);
+                    cv::multiply(L, scale, L);
                 }
                 else
                 {
                     // Crush: add headroom at bottom, compress range
                     float abs_bp = std::abs(black_point);
                     float scale = 1.0f - abs_bp;
-                    cv::multiply(input, scale, working);
-                    cv::add(working, abs_bp, working);
+                    cv::multiply(L, scale, L);
+                    cv::add(L, abs_bp, L);
                 }
             }
-            else
-            {
-                input.copyTo(working);
-            }
 
-            // Step 2: Extended Reinhard tone compression (bypass at neutral)
+            // Step 3: Extended Reinhard tone compression (bypass at neutral)
             // L_out = L * (1 + L/W²) / (1 + L)
             if (!bypass_reinhard)
             {
                 float w2 = white_point * white_point;
 
                 cv::UMat L_squared;
-                cv::multiply(working, working, L_squared);
+                cv::multiply(L, L, L_squared);
 
                 cv::UMat term2;
                 cv::divide(L_squared, w2, term2);
 
                 cv::UMat numerator;
-                cv::add(working, term2, numerator);
+                cv::add(L, term2, numerator);
 
                 cv::UMat denominator;
-                cv::add(working, 1.0f, denominator);
+                cv::add(L, 1.0f, denominator);
 
-                cv::divide(numerator, denominator, working);
+                cv::divide(numerator, denominator, L);
             }
-            // else: bypass Reinhard, keep working as-is
 
-            // Step 3: Shadow curve adjustment (toe) with smooth mask
-            // Lift dark values when shadows > 0, crush when < 0
+            // Step 4: Shadow curve adjustment (toe) with smooth mask
             if (std::abs(shadows) > 0.01f)
             {
-                // Smooth sigmoid mask: weight = 1 / (1 + exp(k * (L - pivot)))
-                // High weight for L < pivot, smooth falloff above
                 cv::UMat shifted;
-                cv::subtract(working, toe_pivot, shifted);
+                cv::subtract(L, toe_pivot, shifted);
                 cv::multiply(shifted, mask_steepness, shifted);
 
-                // Compute sigmoid: 1 / (1 + exp(x))
                 cv::UMat exp_val;
                 cv::exp(shifted, exp_val);
                 cv::UMat shadow_mask;
                 cv::add(exp_val, 1.0f, shadow_mask);
                 cv::divide(1.0f, shadow_mask, shadow_mask);
 
-                // Power adjustment for shadows region
-                float shadow_gamma = 1.0f - shadows * 0.5f;  // 0.5-1.5 range
+                float shadow_gamma = 1.0f - shadows * 0.5f;
                 shadow_gamma = std::max(0.3f, std::min(2.0f, shadow_gamma));
 
-                cv::UMat shadow_adjusted;
                 cv::UMat lifted;
-                cv::add(working, 0.001f, lifted);
+                cv::add(L, 0.001f, lifted);
+                cv::UMat shadow_adjusted;
                 cv::pow(lifted, shadow_gamma, shadow_adjusted);
 
-                // Blend based on smooth shadow mask
                 cv::UMat inv_mask;
                 cv::subtract(1.0f, shadow_mask, inv_mask);
 
                 cv::UMat shadow_part, keep_part;
                 cv::multiply(shadow_adjusted, shadow_mask, shadow_part);
-                cv::multiply(working, inv_mask, keep_part);
-                cv::add(shadow_part, keep_part, working);
+                cv::multiply(L, inv_mask, keep_part);
+                cv::add(shadow_part, keep_part, L);
             }
 
-            // Step 4: Highlight curve adjustment (shoulder) with smooth mask
-            // Compress highlights when < 0, expand when > 0
+            // Step 5: Highlight curve adjustment (shoulder) with smooth mask
             if (std::abs(highlights) > 0.01f)
             {
-                // Smooth sigmoid mask: weight = 1 / (1 + exp(-k * (L - pivot)))
-                // High weight for L > pivot, smooth falloff below
                 cv::UMat shifted;
-                cv::subtract(working, shoulder_pivot, shifted);
+                cv::subtract(L, shoulder_pivot, shifted);
                 cv::multiply(shifted, -mask_steepness, shifted);
 
-                // Compute sigmoid: 1 / (1 + exp(x))
                 cv::UMat exp_val;
                 cv::exp(shifted, exp_val);
                 cv::UMat highlight_mask;
                 cv::add(exp_val, 1.0f, highlight_mask);
                 cv::divide(1.0f, highlight_mask, highlight_mask);
 
-                // Inverse power for highlights (expand/compress upper values)
-                float highlight_gamma = 1.0f + highlights * 0.5f;  // 0.5-1.5 range
+                float highlight_gamma = 1.0f + highlights * 0.5f;
                 highlight_gamma = std::max(0.3f, std::min(2.0f, highlight_gamma));
 
-                cv::UMat inv_working;
-                cv::subtract(1.0f, working, inv_working);
-                cv::max(inv_working, 0.001f, inv_working);
+                cv::UMat inv_L;
+                cv::subtract(1.0f, L, inv_L);
+                cv::max(inv_L, 0.001f, inv_L);
 
                 cv::UMat highlight_adjusted;
-                cv::pow(inv_working, highlight_gamma, highlight_adjusted);
+                cv::pow(inv_L, highlight_gamma, highlight_adjusted);
                 cv::subtract(1.0f, highlight_adjusted, highlight_adjusted);
 
-                // Blend based on smooth highlight mask
                 cv::UMat inv_mask;
                 cv::subtract(1.0f, highlight_mask, inv_mask);
 
                 cv::UMat highlight_part, keep_part;
                 cv::multiply(highlight_adjusted, highlight_mask, highlight_part);
-                cv::multiply(working, inv_mask, keep_part);
-                cv::add(highlight_part, keep_part, working);
+                cv::multiply(L, inv_mask, keep_part);
+                cv::add(highlight_part, keep_part, L);
             }
 
-            // Step 5: Global contrast adjustment
+            // Step 6: Global contrast adjustment
             if (std::abs(contrast - 1.0f) > 0.01f)
             {
-                // S-curve contrast around midpoint (0.5)
-                // Shift to center, apply power, shift back
-                cv::subtract(working, 0.5f, working);
+                cv::subtract(L, 0.5f, L);
 
                 cv::UMat sign_mask;
-                cv::compare(working, 0.0f, sign_mask, cv::CMP_GE);
-                sign_mask.convertTo(sign_mask, CV_32FC3, 1.0/255.0);
+                cv::compare(L, 0.0f, sign_mask, cv::CMP_GE);
+                sign_mask.convertTo(sign_mask, CV_32FC1, 1.0/255.0);
 
-                cv::UMat abs_working;
-                cv::absdiff(working, 0.0f, abs_working);
-                cv::multiply(abs_working, 2.0f, abs_working);  // Scale to 0-1
+                cv::UMat abs_L;
+                cv::absdiff(L, 0.0f, abs_L);
+                cv::multiply(abs_L, 2.0f, abs_L);
 
                 cv::UMat powered;
-                cv::add(abs_working, 0.001f, abs_working);
-                cv::pow(abs_working, contrast, powered);
-                cv::multiply(powered, 0.5f, powered);  // Scale back
+                cv::add(abs_L, 0.001f, abs_L);
+                cv::pow(abs_L, contrast, powered);
+                cv::multiply(powered, 0.5f, powered);
 
-                // Restore sign
                 cv::UMat pos_part, neg_part;
                 cv::multiply(powered, sign_mask, pos_part);
 
@@ -253,13 +261,35 @@ namespace mods
                 cv::multiply(powered, inv_sign, neg_part);
                 cv::multiply(neg_part, -1.0f, neg_part);
 
-                cv::add(pos_part, neg_part, working);
-                cv::add(working, 0.5f, working);
+                cv::add(pos_part, neg_part, L);
+                cv::add(L, 0.5f, L);
             }
 
-            // Clamp final output to [0, 1]
-            cv::max(working, 0.0f, working);
-            cv::min(working, 1.0f, output);
+            // Clamp L to [0, 1]
+            cv::max(L, 0.0f, L);
+            cv::min(L, 1.0f, L);
+
+            // ================================================================
+            // Step 7: Compute scale factor and apply to RGB channels
+            // ================================================================
+            //
+            // scale = L_new / L_orig
+            // This preserves R:G:B ratios, keeping hue constant
+
+            cv::UMat scale;
+            cv::divide(L, L_orig, scale);
+
+            // Apply scale to each channel (preserves hue)
+            cv::multiply(channels[0], scale, channels[0]);  // B
+            cv::multiply(channels[1], scale, channels[1]);  // G
+            cv::multiply(channels[2], scale, channels[2]);  // R
+
+            // Merge back and clamp
+            cv::UMat result;
+            cv::merge(channels, result);
+
+            cv::max(result, 0.0f, result);
+            cv::min(result, 1.0f, output);
 
             return true;
         }

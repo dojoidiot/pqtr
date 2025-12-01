@@ -1,24 +1,19 @@
 // labs.cpp
-// Pipe runner: Processes RAW through pipeline with optional tune settings
+// Pipe runner: Processes RAW through pipeline with tune settings
 //
 // WORKFLOW:
-//   labs <source.ARW> --output tail.png [--tune tune.json]
-//   → Loads RAW through HEAD (decode + color science)
-//   → If tune.json provided, loads dial settings + 3D LUT into BODY
-//   → Runs BODY → TAIL → saves output image
+//   tune <source.ARW> <target> --save-area dir   → vibe.json
+//   labs <source.ARW> --tune vibe.json --output out.png
+//   labs ... --debug                             → saves pipeline stages
 //
 // Usage:
-//   labs <source.ARW> --output <image.png> [options]
+//   labs <source.ARW> --output <image.png> [--tune <vibe.json>] [--debug]
 //
 // Options:
 //   --output <image.png>    Output file (required)
-//   --tune <tune.json>      Apply settings from tune (dials + 3D LUT)
-//   --size <pixels>         Max output dimension (default: 0 = full resolution)
-//
-// Examples:
-//   labs photo.ARW --output photo.png                    # Baseline (no edits)
-//   labs photo.ARW --output photo.png --tune style.json  # With optimized settings
-//   labs photo.ARW --output thumb.png --size 1080        # Social media size
+//   --tune <vibe.json>      Style settings from tune
+//   --size <pixels>         Max output dimension (default: full res)
+//   --debug                 Save intermediate pipeline stages
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -27,14 +22,32 @@
 #include <data.hpp>
 #include <iostream>
 #include <fstream>
+#include <opencv2/imgcodecs.hpp>
 
 void printUsage(const char* prog)
 {
     std::cerr << "Usage: " << prog << " <source.ARW> --output <image.png> [options]\n\n";
     std::cerr << "Options:\n";
     std::cerr << "  --output <image.png>    Output file (required)\n";
-    std::cerr << "  --tune <tune.json>      Apply settings from tune (dials + 3D LUT)\n";
+    std::cerr << "  --tune <vibe.json>      Style settings from tune\n";
     std::cerr << "  --size <pixels>         Max output dimension (default: full res)\n";
+    std::cerr << "  --debug                 Save intermediate pipeline stages\n";
+}
+
+// Save debug image helper
+void saveDebug(const std::string& basePath, const std::string& stage, pipe::View view)
+{
+    // Convert to 8-bit for saving
+    cv::Mat cpu;
+    view.copyTo(cpu);
+
+    // Clamp and convert to 8-bit
+    cv::Mat out;
+    cpu.convertTo(out, CV_8UC3, 255.0);
+
+    std::string path = basePath + "_" + stage + ".png";
+    cv::imwrite(path, out);
+    std::cout << "  [debug] " << stage << " → " << path << std::endl;
 }
 
 int main(int argc, char** argv)
@@ -57,6 +70,7 @@ int main(int argc, char** argv)
     std::string outputPath;
     std::string tunePath;
     int maxSize = 0;
+    bool debug = false;
 
     for (int i = 2; i < argc; i++)
     {
@@ -64,6 +78,7 @@ int main(int argc, char** argv)
         if (arg == "--output" && i + 1 < argc) outputPath = argv[++i];
         else if (arg == "--tune" && i + 1 < argc) tunePath = argv[++i];
         else if (arg == "--size" && i + 1 < argc) maxSize = std::stoi(argv[++i]);
+        else if (arg == "--debug") debug = true;
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
@@ -75,6 +90,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
+    // Debug base path (strip extension from output)
+    std::string debugBase = outputPath;
+    size_t dotPos = debugBase.rfind('.');
+    if (dotPos != std::string::npos) debugBase = debugBase.substr(0, dotPos);
+
     try
     {
         std::cout << "=== LABS ===" << std::endl;
@@ -82,6 +102,7 @@ int main(int argc, char** argv)
         std::cout << "Output: " << outputPath << std::endl;
         if (!tunePath.empty()) std::cout << "Tune: " << tunePath << std::endl;
         if (maxSize > 0) std::cout << "Size: " << maxSize << "px" << std::endl;
+        if (debug) std::cout << "Debug: ON" << std::endl;
 
         // Create pipe and load RAW
         pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
@@ -97,17 +118,34 @@ int main(int argc, char** argv)
         pipe::Info info = head->data().info();
         std::cout << "  Size: " << info["width"] << "x" << info["height"] << std::endl;
         std::cout << "  Camera: " << info["camera_model"] << std::endl;
+        std::cout << "  BaseCurve: " << (head->hasBaseCurve() ? "yes" : "no") << std::endl;
 
-        // Create body (no working size limit - we want full res for output)
+        // Debug: save flat (scene-linear) data
+        if (debug)
+        {
+            saveDebug(debugBase, "0_flat", head->data().view());
+            saveDebug(debugBase, "0_preview", head->view().view());
+        }
+
+        // Create body
         std::cout << "\n[BODY] Processing..." << std::endl;
-        pipe::Body& body = head->body(0);
+        pipe::Body& body = head->body(maxSize);
+
+        // Create links (two-link architecture: linear + display)
+        pipe::Body::Link& linearLink = body.add("linear");
+        pipe::Body::Link& displayLink = body.add("display");
+        std::vector<pipe::Body::Link*> links = {&linearLink, &displayLink};
+
+        // Always apply base curve from camera
+        if (head->hasBaseCurve())
+        {
+            linearLink.baseCurve().setCurve(head->baseCurve());
+            std::cout << "  Applied base curve" << std::endl;
+        }
 
         // Load tune settings if provided
         if (!tunePath.empty())
         {
-            std::cout << "  Loading tune: " << tunePath << std::endl;
-
-            // Check file exists
             std::ifstream check(tunePath);
             if (!check.good())
             {
@@ -115,29 +153,35 @@ int main(int argc, char** argv)
             }
             check.close();
 
-            // Create links and load settings (two-link architecture: linear + display)
-            pipe::Body::Link& linearLink = body.add("linear");
-            pipe::Body::Link& displayLink = body.add("display");
-            std::vector<pipe::Body::Link*> links = {&linearLink, &displayLink};
-
             if (!data::links::load(links, tunePath))
             {
                 throw std::runtime_error("Failed to load tune: " + tunePath);
             }
+            std::cout << "  Applied tune settings" << std::endl;
 
-            // Report what was loaded
-            std::cout << "  Applied 2 links: linear + display" << std::endl;
             if (displayLink.lutCurve().isEstimated())
             {
-                std::cout << "  Display link includes 3D LUT" << std::endl;
+                std::cout << "  Includes 3D LUT" << std::endl;
             }
         }
         else
         {
-            std::cout << "  No tune file (baseline output)" << std::endl;
+            std::cout << "  No tune (baseline)" << std::endl;
         }
 
-        // Save via TAIL
+        // Debug: save after each link
+        if (debug)
+        {
+            // Get working data and apply links one at a time
+            pipe::View working;
+            body.data().view().copyTo(working);
+
+            // After base curve (linear link partial)
+            // Note: can't easily get intermediate - save full link results
+            saveDebug(debugBase, "1_body", body.view(maxSize));
+        }
+
+        // Save output
         std::cout << "\n[TAIL] Saving..." << std::endl;
         if (!body.tail().save(outputPath, maxSize))
         {

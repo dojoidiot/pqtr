@@ -175,6 +175,7 @@ public:
         , m_view(std::move(viewInfo), std::move(viewImage))
         , m_hasBaseCurve(hasBaseCurve)
     {
+        // Base curve
         if (baseCurve && hasBaseCurve)
         {
             for (int i = 0; i < CURVE_SIZE; i++)

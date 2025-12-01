@@ -134,6 +134,17 @@ namespace mods
         // Color density: 0.5 to 1.5 (dial 0.5 = 1.0)
         float color_density = 0.5f + color_density_dial;
 
+        // NEUTRAL CHECK: If all dials are at 0.5, skip processing entirely
+        // This avoids RGB→Lab→RGB quantization errors
+        bool is_neutral = (std::abs(vibrance) <= 0.01f) &&
+                          (std::abs(saturation - 1.0f) <= 0.01f) &&
+                          (std::abs(color_density - 1.0f) <= 0.01f);
+        if (is_neutral)
+        {
+            input.copyTo(output);
+            return true;
+        }
+
         try
         {
             // Convert to Lab color space

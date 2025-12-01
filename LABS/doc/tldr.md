@@ -1,5 +1,25 @@
 # LABS TLDR
 
+## Workflow
+
+```bash
+# 1. Optimize dials to match a reference
+tune photo.ARW reference.jpg --save-area output/
+
+# 2. Apply the vibe
+labs photo.ARW --tune output/tune.json --output photo.png
+
+# 3. Debug: see pipeline stages
+labs photo.ARW --tune output/tune.json --output photo.png --debug
+```
+
+Debug outputs:
+- `photo_0_flat.png` - Scene-linear RAW (before processing)
+- `photo_0_preview.png` - Camera's embedded JPEG
+- `photo_1_body.png` - After all links applied
+
+---
+
 ## Core Insight: Photographers Select Based on Style
 
 Photographers don't see flat RAW. They see the camera's styled preview:
@@ -11,45 +31,60 @@ Photographers don't see flat RAW. They see the camera's styled preview:
 
 **The camera JPEG isn't "a reference" - it's the photographer's intent.**
 
-This drives the entire architecture: **Style first, then tweaks.**
+This drives the entire architecture: **Camera first, then vibes.**
 
 ---
 
-## Two-Layer Architecture: Style + Tweaks
-
-The pipeline separates **style** (automatic, from reference) from **tweaks** (per-image adjustments):
+## Three-Phase Architecture
 
 ```
-Reference Image (camera JPEG or edited photo)
-         ↓
-    [RAWS extracts style transforms]
-         ↓
-    Color Matrix (3x3) + Base Curve (1D×3)
-         ↓
-    [Style applied - already close to reference]
-         ↓
-    45 Dials (fine-tune per-image)
-         ↓
-    Output
+RAW
+ ↓
+[Camera Math] ─ Polynomial transform (deterministic)
+     • 30 coefficients estimated from flat→preview
+     • We copy their math
+     • Gets most images to <5% error, foliage hits ~15%
+ ↓
+[Camera Vibe] ─ Optimize dials to match camera JPEG
+     • 45 dials, target = embedded preview
+     • We find their LUT selection
+     • Closes the gap on DRO-heavy scenes
+ ↓
+[User Vibe] ─ Optimize dials to match photographer edit
+     • Same 45 dials, target = edited reference
+     • Captures creative intent
+     • Exportable as .pipe.json
+ ↓
+Output
 ```
 
-**Key insight**: When matching camera JPEGs, dials converge to neutral (0.5) because the style transforms already capture the look. When matching edited photos, dials will deviate to capture the photographer's creative choices.
+**Key insight**: Camera Vibe does per-image what Sony does per-class. Sony bakes dial settings into LUTs indexed by scene type. We optimize to match what their LUT produced for *this specific image*.
 
-## Style Transforms (Automatic)
+## Camera Math (Deterministic)
 
-Extracted by RAWS from RAW→reference comparison:
+Polynomial transform captures camera's global RGB→RGB mapping:
 
-| Transform | Purpose | Captures |
-|-----------|---------|----------|
-| **Color Matrix (3x3)** | Cross-channel color | Hue rotation, color grading |
-| **Base Curve (1D×3)** | Per-channel tone | Contrast, brightness, channel balance |
+```
+Out_c = c0 + c1*R + c2*G + c3*B + c4*R² + c5*G² + c6*B² + c7*RG + c8*RB + c9*GB
+```
 
-These are **deterministic** - same camera + style = same transforms.
+30 coefficients (10 per output channel) capture:
+- Color matrix (linear terms c1-c3)
+- Tone curve nonlinearity (quadratic terms c4-c6)
+- Cross-channel interactions (product terms c7-c9)
 
-## Tweaks (45 Dials)
+**No optimization** - coefficients estimated directly from flat→preview pixel correspondence.
 
-For per-image adjustments on top of the style:
+## Camera Vibe & User Vibe (45 Dials)
 
+Both phases use the same 45 dials, different targets:
+
+| Phase | Target | Purpose |
+|-------|--------|---------|
+| **Camera Vibe** | Embedded preview | Find their LUT selection |
+| **User Vibe** | Edited reference | Match creative intent |
+
+**The 45 dials:**
 - 3 color correction (exposure, temperature, tint)
 - 7 tone mapping (contrast, highlights, shadows, toe, shoulder, black, white)
 - 3 global color (vibrance, saturation, density)
@@ -88,51 +123,62 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 ## Current Results (2024-12-01)
 
-With base curve + baseline guard + 3D LUT:
+### Camera Math Results
 
-| Image | Baseline | Final |
-|-------|----------|-------|
-| DSC00144 | 13.16% | 12.96% |
-| DSC00159 | 4.04% | 1.82% |
-| DSC00202 | 6.22% | 2.59% |
-| DSC00234 | 6.73% | ~5% |
-| DSC01531 | ~36% | ~16% |
+| Image | DRO Level | Polynomial Error | Status |
+|-------|-----------|-----------------|--------|
+| DSC00159 | 0 (reduced) | **3.1%** | ✅ Camera Math sufficient |
+| DSC00144 | 3 | **3.7%** | ✅ Camera Math sufficient |
+| DSC01531 | 3 (heavy DRO) | **15.1%** | ⚠️ Needs Camera Vibe |
 
-**Summary:**
-- Most images: baseline < 7%, final < 5%
-- Base curve handles per-channel tone mapping
-- 3D LUT captures nonlinear color relationships
-- Baseline guard prevents optimizer from degrading quality
+### Camera Vibe
 
-**DSC01531 outlier:** Complex cross-channel colors (saturated greens/reds) that per-channel curves can't capture. Root cause: per-channel tone curves shift hue on saturated colors.
+For DRO-heavy scenes (foliage, complex shadows):
+- Camera Math hits ~15% floor due to spatial effects
+- Camera Vibe optimizes dials to close the gap
+- Target: embedded camera preview
 
-## Why We Can't Match Perfectly
+### User Vibe
 
-The 5% residual loss comes from:
+For matching photographer edits:
+- Same 45 dials, target = edited reference
+- Captures creative intent beyond camera matching
+- Exportable as .pipe.json for batch application
 
-| Cause | Contribution | Fix |
-|-------|-------------|-----|
-| Per-channel curves shift hue | 50% | Luminance-based tone mapping |
-| 3D LUT limited resolution | 30% | Higher grid or tetrahedral interp |
-| DRO spatial variation | 15% | Local tone mapping (out of scope) |
-| Color matrix, alignment | 5% | Validation against darktable |
+## Why DRO-Heavy Scenes Hit 15% Floor
 
-**Quick wins**: Neutral-pixel curve estimation and luminance-preserving tone mapping. See [todo.md](./todo.md#strategic-analysis-path-to-camera-parity-2024-12-01) for full analysis.
+DSC01531's error isn't from ColorMatrix (same as DSC00144 which achieves 3.7%). It's from **DRO's spatially-varying lift**:
 
-## Direct LUT Experiment (2024-12-01)
+| Finding | Evidence |
+|---------|----------|
+| Same ColorMatrix | DSC00144 and DSC01531 have identical matrix |
+| DRO is spatial | Lifts shadows based on **neighborhood**, not pixel value |
+| Polynomial is global | Cannot capture "this shadow region lifted more than that one" |
 
-**Hypothesis**: Camera matching is measurement, not optimization. A single 33³ LUT measured directly from flat→JPEG should achieve near-zero loss.
+**The 15% floor is a spatial problem** - polynomial transforms are per-pixel, DRO is per-region.
 
-**Result**: Direct LUT performs **worse** than the current pipeline:
+## Foliage Scenes: The Worst Case
 
-| Image | Direct LUT | Current Pipeline |
-|-------|------------|------------------|
-| DSC00144 | 7.0% | ~5% |
-| DSC01531 | 18.8% | 16% |
+DSC01531 is a foliage scene - the **worst case** for local tone mapping:
 
-**Why it fails**: 96% of LUT cells are empty. Scene-linear data clusters in low value range (83% below 0.33 after gamma). Uniform 33³ grid wastes cells on unused RGB regions.
+| Factor | Why It's Hard |
+|--------|---------------|
+| **High spatial frequency** | Every leaf creates micro-shadows |
+| **Already saturated greens** | Less headroom before clipping |
+| **Memory color expectations** | Viewers expect vivid greens |
+| **DRO + Landscape Style** | Double saturation boost |
 
-**Conclusion**: The measurement hypothesis is correct, but the current two-phase architecture (base curve → dials → small LUT) is more efficient than a single large LUT. Base curves capture the dominant 1D tone transforms, leaving only 3D color shifts for the LUT. See [todo.md](./todo.md#direct-lut-experiment-2024-12-01) for details.
+**The Double Whammy:**
+1. DRO lifts shadows → increases local contrast → saturation boost
+2. Sony Landscape style → additional green/blue saturation increase
+3. Result: Patchy over-saturated foliage that no per-pixel function can match
+
+**Other scene types are easier:**
+- Urban: Large uniform areas, predictable DRO response
+- Portrait: DRO focuses on face regions
+- Sky: Few shadows to lift, simple gradient
+
+See [hack.md](./hack.md) for full reverse-engineering analysis and foliage scene class study.
 
 ## Architecture
 
@@ -140,31 +186,26 @@ The 5% residual loss comes from:
 RAWS:
   1. Decode RAW → scene-linear data
   2. Extract embedded JPEG → preview
-  3. Estimate colorMatrix[9] from data→preview (cross-channel)
-  4. Estimate baseCurve[768] from data→preview (BGR × 256)
-  5. Return {data, preview, colorMatrix, baseCurve}
+  3. Estimate baseCurve[768] from flat→preview (neutral pixels only)
+  4. Estimate polyCoeffs[30] from flat→preview (all pixels)
+  5. Serialize polyCoeffs to dataInfo["poly_coeffs"]
+  6. Return {data, preview, baseCurve, dataInfo}
 
-pipe::Link:
-  colorCorrection → colorMatrix → baseCurve → toneMapping → ...
+LABS Pipeline:
+  BaseCurve:   baseCurve[768] → primary tone transform (12.6% baseline)
+  PolyColor:   polyCoeffs[30] → optional, cross-channel (13.5% baseline)
+  Camera Vibe: optimize(dials, target=preview) → find their LUT
+  User Vibe:   optimize(dials, target=edit) → match photographer
 ```
 
-## Use Cases
-
-**Camera JPEG matching** (current):
-- Style = camera's picture style (Standard, Vivid, etc.)
-- Dials ≈ 0.5 (neutral) - style does all the work
-
-**Photographer style matching** (future):
-- Style = base transforms learned from edited examples
-- Dials = creative adjustments the photographer made
-- Can apply same style to new images
+**Key finding (2024-12-02)**: BaseCurve (768 params) outperforms polynomial (30 params) because per-channel curves can exactly match any 1D transform. Polynomial captures cross-channel interactions but has fewer degrees of freedom. BaseCurve is the primary camera transform; PolyColor is available for experimentation.
 
 ## Key Files
 
 | File | Purpose |
 |------|---------|
-| `RAWS/src/main/raws.cpp` | Style extraction |
-| `LABS/src/main/part/pipe/mods/color_matrix.cpp` | Matrix application |
-| `LABS/src/main/part/pipe/mods/base_curve.cpp` | Curve application |
+| `src/main/part/pipe/mods/poly_color.cpp` | Polynomial color transform (Phase 1) |
+| `src/main/part/pipe/mods/local_tone.cpp` | Local tone mapping (Iridix-style, research) |
+| `RAWS/src/main/raws.cpp` | RAW decoding + coefficient estimation |
 | `etc/jacob.json` | Jacobian matrix (45×23 dial→feature sensitivity) |
-| `src/test/geos/jacob.cpp` | Jacobian estimation tool |
+| `doc/hack.md` | Reverse-engineering Sony ISP + foliage analysis |

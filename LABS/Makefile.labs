@@ -51,7 +51,9 @@ MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/detail.cpp \
             $(SRC_DIR)/part/pipe/mods/lut_curve.cpp \
             $(SRC_DIR)/part/pipe/mods/lut3d.cpp \
-            $(SRC_DIR)/part/pipe/mods/split_tone.cpp
+            $(SRC_DIR)/part/pipe/mods/split_tone.cpp \
+            $(SRC_DIR)/part/pipe/mods/poly_color.cpp \
+            $(SRC_DIR)/part/pipe/mods/local_tone.cpp
 
 # Geos sources (optimization + loss metrics + serialization)
 GEOS_SRCS = $(SRC_DIR)/part/geos/task.cpp \
@@ -77,7 +79,9 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/detail.o \
             $(OBJ_DIR)/mods/lut_curve.o \
             $(OBJ_DIR)/mods/lut3d.o \
-            $(OBJ_DIR)/mods/split_tone.o
+            $(OBJ_DIR)/mods/split_tone.o \
+            $(OBJ_DIR)/mods/poly_color.o \
+            $(OBJ_DIR)/mods/local_tone.o
 
 GEOS_OBJS = $(OBJ_DIR)/geos/task.o \
             $(OBJ_DIR)/geos/diff.o \

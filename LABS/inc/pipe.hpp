@@ -178,7 +178,31 @@ namespace pipe
                 virtual bool isActive() const = 0;
             };
 
-            // Module 2.6: 3D LUT (full RGB→RGB transform capture) - LINEAR_RGB
+            // Module 2.6: Polynomial Color (Camera Math) - LINEAR_RGB
+            // NOT a dial-based module - coefficients derived by RAWS from RAW→preview
+            // Captures camera's global RGB→RGB transform via quadratic polynomial
+            class PolyColor
+            {
+            public:
+                virtual ~PolyColor() = default;
+                static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
+                static constexpr int COEFFS_PER_CHANNEL = 10;
+                static constexpr int COEFFS_SIZE = COEFFS_PER_CHANNEL * 3;  // 30
+
+                // Get the current coefficients (30 floats: R, G, B channels)
+                virtual const float* coeffs() const = 0;
+
+                // Set coefficients directly (called with head->polyCoeffs())
+                virtual void setCoeffs(const float* values) = 0;
+
+                // Reset to identity (no effect)
+                virtual void reset() = 0;
+
+                // Check if coefficients are non-identity
+                virtual bool isActive() const = 0;
+            };
+
+            // Module 2.7: 3D LUT (full RGB→RGB transform capture) - LINEAR_RGB
             // This is NOT a dial-based module - it stores a 3D LUT array
             // Used by tune to capture any color transform from base to target
             // 17³ grid = 4,913 cells × 3 channels = 14,739 parameters
@@ -401,6 +425,7 @@ namespace pipe
             virtual Geometric& geometric() = 0;
             virtual ColorCorrection& colorCorrection() = 0;
             virtual BaseCurve& baseCurve() = 0;
+            virtual PolyColor& polyColor() = 0;
             virtual LutCurve& lutCurve() = 0;
             virtual ToneMapping& toneMapping() = 0;
             virtual GlobalColor& globalColor() = 0;
@@ -488,6 +513,9 @@ namespace pipe
         static constexpr int CURVE_SIZE = CURVE_LEN * CURVE_CHANNELS;  // 768
         virtual const float* baseCurve() const = 0;
         virtual bool hasBaseCurve() const = 0;
+
+        // Note: Polynomial coefficients (Camera Math) are available in data().info()["poly_coeffs"]
+        // as comma-separated floats if estimated during decode. Use parsePolyCoeffs() helper.
 
         // Continue to body processing (builder pattern)
         // working_size: 0 = full resolution, >0 = scale decoded data for faster preview

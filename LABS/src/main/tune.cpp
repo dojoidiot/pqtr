@@ -19,6 +19,7 @@
 //   --mode <mode>           Optimization mode: blockwise, full35d, linear (default: blockwise)
 //   --optimizer <algo>      Optimizer: spsa, aceo, hybrid (default: spsa)
 //   --full                  Full ACEO mode: single-pass 45-dial optimization (no LUT, no two-link)
+//   --camera-vibe           Camera Vibe mode: target=preview, saves camera.pipe.json
 //   --skip-lut              Skip 3D LUT estimation (pure dial optimization)
 //   --logs                  Verbose progress output (dome.r, edge.ratio)
 //   --fine                  Save intermediate images + meta.json
@@ -61,6 +62,7 @@ void printUsage(const char* prog)
     std::cerr << "  --mode <mode>           blockwise, full35d, linear (default: blockwise)\n";
     std::cerr << "  --optimizer <algo>      spsa, aceo (default: spsa)\n";
     std::cerr << "  --full                  Full 45-dial mode: single-pass, no LUT, no two-link\n";
+    std::cerr << "  --camera-vibe           Camera Vibe: target=preview, output=camera.pipe.json\n";
     std::cerr << "  --skip-lut              Skip 3D LUT estimation\n";
     std::cerr << "  --regional              Enable regional refinement (slower, off by default)\n";
     std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
@@ -100,6 +102,7 @@ int main(int argc, char** argv)
     bool skipLut = false;
     bool skipRegional = true;  // Off by default (faster)
     bool fullMode = false;     // Full 45-dial single-pass mode
+    bool cameraVibe = false;   // Camera Vibe mode: target=preview, output=camera.pipe.json
     bool logs = false;
     bool fine = false;
 
@@ -113,6 +116,7 @@ int main(int argc, char** argv)
         else if (arg == "--skip-lut") skipLut = true;
         else if (arg == "--regional") skipRegional = false;  // Enable regional refinement
         else if (arg == "--full") fullMode = true;  // Full 45-dial single-pass mode
+        else if (arg == "--camera-vibe") cameraVibe = true;  // Camera Vibe mode
         else if (arg == "--logs") logs = true;
         else if (arg == "--fine") fine = true;
         else if (arg == "--mode" && i + 1 < argc)
@@ -145,17 +149,29 @@ int main(int argc, char** argv)
     // Default fine-area to save-area
     if (fineArea.empty()) fineArea = saveArea;
 
+    // Camera Vibe mode: force preview target, imply fullMode
+    if (cameraVibe)
+    {
+        targetPath = "preview";
+        fullMode = true;  // Camera Vibe uses full 45-dial mode
+    }
+
+    // Output filename based on mode
+    std::string outputFilename = cameraVibe ? "camera.pipe.json" : "tune.json";
+
     try
     {
-        const char* modeName = fullMode ? "FULL_45D" :
+        const char* modeName = cameraVibe ? "CAMERA_VIBE" :
+                               fullMode ? "FULL_45D" :
                                (mode == geos::Mode::FULL_35D) ? "FULL_35D" :
                                (mode == geos::Mode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
         const char* optimizerName = (optimizer == geos::Optimizer::ACEO) ? "ACEO" : "SPSA";
 
         std::cout << "=== TUNE ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
-        std::cout << "Target: " << targetPath << std::endl;
+        std::cout << "Target: " << targetPath << (cameraVibe ? " (Camera Vibe)" : "") << std::endl;
         std::cout << "Save area: " << saveArea << std::endl;
+        std::cout << "Output: " << outputFilename << std::endl;
         std::cout << "Mode: " << modeName << (fullMode ? " (single-pass, no LUT)" : "") << std::endl;
         std::cout << "Optimizer: " << optimizerName << std::endl;
         std::cout << "Working size: " << workingSize << "px" << std::endl;
@@ -178,6 +194,8 @@ int main(int argc, char** argv)
         pipe::Info info = head->data().info();
         std::cout << "  Size: " << info["width"] << "x" << info["height"] << std::endl;
         std::cout << "  Camera: " << info["camera_model"] << std::endl;
+        std::cout << "  BaseCurve: " << (head->hasBaseCurve() ? "yes" : "no") << std::endl;
+        std::cout << "  PolyCoeffs: " << (info.count("poly_coeffs") ? "yes" : "no") << std::endl;
 
         // Get target image
         cv::Mat targetMat;
@@ -264,12 +282,16 @@ int main(int argc, char** argv)
             std::cout << "\n[FULL] Creating single holistic link (45 dials)..." << std::endl;
             pipe::Body::Link& fullLink = body.add("full");
 
-            // Apply base curve from RAW decoder
+            // Apply base curve from RAW decoder (primary camera transform)
             if (head->hasBaseCurve())
             {
                 fullLink.baseCurve().setCurve(head->baseCurve());
                 std::cout << "[FULL] Base curve applied from RAW decoder" << std::endl;
             }
+
+            // Note: polyColor (Camera Math) is available but not used by default
+            // It captures cross-channel interactions but has fewer parameters than baseCurve
+            // Use --poly-color flag to enable (TODO: implement flag)
 
             // Initialize all dials to neutral (0.5) FIRST
             fullLink.colorCorrection().exposure().set(0.5f);
@@ -434,7 +456,7 @@ int main(int argc, char** argv)
         // Save link(s)
         // ------------------------------------------------------------
         std::cout << "\n[SAVE] Writing tune settings (" << links.size() << " link" << (links.size() > 1 ? "s" : "") << ")..." << std::endl;
-        std::string tunePath = saveArea + "/tune.json";
+        std::string tunePath = saveArea + "/" + outputFilename;
         if (!data::links::save(links, tunePath))
         {
             throw std::runtime_error("Failed to save: " + tunePath);

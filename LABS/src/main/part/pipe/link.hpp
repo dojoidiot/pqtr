@@ -15,6 +15,7 @@ namespace pipe::internal
     class GeometricImpl;
     class ColorCorrectionImpl;
     class BaseCurveImpl;
+    class PolyColorImpl;
     class LutCurveImpl;
     class ToneMappingImpl;
     class GlobalColorImpl;
@@ -34,6 +35,7 @@ namespace pipe::internal
         Geometric& geometric() override;
         ColorCorrection& colorCorrection() override;
         BaseCurve& baseCurve() override;
+        PolyColor& polyColor() override;
         LutCurve& lutCurve() override;
         ToneMapping& toneMapping() override;
         GlobalColor& globalColor() override;
@@ -48,6 +50,7 @@ namespace pipe::internal
         std::unique_ptr<GeometricImpl> m_geometric;
         std::unique_ptr<ColorCorrectionImpl> m_colorCorrection;
         std::unique_ptr<BaseCurveImpl> m_baseCurve;
+        std::unique_ptr<PolyColorImpl> m_polyColor;
         std::unique_ptr<LutCurveImpl> m_lutCurve;
         std::unique_ptr<ToneMappingImpl> m_toneMapping;
         std::unique_ptr<GlobalColorImpl> m_globalColor;

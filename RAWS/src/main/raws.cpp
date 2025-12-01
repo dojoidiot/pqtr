@@ -6,8 +6,10 @@
 #include "sony.h"
 #include <opencv2/imgproc.hpp>
 #include <sstream>
+#include <iomanip>
 #include <cmath>
 #include <vector>
+#include <iostream>
 
 namespace raws {
 
@@ -47,12 +49,21 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
 
     // Per-channel curve estimation (BGR order in OpenCV)
     // curve layout: [B0..B255, G0..G255, R0..R255] to match OpenCV BGR
+    //
+    // KEY INSIGHT: Only use near-neutral pixels for curve estimation.
+    // This isolates the tone curve from color grading. Saturated pixels
+    // have hue-dependent transforms that pollute per-channel curves.
     std::vector<double> sum[3];
     std::vector<double> count[3];
     for (int c = 0; c < 3; c++) {
         sum[c].resize(256, 0.0);
         count[c].resize(256, 0.0);
     }
+
+    // Chroma threshold for "neutral" pixels (in 0-255 space)
+    // A pixel is neutral if max(R,G,B) - min(R,G,B) < threshold
+    // 30 ≈ 12% of range - allows slight color cast but excludes saturated colors
+    const int chroma_threshold = 30;
 
     for (int y = 0; y < data_8u.rows; y++)
     {
@@ -61,11 +72,24 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
 
         for (int x = 0; x < data_8u.cols; x++)
         {
-            for (int c = 0; c < 3; c++)  // B, G, R
+            int b = d_ptr[x * 3 + 0];
+            int g = d_ptr[x * 3 + 1];
+            int r = d_ptr[x * 3 + 2];
+
+            // Compute chroma as max - min (simple saturation measure)
+            int max_val = std::max({b, g, r});
+            int min_val = std::min({b, g, r});
+            int chroma = max_val - min_val;
+
+            // Only use near-neutral pixels for curve estimation
+            if (chroma < chroma_threshold)
             {
-                int bin = d_ptr[x * 3 + c];
-                sum[c][bin] += p_ptr[x * 3 + c];
-                count[c][bin] += 1.0;
+                for (int c = 0; c < 3; c++)  // B, G, R
+                {
+                    int bin = d_ptr[x * 3 + c];
+                    sum[c][bin] += p_ptr[x * 3 + c];
+                    count[c][bin] += 1.0;
+                }
             }
         }
     }
@@ -97,6 +121,133 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
         for (int i = 0; i < 256; i++)
             curve[c * 256 + i] = smoothed[i];
     }
+}
+
+// ============================================================
+// Polynomial coefficient estimation (Camera Math)
+// ============================================================
+
+static void estimatePolyCoeffs(const cv::UMat& data, const cv::UMat& preview, float* coeffs)
+{
+    // Initialize to identity: R_out = R, G_out = G, B_out = B
+    // coeffs layout: [R(10), G(10), B(10)]
+    // Per channel: [c0, c1_R, c2_G, c3_B, c4_R², c5_G², c6_B², c7_RG, c8_RB, c9_GB]
+    for (int i = 0; i < 30; i++)
+        coeffs[i] = 0.0f;
+    coeffs[1] = 1.0f;   // R_out from R
+    coeffs[12] = 1.0f;  // G_out from G (index 10 + 2)
+    coeffs[23] = 1.0f;  // B_out from B (index 20 + 3)
+
+    if (data.empty() || preview.empty())
+        return;
+
+    // Resize data to preview size
+    cv::Mat data_cpu, preview_cpu;
+    data.copyTo(data_cpu);
+    preview.copyTo(preview_cpu);
+
+    cv::Mat data_small;
+    if (data_cpu.size() != preview_cpu.size())
+        cv::resize(data_cpu, data_small, preview_cpu.size(), 0, 0, cv::INTER_AREA);
+    else
+        data_small = data_cpu;
+
+    // Convert data to gamma-encoded (polynomial works in gamma space)
+    cv::Mat data_gamma;
+    cv::max(data_small, 0.0f, data_gamma);
+    cv::min(data_gamma, 1.0f, data_gamma);
+    cv::pow(data_gamma, 1.0f / 2.2f, data_gamma);
+
+    // Target to float [0-1]
+    cv::Mat target_f;
+    preview_cpu.convertTo(target_f, CV_32FC3, 1.0f / 255.0f);
+
+    // Sample pixels for least squares (random sampling for speed)
+    const int num_samples = 50000;
+    std::vector<std::vector<float>> samples_r, samples_g, samples_b;
+    std::vector<float> targets_r, targets_g, targets_b;
+    samples_r.reserve(num_samples);
+    samples_g.reserve(num_samples);
+    samples_b.reserve(num_samples);
+    targets_r.reserve(num_samples);
+    targets_g.reserve(num_samples);
+    targets_b.reserve(num_samples);
+
+    // Deterministic sampling pattern
+    int step = std::max(1, (data_gamma.rows * data_gamma.cols) / num_samples);
+    int idx = 0;
+    for (int y = 0; y < data_gamma.rows && idx < num_samples; y++)
+    {
+        const float* src = data_gamma.ptr<float>(y);
+        const float* tgt = target_f.ptr<float>(y);
+
+        for (int x = 0; x < data_gamma.cols && idx < num_samples; x++)
+        {
+            if ((y * data_gamma.cols + x) % step == 0)
+            {
+                float b = src[x * 3 + 0];
+                float g = src[x * 3 + 1];
+                float r = src[x * 3 + 2];
+
+                // Feature vector: 1, R, G, B, R², G², B², RG, RB, GB
+                std::vector<float> features = {
+                    1.0f, r, g, b,
+                    r * r, g * g, b * b,
+                    r * g, r * b, g * b
+                };
+
+                samples_r.push_back(features);
+                samples_g.push_back(features);
+                samples_b.push_back(features);
+
+                targets_r.push_back(tgt[x * 3 + 2]);  // R
+                targets_g.push_back(tgt[x * 3 + 1]);  // G
+                targets_b.push_back(tgt[x * 3 + 0]);  // B
+
+                idx++;
+            }
+        }
+    }
+
+    if (samples_r.empty())
+        return;
+
+    // Solve least squares for each channel using normal equations: (A^T A) x = A^T b
+    auto solve_channel = [](const std::vector<std::vector<float>>& inputs,
+                            const std::vector<float>& outputs,
+                            float* out_coeffs)
+    {
+        const int n = inputs.size();
+        const int k = 10;  // coefficients per channel
+
+        // Build A^T A (k×k) and A^T b (k×1)
+        cv::Mat AtA(k, k, CV_64FC1, cv::Scalar(0));
+        cv::Mat Atb(k, 1, CV_64FC1, cv::Scalar(0));
+
+        for (int i = 0; i < n; i++)
+        {
+            const auto& row = inputs[i];
+            double y = outputs[i];
+
+            for (int j = 0; j < k; j++)
+            {
+                Atb.at<double>(j, 0) += row[j] * y;
+                for (int m = 0; m < k; m++)
+                    AtA.at<double>(j, m) += row[j] * row[m];
+            }
+        }
+
+        // Solve using SVD
+        cv::Mat x;
+        cv::solve(AtA, Atb, x, cv::DECOMP_SVD);
+
+        for (int i = 0; i < k; i++)
+            out_coeffs[i] = static_cast<float>(x.at<double>(i, 0));
+    };
+
+    solve_channel(samples_r, targets_r, coeffs);       // R coeffs [0-9]
+    solve_channel(samples_g, targets_g, coeffs + 10);  // G coeffs [10-19]
+    solve_channel(samples_b, targets_b, coeffs + 20);  // B coeffs [20-29]
 }
 
 // ============================================================
@@ -172,6 +323,20 @@ static Result decodeSony(pqtr::Sink& sink)
     // Estimate base curve from data→preview comparison
     estimateBaseCurve(result.data, result.preview, result.baseCurve);
     result.hasBaseCurve = true;
+
+    // Estimate polynomial coefficients (Camera Math) and serialize to dataInfo
+    estimatePolyCoeffs(result.data, result.preview, result.polyCoeffs);
+    result.hasPolyCoeffs = true;
+    {
+        std::ostringstream oss;
+        oss << std::fixed << std::setprecision(6);
+        for (int i = 0; i < Result::POLY_COEFFS_SIZE; i++)
+        {
+            if (i > 0) oss << ",";
+            oss << result.polyCoeffs[i];
+        }
+        result.dataInfo["poly_coeffs"] = oss.str();
+    }
 
     result.success = true;
     return result;

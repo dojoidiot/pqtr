@@ -205,6 +205,71 @@ namespace mods
         int grid_size);
 
     //--------------------------------------------------------------------------
+    // Polynomial Color Transform (camera phase, no dials)
+    //--------------------------------------------------------------------------
+
+    // Number of coefficients for polynomial transform
+    static constexpr int POLY_COEFFS = 10;   // Per channel
+    static constexpr int POLY_TOTAL = 30;    // Total (3 channels)
+
+    // Apply polynomial color transform
+    // Input:  CV_32FC3 gamma-encoded RGB (0-1)
+    // Output: CV_32FC3 transformed RGB (0-1)
+    // coeffs: 30 floats [R(10), G(10), B(10)]
+    // Model:  Out_c = c0 + c1*R + c2*G + c3*B + c4*R² + c5*G² + c6*B² + c7*RG + c8*RB + c9*GB
+    bool poly_color(
+        const cv::UMat& input,
+        cv::UMat& output,
+        const float* coeffs);
+
+    // Estimate polynomial coefficients from scene-linear→camera JPEG pair
+    // base:   Scene-linear RGB (CV_32FC3)
+    // target: Camera JPEG (CV_8UC3)
+    // coeffs: Output (30 floats)
+    // num_samples: Pixels to sample for regression (default 50000)
+    bool estimate_poly_color(
+        const cv::UMat& base,
+        const cv::UMat& target,
+        float* coeffs,
+        int num_samples = 50000);
+
+    // Initialize identity polynomial (no transform)
+    void identity_poly_color(float* coeffs);
+
+    //--------------------------------------------------------------------------
+    // Local Tone Mapping (Iridix-style, camera phase, no dials)
+    //--------------------------------------------------------------------------
+
+    // Local tone mapping based on Apical Iridix algorithm (US7302110B2)
+    // Applies different tone curves to different parts of the image based on
+    // local luminance context. Mimics human retinal adaptation.
+    //
+    // Input:  CV_32FC3 gamma-encoded RGB (0-1)
+    // Output: CV_32FC3 locally tone-mapped RGB (0-1)
+    //
+    // Parameters:
+    //   strength: Overall effect strength (0-1, default 0.5)
+    //   delta: Asymmetry parameter (0.001-0.1, default 0.02)
+    //          Lower = more shadow lift, higher = more balanced
+    //   window_scale: Window size as fraction of image (0.01-0.5, default 0.1)
+    //                 Controls spatial locality of adaptation
+    bool local_tone(
+        const cv::UMat& input,
+        cv::UMat& output,
+        float strength = 0.5f,
+        float delta = 0.02f,
+        float window_scale = 0.1f);
+
+    // Estimate local tone mapping parameters from base→target pair
+    // Analyzes shadow regions to determine how much lifting was applied
+    bool estimate_local_tone(
+        const cv::UMat& base,
+        const cv::UMat& target,
+        float& strength,
+        float& delta,
+        float& window_scale);
+
+    //--------------------------------------------------------------------------
     // Split Toning (shadow/highlight color grading) (4 dials)
     //--------------------------------------------------------------------------
 

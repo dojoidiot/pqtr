@@ -38,6 +38,15 @@ namespace raws {
         static constexpr int CURVE_SIZE = CURVE_LEN * CURVE_CHANNELS;  // 768
         float baseCurve[CURVE_SIZE];
         bool hasBaseCurve = false;
+
+        // Polynomial color transform (Camera Math)
+        // Quadratic polynomial per output channel: Out = c0 + c1*R + c2*G + c3*B + c4*R² + c5*G² + c6*B² + c7*RG + c8*RB + c9*GB
+        // Layout: [R_coeffs(10), G_coeffs(10), B_coeffs(10)]
+        // Estimated from scene-linear→preview comparison via least squares
+        static constexpr int POLY_COEFFS_PER_CHANNEL = 10;
+        static constexpr int POLY_COEFFS_SIZE = POLY_COEFFS_PER_CHANNEL * 3;  // 30
+        float polyCoeffs[POLY_COEFFS_SIZE];
+        bool hasPolyCoeffs = false;
     };
 
     // Decode a RAW file

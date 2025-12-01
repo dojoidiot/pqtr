@@ -111,12 +111,28 @@ Parts are modular libraries in `src/main/part/`. They expose a public API using 
     *   **TAIL**: Renders the final image to **PNG** (lossless format).
 *   [**`geos`**](./doc/geos.md): The optimizer library. 45 style dials, 23D feature space, weighted L2 loss, three optimizer modes (SPSA, ACEO, HYBRID). See [tldr.md](./doc/tldr.md) for overview.
 
-## Headless Tools (Programs)
+## Workflow
 
-Command-line executables in `bin/`:
+```bash
+# 1. Optimize dials to match a reference
+tune photo.ARW reference.jpg --save-area output/
 
-*   **`tune`**: Automatically optimizes 45 style dials to match a reference style. Supports SPSA, ACEO, and HYBRID optimizers. Optional 17³ 3D LUT for nonlinear color transforms.
-*   **`labs`**: Processes RAW to PNG with optional tune.json settings (dials + 3D LUT).
+# 2. Apply the vibe to produce final image
+labs photo.ARW --tune output/tune.json --output photo.png
+
+# 3. Debug: see pipeline stages
+labs photo.ARW --tune output/tune.json --output photo.png --debug
+```
+
+Debug outputs (alongside photo.png):
+- `photo_0_flat.png` - Scene-linear RAW data (before any processing)
+- `photo_0_preview.png` - Camera's embedded JPEG preview
+- `photo_1_body.png` - After all processing links applied
+
+## Tools
+
+*   **`tune`**: Optimizes 45 style dials to match a reference. Outputs `tune.json`.
+*   **`labs`**: Applies tune settings to RAW, outputs PNG. Use `--debug` to save intermediate stages.
 
 ## RAW Decoding
 

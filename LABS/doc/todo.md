@@ -10,79 +10,67 @@
 - [x] `--full` mode for single-pass optimization
 - [x] Built `bounds` diagnostic - found achievable limits
 - [x] **Base curve implementation** (2024-12-01)
-  - RAWS estimates curve per-image from RAW→preview
-  - Curve stored in raws::Result, passed via pipe::Head
-  - Applied in gamma space after colorCorrection
-  - Loss dropped: 17.3% → 13.1%
 - [x] **Resolution independence verified** (2024-12-01)
-  - Tested embedded preview (1616×1080) vs full-res sidecar JPG
-  - Curves match: L2 < 0.002 when both at preview size
-  - Higher resolution adds alignment noise, not signal
-  - Conclusion: Preview is sufficient for curve estimation
 - [x] **Baseline guard** (2024-12-01)
-  - Optimizer was sometimes making images worse (spectral→combined loss mismatch)
-  - Added guard in task.cpp: if final > baseline, restore neutral dials
-  - Now guarantees optimizer never degrades quality
 - [x] **Jacobian estimation** (2024-12-01)
-  - 45×23 dial→feature sensitivity matrix
-  - Central difference method (±5% perturbation)
-  - Stored in `etc/jacob.json` with dial/feature names
-  - Tool: `src/test/geos/jacob.cpp`
 - [x] **RAWS hasBaseCurve bug** - was stale library, fixed by rebuild
+- [x] **Polynomial color transform** (2024-12-01)
+  - 30 coefficients (10 per channel) capture camera's global RGB→RGB transform
+  - Achieves <5% error on most images (3.1% DSC00159, 3.7% DSC00144)
+  - `src/main/part/pipe/mods/poly_color.cpp`
+- [x] **Local tone mapping module** (2024-12-01)
+  - Iridix-style local adaptation based on patent US7302110B2
+  - `src/main/part/pipe/mods/local_tone.cpp`
+- [x] **ISP reverse-engineering** (2024-12-01)
+  - Documented canonical ISP pipeline (14 stages)
+  - Identified Sony's DRO as Apical Iridix implementation
+  - Found same ColorMatrix for different scenes - DRO is the differentiator
+  - `doc/hack.md`
+- [x] **Foliage scene class analysis** (2024-12-01)
+  - Wide-to-narrow research on why foliage scenes hit 15% floor
+  - Found memory color patents (US6594388B1), saturation coupling to contrast
+  - Documented in `doc/hack.md`
+- [x] **PolyColor pipeline integration** (2024-12-02)
+  - Added `polyCoeffs[30]` to RAWS Result
+  - RAWS estimates coefficients and serializes to `dataInfo["poly_coeffs"]`
+  - Added `pipe::Link::PolyColor` module with `setCoeffs()`/`isActive()`
+  - Pipeline order: ColorCorrection → BaseCurve → PolyColor → ToneMapping
+  - **Finding**: BaseCurve (768 params) achieves 12.63% baseline vs PolyColor (30 params) at 13.51%
+  - BaseCurve remains primary transform; PolyColor available for experimentation
 
-## Current: Refinement
+## Current: Simplified Workflow (2024-12-02)
 
-Now that base curve is working, the optimizer has more headroom.
+```bash
+# 1. Optimize dials to match a reference
+tune photo.ARW reference.jpg --save-area output/
 
-### Batch Results (2024-12-01)
+# 2. Apply the vibe
+labs photo.ARW --tune output/tune.json --output photo.png
 
-With base curve + baseline guard + 3D LUT:
+# 3. Debug: see pipeline stages
+labs photo.ARW --tune output/tune.json --output photo.png --debug
+```
 
-| Image | Baseline | Final | Status |
-|-------|----------|-------|--------|
-| DSC00144 | 13.16% | 12.96% | Improved |
-| DSC00159 | 4.04% | 1.82% | Improved |
-| DSC00202 | 6.22% | 2.59% | Improved |
-| DSC00234 | 6.73% | ~5% | Improved |
-| DSC00235 | ~5% | ~3% | Improved |
-| DSC00458 | ~7% | ~4% | Improved |
-| DSC00501 | ~5% | ~3% | Improved |
-| DSC00521 | ~6% | ~4% | Improved |
-| DSC01531 | ~36% | ~16% | Outlier (complex colors) |
-| DSC01559 | ~4% | ~2% | Improved |
+Debug outputs:
+- `photo_0_flat.png` - Scene-linear RAW (before processing)
+- `photo_0_preview.png` - Camera's embedded JPEG
+- `photo_1_body.png` - After all links applied
 
-**Summary:**
-- Most images: baseline < 7%, final < 5%
-- 3D LUT handles nonlinear color shifts beyond base curve
-- DSC01531 remains an outlier - saturated greens/reds need color matrix
+### Recent Completions
 
-### Bounds Analysis (2024-12-01)
+- [x] **Simplified CLI** (2024-12-02)
+  - Removed `--camera-vibe` switch from labs (internal detail)
+  - Added `--debug` to labs for pipeline artifact inspection
+  - Updated README.md and tldr.md with workflow
 
-Unreachable features (4/23):
-- `sigma2` - second singular value (color distribution shape)
-- `L_p90` - 90th percentile luminance
-- `C_p50` - median chroma
-- `C_p90` - 90th percentile chroma
-
-These represent fundamental limits: dials can shift global values but can't reshape distributions.
-
-### Next Steps
-
-1. **Jacobian-informed optimization** (potential)
-   - Use J to compute analytic gradient: Δdials = J⁺ · Δfeatures
-   - Feed forward (apply dials) → measure error → back-compute corrections
-   - Could replace or augment SPSA for faster convergence
-
-2. **Color matrix estimation** (for outliers)
-   - DSC01531-type images need cross-channel transforms
-   - RAWS could estimate 3x3 matrix from RAW→preview
+- [x] **PolyColor pipeline integration** (2024-12-02)
+  - BaseCurve (768 params) achieves 12.63% baseline
+  - PolyColor (30 params) achieves 13.51% baseline
+  - BaseCurve is primary; PolyColor available for experimentation
 
 ### Deferred
 
-- [ ] Re-enable regional refinement
-- [ ] Per-dial learning rates (vs per-block)
-- [ ] Sky banding artifacts (may be resolved by base curve)
-- [ ] Skin tone matching (may improve with better baseline)
+- **True spatial local tone mapping** - would require full Iridix algorithm; out of scope
 
 ---
 
@@ -102,6 +90,32 @@ LABS (generic):
   - Link.baseCurve().setCurve(head->baseCurve())
   - Applied in gamma space after colorCorrection, before toneMapping
 ```
+
+### Metadata Ownership (2024-12-02)
+
+**Principle**: Each layer serializes its own metadata. Downstream layers don't know internals.
+
+```
+RAWS owns:
+  - dataInfo["poly_coeffs"]     ← serialized by RAWS, not pipe
+  - dataInfo["decoder"]
+  - dataInfo["camera_model"]
+  - baseCurve[768]              ← binary array (frequently accessed)
+  - hasBaseCurve                ← flag
+
+pipe owns:
+  - Passes dataInfo through unchanged
+  - Exposes baseCurve() on Head (binary API for performance)
+  - Does NOT expose polyCoeffs() - available via info["poly_coeffs"]
+
+tune/labs access:
+  - head->hasBaseCurve() + head->baseCurve()  ← direct
+  - info.count("poly_coeffs")                  ← metadata check
+```
+
+**Why baseCurve is binary but polyCoeffs is serialized:**
+- baseCurve (768 floats) is used every frame → binary API
+- polyCoeffs (30 floats) is experimental/optional → metadata string is fine
 
 ### Jacobian Flow
 
