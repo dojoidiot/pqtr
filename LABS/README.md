@@ -143,7 +143,11 @@ See [out_of_scope.md](./doc/mods/out_of_scope.md) for detailed module ideas.
 4.  **Tune Optimizes All Roles**: 45 dials via SPSA/ACEO/HYBRID; optional 3D LUT.
 5.  **Performance Targets Met**: `tune`: ~65 seconds total.
 
-**Base curve implemented**: RAWS estimates per-channel curves (768 floats) from RAW→preview comparison, bridging the gap between flat RAW and camera JPEG appearance. Baseline guard ensures optimizer never degrades quality.
+**Current results (2024-12-01)**: Most images achieve <5% final loss with base curve + 3D LUT. RAWS estimates per-channel curves (768 floats) from RAW→preview comparison. Baseline guard ensures optimizer never degrades quality.
+
+**Remaining gap analysis**: The 5% residual comes from per-channel curves shifting hue (50%), 3D LUT resolution limits (30%), DRO spatial variation (15%), and alignment/matrix precision (5%). Quick wins: neutral-pixel curve estimation and luminance-preserving tone mapping. See [todo.md](./doc/todo.md#strategic-analysis-path-to-camera-parity-2024-12-01) for full analysis.
+
+**Direct LUT experiment (2024-12-01)**: Tested bypassing base curve + dials with a single 33³ LUT measured directly from flat→JPEG. Result: worse than current pipeline (7% vs 5% on DSC00144) because 96% of LUT cells are empty - scene-linear data clusters in low value range. The two-phase architecture (base curve → dials → small LUT) is more efficient.
 
 ## Documentation Standards
 
@@ -164,7 +168,12 @@ Reference [docs.md](./doc/docs.md) for the review template and criteria.
 - [geos.md](./doc/geos.md) - GeoS model (23D feature space, weighted L2 loss)
 - [aceo.md](./doc/aceo.md) - ACEO optimizer (eigenspace, covariance)
 - [spsa.md](./doc/spsa.md) - SPSA optimizer (phased, gradient-free)
-- [base_curve.md](./doc/base_curve.md) - Per-camera base curve learning
+- [base_curve.md](./doc/base_curve.md) - Per-image base curve estimation
+
+## Data Files
+
+- `etc/jacob.json` - Jacobian matrix (45×23 dial→feature sensitivity)
+- `etc/aceo_full.json` - Covariance prior (45×45 dial correlations)
 
 ## Research
 
