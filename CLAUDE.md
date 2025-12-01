@@ -1,5 +1,17 @@
 # PQTR Project Rules
 
+## Hard Shut
+When the user says **"hard shut"**, immediately:
+1. Read `LABS/doc/docs.md` for documentation standards
+2. Update all affected docs to reflect current implementation:
+   - `LABS/doc/tldr.md` - current status summary
+   - `LABS/doc/todo.md` - remaining work
+   - `LABS/README.md` - if architecture changed
+   - Module docs if dials/features changed
+3. Apply docs.md rules: present tense, correct terminology, accurate counts
+4. Verify dial counts match code (45 style dials)
+5. Update any stale cross-references
+
 ## Output Paths
 - Working files: `<PROJECT>/tmp/` (gitignored)
 - Test outputs: `<PROJECT>/tmp/var/tune/`

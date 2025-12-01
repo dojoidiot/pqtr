@@ -78,10 +78,10 @@ The covariance captures which dials move together across samples, enabling ACEO 
 
 Find dial settings where the angle (loss) is as close to zero as possible.
 
-Zero angle = candidate matches target in 12D feature space = style matched.
+Zero angle = candidate matches target in 23D feature space = style matched.
 
 ## See Also
 
-- [geos.md](./geos.md) - Full mathematical foundation (12D features, cosine loss)
+- [geos.md](./geos.md) - Full mathematical foundation (23D features, weighted L2 loss)
 - [aceo.md](./aceo.md) - CMA-ES eigenspace optimization using SPSA-built covariance
 - [tune.md](./tune.md) - How SPSA fits into the tuning pipeline

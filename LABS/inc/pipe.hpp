@@ -153,7 +153,32 @@ namespace pipe
                 virtual WhiteBalance& whiteBalance() = 0;
             };
 
-            // Module 2.5: 3D LUT (full RGB→RGB transform capture) - LINEAR_RGB
+            // Module 2.5: Base Curve (from RAW decoder) - LINEAR_RGB
+            // NOT a dial-based module - curve derived by RAWS from RAW→preview
+            // Applied early to bridge flat RAW → camera JPEG appearance gap
+            class BaseCurve
+            {
+            public:
+                virtual ~BaseCurve() = default;
+                static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
+                static constexpr int CURVE_LEN = 256;
+                static constexpr int CURVE_CHANNELS = 3;
+                static constexpr int CURVE_SIZE = CURVE_LEN * CURVE_CHANNELS;  // 768
+
+                // Get the current curve (768 floats: B, G, R channels)
+                virtual const float* curve() const = 0;
+
+                // Set curve directly (called with head->baseCurve())
+                virtual void setCurve(const float* values) = 0;
+
+                // Reset to identity (no effect)
+                virtual void reset() = 0;
+
+                // Check if curve is non-identity
+                virtual bool isActive() const = 0;
+            };
+
+            // Module 2.6: 3D LUT (full RGB→RGB transform capture) - LINEAR_RGB
             // This is NOT a dial-based module - it stores a 3D LUT array
             // Used by tune to capture any color transform from base to target
             // 17³ grid = 4,913 cells × 3 channels = 14,739 parameters
@@ -375,6 +400,7 @@ namespace pipe
             virtual Name name() = 0;
             virtual Geometric& geometric() = 0;
             virtual ColorCorrection& colorCorrection() = 0;
+            virtual BaseCurve& baseCurve() = 0;
             virtual LutCurve& lutCurve() = 0;
             virtual ToneMapping& toneMapping() = 0;
             virtual GlobalColor& globalColor() = 0;
@@ -453,6 +479,15 @@ namespace pipe
 
         // Access the embedded camera made view image.
         virtual Data& view() = 0;
+
+        // Base curve derived from RAW→preview comparison
+        // Per-channel RGB: 768 floats [B0..B255, G0..G255, R0..R255]
+        // Returns nullptr if no curve available
+        static constexpr int CURVE_LEN = 256;
+        static constexpr int CURVE_CHANNELS = 3;
+        static constexpr int CURVE_SIZE = CURVE_LEN * CURVE_CHANNELS;  // 768
+        virtual const float* baseCurve() const = 0;
+        virtual bool hasBaseCurve() const = 0;
 
         // Continue to body processing (builder pattern)
         // working_size: 0 = full resolution, >0 = scale decoded data for faster preview

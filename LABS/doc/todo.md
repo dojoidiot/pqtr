@@ -1,103 +1,93 @@
 # LABS TODO
 
-## Current: Base Curve Learning
-
-### Discovery (2024-11-30)
-
-The "washed out" problem is NOT an optimizer issue - it's a **pipeline capability gap**.
-
-**Measured:** Our max std_L = 0.1303, target = 0.2244 (42% shortfall)
-
-**Root cause:** Camera JPEGs apply a base tone curve (chosen by photographer via picture style) BEFORE any adjustments. We start from a flat baseline.
-
-**Key insight:** The base curve represents **photographer intent** - it's what they SAW when composing the shot and what they EXPECT as their editing baseline.
-
-See: `doc/base_curve.md` for full analysis.
-
----
-
-## Discussion Topics for Next Session
-
-### 1. Base Curve Architecture
-
-Where in the pipeline should the base curve be applied?
-
-| Option | Location | Pros | Cons |
-|--------|----------|------|------|
-| A | After demosaic, before color matrix | Physically correct | Complex interaction with WB |
-| B | After color matrix, before dials | Clean separation | May need per-channel curves |
-| C | Modify dial ranges | Simple | Less flexible |
-| D | Early 3D LUT | Captures all transforms | Expensive, opaque |
-
-### 2. Learning Strategy
-
-How do we learn base curves from RAW+JPEG pairs?
-
-| Option | Method | Complexity | Quality |
-|--------|--------|------------|---------|
-| A | Parametric (contrast, gamma, points) | Low | Good |
-| B | 1D LUT per channel | Medium | Better |
-| C | 3D LUT | High | Best |
-| D | Neural network | Very high | Overkill? |
-
-### 3. EXIF Picture Style (VERIFIED)
-
-Picture style IS available in EXIF:
-
-```
-Sony:  -CreativeStyle    → "Standard", "Vivid", etc.
-Canon: -PictureStyle     → "Standard", "Portrait", etc.
-Nikon: -PictureControlName
-Fuji:  -FilmSimulation
-```
-
-Test images confirmed: `Creative Style: Standard` on all A7III shots.
-
-### 4. Fallback Hierarchy
-
-```
-1. Exact: Sony/ILCE-7M3/{serial}/vivid.json  (bespoke tuning)
-2. Model: Sony/ILCE-7M3/vivid.json
-3. Make:  Sony/default.json
-4. Universal: default.json
-```
-
-### 5. Service Model
-
-**"YOUR Camera Tuned"** - Premium service for pros.
-
-- Pro sends their camera body
-- We shoot color card with THEIR sensor
-- Deliver bespoke profile for their serial number
-- Captures per-unit manufacturing variance
-
-### 6. Equipment Needed
-
-- X-Rite ColorChecker Classic (24 patch) - ~$70
-- Constant D50/D65 light source
-- Tripod + controlled environment
-
----
-
 ## Completed
 
-- [x] 19D feature vector (sigma, LCH, percentiles, shadow chroma)
+- [x] 23D feature vector (sigma, LCH, percentiles, shadow chroma, split tone colors)
 - [x] Weighted L2 loss with trained weights (cnst.json)
-- [x] Built `bounds` diagnostic - found achievable limits
-- [x] Documented base curve concept (`doc/base_curve.md`)
 - [x] Training infrastructure (train-greedy, train-prms, train-exhaustive)
 - [x] Hybrid mode: ACEO → SPSA polish
 - [x] Full ACEO (45 dials) with covariance
 - [x] `--full` mode for single-pass optimization
+- [x] Built `bounds` diagnostic - found achievable limits
+- [x] **Base curve implementation** (2024-12-01)
+  - RAWS estimates curve per-image from RAW→preview
+  - Curve stored in raws::Result, passed via pipe::Head
+  - Applied in gamma space after colorCorrection
+  - Loss dropped: 17.3% → 13.1%
+- [x] **Resolution independence verified** (2024-12-01)
+  - Tested embedded preview (1616×1080) vs full-res sidecar JPG
+  - Curves match: L2 < 0.002 when both at preview size
+  - Higher resolution adds alignment noise, not signal
+  - Conclusion: Preview is sufficient for curve estimation
+- [x] **Baseline guard** (2024-12-01)
+  - Optimizer was sometimes making images worse (spectral→combined loss mismatch)
+  - Added guard in task.cpp: if final > baseline, restore neutral dials
+  - Now guarantees optimizer never degrades quality
 
-## Blocked (Until Base Curve)
+## Current: Refinement
 
-- [ ] cnst/prms/cvar optimization (limited by achievable range)
-- [ ] Batch tune quality (will remain "washed out")
-- [ ] Sky banding artifacts
-- [ ] Skin tone matching
+Now that base curve is working, the optimizer has more headroom.
 
-## Deferred
+### Baseline Results (2024-12-01)
+
+With base curve + baseline guard:
+
+| Baseline Range | Count | Status |
+|----------------|-------|--------|
+| 3-5% | 3 | Guard preserved (optimizer overshoots) |
+| 5-13% | 5 | Improved by optimizer |
+| 35% | 1 | DSC01531 - complex colors (saturated greens/reds) |
+
+**DSC01531 outlier (35.81%):** Not a curve failure - the image has complex cross-channel color relationships that per-channel curves can't capture. Needs color matrix estimation.
+
+### Next Steps
+
+1. **Re-run bounds analysis** with base curve active
+   - Check if previously unreachable features are now achievable
+   - Identify remaining gaps
+
+2. **Retrain weights** (cnst.json)
+   - Feature importance may have shifted
+   - Batch tune with base curve, analyze residuals
+
+3. **Batch quality assessment**
+   - Run tune on all 10 test images
+   - Compare before/after base curve
+   - Document typical loss range
+
+### Deferred
 
 - [ ] Re-enable regional refinement
 - [ ] Per-dial learning rates (vs per-block)
+- [ ] Sky banding artifacts (may be resolved by base curve)
+- [ ] Skin tone matching (may improve with better baseline)
+- [x] **RAWS hasBaseCurve bug** - was stale library, fixed by rebuild
+
+---
+
+## Architecture Notes
+
+### Base Curve Flow
+
+```
+RAWS (camera-specific):
+  - Decodes RAW
+  - Extracts embedded JPEG preview
+  - Estimates per-channel curves from flat→preview (768 floats: BGR × 256)
+  - Returns baseCurve[768] in Result
+
+LABS (generic):
+  - Head stores curve from Result
+  - Link.baseCurve().setCurve(head->baseCurve())
+  - Applied in gamma space after colorCorrection, before toneMapping
+```
+
+### Key Files Changed
+
+- `RAWS/inc/raws.hpp` - Result has baseCurve[768], hasBaseCurve
+- `RAWS/src/main/raws.cpp` - estimateBaseCurve() function
+- `LABS/inc/pipe.hpp` - Head::baseCurve(), Link::BaseCurve simplified
+- `LABS/src/main/part/pipe/pipe.cpp` - HeadImpl stores/exposes curve
+- `LABS/src/main/part/pipe/link.cpp` - BaseCurveImpl applies curve
+- `LABS/src/main/part/pipe/mods/base_curve.cpp` - gamma-space LUT apply
+- `LABS/src/main/part/geos/task.cpp` - baseline guard (line 179)

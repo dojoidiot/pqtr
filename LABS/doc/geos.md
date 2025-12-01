@@ -30,9 +30,9 @@ Every point in this hypercube represents a complete set of dial settings.
 
 ---
 
-## The Feature Space (19D)
+## The Feature Space (23D)
 
-The 45 dials produce an image. That image is reduced to **19 features**:
+The 45 dials produce an image. That image is reduced to **23 features**:
 
 ```
 [0-2]   σ₁, σ₂, σ₃       # SVD singular values (energy distribution)
@@ -46,6 +46,8 @@ The 45 dials produce an image. That image is reduced to **19 features**:
 [12-15] L_p10, L_p25, L_p75, L_p90  # Luminance percentiles (TONE CURVE)
 [16-17] C_p50, C_p90      # Chroma percentiles (saturation level)
 [18]    C_shadow          # Shadow chroma (preserve color in darks)
+[19-20] a_shadow, b_shadow    # Shadow color (split tone signal)
+[21-22] a_highlight, b_highlight  # Highlight color (split tone signal)
 ```
 
 ### Feature Groups
@@ -60,6 +62,7 @@ The 45 dials produce an image. That image is reduced to **19 features**:
 | 12-15 | L_p10, L_p25, L_p75, L_p90 | Tone curve shape |
 | 16-17 | C_p50, C_p90 | Saturation levels |
 | 18 | C_shadow | Shadow color preservation |
+| 19-22 | a/b_shadow, a/b_highlight | Split tone colors |
 
 ### Critical Features (High Weight)
 
@@ -86,7 +89,7 @@ The 45 dials produce an image. That image is reduced to **19 features**:
 Each dial can affect multiple features. Each feature is affected by multiple dials.
 
 ```
-45 dials ──┬──► 19 features
+45 dials ──┬──► 23 features
            │
         coupled
 ```
@@ -96,13 +99,13 @@ Examples:
 - Saturation dial → affects μ_C, std_C, cov_LC, cov_HC, C percentiles
 - Contrast dial → affects std_L, σ₁σ₂σ₃, skew_L, L percentiles
 
-The mapping is many-to-many. This is why dials are dependent—they all pull on the same 19 features from different directions.
+The mapping is many-to-many. This is why dials are dependent—they all pull on the same 23 features from different directions.
 
 ---
 
 ## The Loss
 
-**Weighted L2 loss** in 19D feature space:
+**Weighted L2 loss** in 23D feature space:
 
 ```
 Loss = Σ weights[i] × (feature[i] - target[i])²
@@ -140,7 +143,7 @@ The covariance matrix Σ is 45×45—dial-to-dial correlations in the search spa
 ```
 Search space:       45D hypercube (dials)
 Covariance matrix:  45×45 (dial correlations)
-Feature space:      19D (where loss is computed)
+Feature space:      23D (where loss is computed)
 ```
 
 It captures: when dial A moves toward its optimum, which other dials tend to move with it?
@@ -151,7 +154,7 @@ The features tell us how far off we are. The dial covariance tells us how to ste
 
 | File | Purpose |
 |------|---------|
-| `etc/cnst.json` | Feature weights (19 values) |
+| `etc/cnst.json` | Feature weights (23 values) |
 | `etc/prms.json` | SPSA phase params (a0, c0 per block) |
 | `etc/cvar.json` | 45×45 covariance matrix for ACEO |
 
@@ -173,7 +176,7 @@ GeoS defines the space and loss. Optimizers navigate:
 | | SPSA | ACEO | HYBRID |
 |--|------|------|--------|
 | Search space | Hypercube [0,1]^45 | Hypercube [0,1]^45 | Hypercube [0,1]^45 |
-| Loss function | Weighted L2 in 19D feature space | Weighted L2 in 19D feature space | Weighted L2 in 19D feature space |
+| Loss function | Weighted L2 in 23D feature space | Weighted L2 in 23D feature space | Weighted L2 in 23D feature space |
 | Dial coupling | Implicit (felt through loss) | Explicit (prior Σ matrix) | Both (ACEO→SPSA) |
 | Perturbation shape | Random hypercube corners | Ellipsoidal (eigenspace) | Ellipsoidal→Random |
 | Variance model | None (uniform) | Prior + learned | Prior then uniform |
@@ -189,7 +192,7 @@ Same space. Same loss. Same coupling. Different navigation strategies:
 │              GEOS (space)               │
 │                                         │
 │   45D hypercube [0,1]^45 (dials)        │
-│   19D feature space                     │
+│   23D feature space                     │
 │   Many-to-many coupling                 │
 │   Weighted L2 loss                      │
 │                                         │
@@ -242,9 +245,9 @@ No optimizer logic in the visualization. Just dial state → color. The dome sho
 
 ## Status
 
-**GeoS model**: Defined. 45D dial hypercube → 19D feature space → weighted L2 loss.
+**GeoS model**: Defined. 45D dial hypercube → 23D feature space → weighted L2 loss.
 
-**Feature vector v3**: 19 features including percentiles, shadow chroma, and color cast.
+**Feature vector v4**: 23 features including percentiles, shadow chroma, color cast, and split tone colors.
 
 **Optimizers**:
 - **SPSA**: Phased optimization with full 45D exploration. Builds covariance via `--save-cov`.

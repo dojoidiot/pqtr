@@ -176,7 +176,7 @@ mods::tone_map(input, output,
 | `split_tone()` | 4 | all 0.5 |
 | `detail()` | 2 | sharpen amount/radius |
 
-**GEOS optimizes**: 45 style dials (SPSA/ACEO/HYBRID, 12D features)
+**GEOS optimizes**: 45 style dials (SPSA/ACEO/HYBRID, 23D features)
 
 ---
 

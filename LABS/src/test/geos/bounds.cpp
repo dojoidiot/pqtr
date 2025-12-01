@@ -72,6 +72,12 @@ int main(int argc, char** argv) {
     pipe::Body& body = head->body(720);
     pipe::Body::Link& link = body.add("bounds");
 
+    // Apply base curve from RAW decoder
+    if (head->hasBaseCurve()) {
+        link.baseCurve().setCurve(head->baseCurve());
+        std::cout << "[bounds] Base curve applied from RAW decoder" << std::endl;
+    }
+
     // Get target features
     cv::UMat targetView = head->view().view();
     cv::Mat targetMat;

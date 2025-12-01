@@ -14,7 +14,7 @@ Image style has three independent dimensions. Each requires different handling:
 
 | Role | Dials | Who/What | Metric | Time |
 |------|-------|----------|--------|------|
-| **Color/Tone** | 41 + LUT | SPSA/ACEO/HYBRID | Weighted L2 (19D) | ~5min |
+| **Color/Tone** | 41 + LUT | SPSA/ACEO/HYBRID | Weighted L2 (23D) | ~5min |
 | **Sharpness** | 4 | Detail optimizer | Frequency (Laplacian) | ~2s |
 | **Geometry** | 6 | User | Visual judgment | - |
 
@@ -32,7 +32,7 @@ The "vibe" or "mood" of an image - warm/cool, saturated/muted, high-key/low-key,
 - Selective Color: 8 hues × 3 HSL adjustments (24)
 - **17³ 3D LUT** captures nonlinear camera color science
 
-**Method:** 3D LUT estimation + SPSA/ACEO/HYBRID with 19D weighted L2 loss. Content-invariant.
+**Method:** 3D LUT estimation + SPSA/ACEO/HYBRID with 23D weighted L2 loss. Content-invariant.
 
 ### Role 2: Sharpness (Automated)
 
@@ -225,7 +225,7 @@ Tune produces **two separate links** to separate concerns:
 
 ## Stage 1: GeoS Color/Tone Optimizer
 
-Optimizes dials + 17³ LUT using weighted L2 loss in 19D feature space.
+Optimizes dials + 17³ LUT using weighted L2 loss in 23D feature space.
 
 **See [geos.md](./geos.md) for full theory and algorithm.**
 
@@ -234,7 +234,7 @@ Optimizes dials + 17³ LUT using weighted L2 loss in 19D feature space.
 | **Dials** | 5 scene-linear + 36 display + 17³ LUT |
 | **Algorithm** | 3D LUT estimation + SPSA/ACEO/HYBRID |
 | **Phases** | Scene-Linear → LUT Estimation → Display (phased step sizes) |
-| **Loss** | Weighted L2 in 19D feature space |
+| **Loss** | Weighted L2 in 23D feature space |
 | **Time** | ~5 minutes |
 | **Multi-start** | 5 random initializations |
 
@@ -512,7 +512,7 @@ The tune API provides rich feedback for GUI visualization during optimization.
 
 ### Dome Compass (GEOS Stage)
 
-The 19D style space is projected to a 2D dome compass:
+The 23D style space is projected to a 2D dome compass:
 
 ```
         N (target)
@@ -534,10 +534,10 @@ The 19D style space is projected to a 2D dome compass:
 
 **Computing dome coordinates:**
 ```cpp
-// Given feature vectors in R^19
+// Given feature vectors in R^23
 // Compute normalized weighted difference
 float weighted_loss = 0.0f;
-for (int i = 0; i < 19; i++) {
+for (int i = 0; i < 23; i++) {
     float diff = features[i] - target[i];
     weighted_loss += weights[i] * diff * diff;
 }
@@ -601,7 +601,7 @@ tune::Result result = task->run(body, link, config,
 
 | What | How | Time |
 |------|-----|------|
-| **Style** (45 dials) | SPSA/ACEO/HYBRID + 19D weighted L2 loss | ~5min |
+| **Style** (45 dials) | SPSA/ACEO/HYBRID + 23D weighted L2 loss | ~5min |
 | **Geometry** (6 dials) | User sets manually | - |
 
 The user's responsibility is simple: **frame your shot**. The tool handles the rest.
@@ -629,7 +629,7 @@ See [libs.md](./libs.md) for full source structure.
 ## See Also
 
 - [tldr.md](./tldr.md) - Quick overview
-- [geos.md](./geos.md) - GeoS: 19D feature space + SPSA/ACEO/HYBRID algorithm (color/tone)
+- [geos.md](./geos.md) - GeoS: 23D feature space + SPSA/ACEO/HYBRID algorithm (color/tone)
 - [edge.md](./edge.md) - Edge: Frequency loss theory + golden section algorithm (sharpness)
 - [diff.md](./diff.md) - Loss metrics redirect
 - [data.md](./data.md) - Style sidecar format

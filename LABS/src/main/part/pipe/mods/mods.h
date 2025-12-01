@@ -54,6 +54,20 @@ namespace mods
         float tint);
 
     //--------------------------------------------------------------------------
+    // Base Curve (from RAWS decoder, no dials)
+    //--------------------------------------------------------------------------
+
+    // Apply base curve derived by RAWS from RAW→preview comparison
+    // curve: 256 float values mapping gamma-space input to output [0-1]
+    bool base_curve(
+        const cv::UMat &input,
+        cv::UMat &output,
+        const float* curve);
+
+    // Generate identity curve (no change)
+    void base_curve_identity(float* curve);
+
+    //--------------------------------------------------------------------------
     // Tone Mapping (7 dials)
     //--------------------------------------------------------------------------
 

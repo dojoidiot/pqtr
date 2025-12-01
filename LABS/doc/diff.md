@@ -24,7 +24,7 @@ geos::View diffImg = task->view(candidate, 5.0f);
 
 | Metric | Range | Meaning |
 |--------|-------|---------|
-| `spectral` | [0, ∞) | Weighted L2 distance in 19D feature space (0 = identical style) |
+| `spectral` | [0, ∞) | Weighted L2 distance in 23D feature space (0 = identical style) |
 | `frequency` | [0, ∞) | Relative Laplacian variance difference (0 = identical sharpness) |
 
 ## Loss Function
@@ -38,6 +38,6 @@ Feature weights are loaded from `etc/cnst.json`. Critical features (std_L, perce
 
 ## See Also
 
-- [geos.md](./geos.md) - Full GeoS documentation (19D feature space, weighted L2 loss)
+- [geos.md](./geos.md) - Full GeoS documentation (23D feature space, weighted L2 loss)
 - [tldr.md](./tldr.md) - Quick overview
 - [edge.md](./edge.md) - Frequency loss theory

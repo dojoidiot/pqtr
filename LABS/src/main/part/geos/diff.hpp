@@ -15,7 +15,7 @@ namespace geos::internal
     // Constants
     constexpr int PROXY_SIZE = 512;
     constexpr float CHROMA_WEIGHT_K = 0.1f;
-    constexpr int STYLE_DIM = 19;  // Feature vector dimension (12 + 6 percentiles + 1 shadow chroma)
+    constexpr int STYLE_DIM = 23;  // Feature vector dimension (19 + 4 luminance-dependent color)
     constexpr int IDX_MU_L = 3;    // Brightness axis in style vector
     constexpr int IDX_MU_C = 4;    // Color axis in style vector
     constexpr int IDX_STD_L = 5;   // Contrast (L standard deviation)
@@ -30,6 +30,11 @@ namespace geos::internal
     constexpr int IDX_C_P50 = 16;  // Chroma median (saturation level)
     constexpr int IDX_C_P90 = 17;  // Chroma peak (max saturation)
     constexpr int IDX_C_SHADOW = 18;  // Shadow chroma (mean C where L < L_p25)
+    // Luminance-dependent color (for split tone optimization)
+    constexpr int IDX_A_SHADOW = 19;    // Mean a* where L < L_p25 (shadow green-magenta)
+    constexpr int IDX_B_SHADOW = 20;    // Mean b* where L < L_p25 (shadow blue-yellow)
+    constexpr int IDX_A_HIGHLIGHT = 21; // Mean a* where L > L_p75 (highlight green-magenta)
+    constexpr int IDX_B_HIGHLIGHT = 22; // Mean b* where L > L_p75 (highlight blue-yellow)
 
     // Regional analysis grid (4x4 = 16 cells)
     constexpr int GRID_SIZE = 4;
@@ -56,19 +61,23 @@ namespace geos::internal
         5.0f,               // [15]   L_p90 (white point - critical!)
         5.0f,               // [16]   C_p50 (chroma median - critical!)
         3.1f,               // [17]   C_p90 (chroma peak)
-        5.0f                // [18]   C_shadow (shadow chroma - critical!)
+        5.0f,               // [18]   C_shadow (shadow chroma - critical!)
+        3.0f, 3.0f,         // [19-20] a_shadow, b_shadow (shadow color)
+        3.0f, 3.0f          // [21-22] a_highlight, b_highlight (highlight color)
     };
 
-    // Style feature vector (19 dimensions)
+    // Style feature vector (23 dimensions)
     // [0-2]   SVD singular values (sigma1, sigma2, sigma3)
     // [3-4]   LCH means (mu_L, mu_C)
     // [5-6]   LCH stds (std_L, std_C)
     // [7]     Luminance skewness (skew_L)
     // [8-9]   Covariances (cov_LC, cov_HC)
-    // [10-11] Lab a/b means (mu_a, mu_b) - color cast
+    // [10-11] Lab a/b means (mu_a, mu_b) - global color cast
     // [12-15] Luminance percentiles (L_p10, L_p25, L_p75, L_p90) - tone curve
     // [16-17] Chroma percentiles (C_p50, C_p90) - saturation level
     // [18]    Shadow chroma (mean C where L < L_p25) - preserve color in shadows
+    // [19-20] Shadow color (a_shadow, b_shadow) - for split tone optimization
+    // [21-22] Highlight color (a_highlight, b_highlight) - for split tone optimization
     struct StyleFeatures
     {
         std::array<float, STYLE_DIM> v;   // Raw feature vector

@@ -89,6 +89,7 @@ pipe::View display = body.view(512);    // Further scaled to 512px
 **Modules** (see [libs.md](./libs.md) for implementation details):
 - `geometric()` - 6 dials (Crop, Zoom, Rotation)
 - `colorCorrection()` - 3 dials (Exposure, WhiteBalance)
+- `baseCurve()` - no dials (auto-derived by RAWS from RAW→preview)
 - `toneMapping()` - 7 dials (Contrast, Highlights, Shadows, Toe/Shoulder Pivots, White/Black Points)
 - `globalColor()` - 3 dials (Vibrance, Saturation, ColourDensity)
 - `splitTone()` - 4 dials (Shadow/Highlight Hue/Sat)
@@ -111,9 +112,11 @@ tail.save("/path/to/web.png", 2048);        // Process at 2048px, save
 
 ---
 
-## The 6 Golden Modules
+## The 6 Golden Modules + Base Curve
 
 Each module contains sub-modules that work together. See [module documentation](./mods/) for complete specifications.
+
+**Note:** BaseCurve is a special module with no dials. It applies a tone curve derived automatically by RAWS from the RAW→preview comparison, bridging the gap between flat RAW decode and camera JPEG appearance. See [base_curve.md](./base_curve.md).
 
 ### 1. [Geometric](./mods/geometric.md)
 **Purpose**: Geometric transformations (crop, scale, rotate)
@@ -126,6 +129,11 @@ Each module contains sub-modules that work together. See [module documentation](
 **Sub-Modules**: Exposure (1 dial), White Balance (2 dials)
 **Total**: 3 dials
 **Color Space**: LINEAR_RGB
+
+### 2.5 Base Curve (no dials)
+**Purpose**: Apply camera-style tone curve from RAWS
+**Dials**: None (auto-derived from RAW→preview)
+**Color Space**: LINEAR_RGB (applied in gamma space internally)
 
 ### 3. [Tone Mapping](./mods/tone_mapping.md)
 **Purpose**: HDR to SDR compression with perceptual contrast

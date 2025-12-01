@@ -129,6 +129,51 @@ public:
 };
 
 // ============================================================
+// Base Curve Module (from RAW decoder)
+// ============================================================
+
+class BaseCurveImpl : public Body::Link::BaseCurve
+{
+    float m_curve[CURVE_SIZE];
+    bool m_active = false;
+
+public:
+    BaseCurveImpl()
+    {
+        reset();
+    }
+
+    const float* curve() const override { return m_curve; }
+
+    void setCurve(const float* values) override
+    {
+        for (int i = 0; i < CURVE_SIZE; i++)
+            m_curve[i] = values[i];
+        m_active = true;
+    }
+
+    void reset() override
+    {
+        mods::base_curve_identity(m_curve);
+        m_active = false;
+    }
+
+    bool isActive() const override { return m_active; }
+
+    bool apply(View& view)
+    {
+        if (!m_active)
+            return true;  // No-op
+
+        View output;
+        if (!mods::base_curve(view, output, m_curve))
+            return false;
+        view = output;
+        return true;
+    }
+};
+
+// ============================================================
 // 3D LUT Module (full RGB→RGB transform)
 // ============================================================
 
@@ -519,6 +564,7 @@ LinkImpl::LinkImpl(Name name)
     : m_name(std::move(name))
     , m_geometric(std::make_unique<GeometricImpl>())
     , m_colorCorrection(std::make_unique<ColorCorrectionImpl>())
+    , m_baseCurve(std::make_unique<BaseCurveImpl>())
     , m_lutCurve(std::make_unique<LutCurveImpl>())
     , m_toneMapping(std::make_unique<ToneMappingImpl>())
     , m_globalColor(std::make_unique<GlobalColorImpl>())
@@ -533,6 +579,7 @@ LinkImpl::~LinkImpl() = default;
 Name LinkImpl::name() { return m_name; }
 Body::Link::Geometric& LinkImpl::geometric() { return *m_geometric; }
 Body::Link::ColorCorrection& LinkImpl::colorCorrection() { return *m_colorCorrection; }
+Body::Link::BaseCurve& LinkImpl::baseCurve() { return *m_baseCurve; }
 Body::Link::LutCurve& LinkImpl::lutCurve() { return *m_lutCurve; }
 Body::Link::ToneMapping& LinkImpl::toneMapping() { return *m_toneMapping; }
 Body::Link::GlobalColor& LinkImpl::globalColor() { return *m_globalColor; }
@@ -544,6 +591,7 @@ View LinkImpl::run(View view)
 {
     if (m_geometric->isActive()) m_geometric->apply(view);
     if (m_colorCorrection->isActive()) m_colorCorrection->apply(view);
+    if (m_baseCurve->isActive()) m_baseCurve->apply(view);
     if (m_lutCurve->isEstimated()) m_lutCurve->apply(view);
     if (m_toneMapping->isActive()) m_toneMapping->apply(view);
     if (m_globalColor->isActive()) m_globalColor->apply(view);

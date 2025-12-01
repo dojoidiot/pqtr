@@ -1,5 +1,5 @@
 {
-  "description": "Feature weights for style matching loss",
+  "description": "Feature weights for style matching loss (23D)",
   "training_images": 11,
   "average_loss": 0.0652,
   "weights": {
@@ -21,6 +21,10 @@
     "L_p90": 5.00,
     "C_p50": 5.00,
     "C_p90": 3.12,
-    "C_shadow": 5.00
+    "C_shadow": 5.00,
+    "a_shadow": 3.00,
+    "b_shadow": 3.00,
+    "a_highlight": 3.00,
+    "b_highlight": 3.00
   }
 }

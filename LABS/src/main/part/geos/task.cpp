@@ -111,6 +111,7 @@ namespace geos
             // Initial loss measurement (with LUT applied)
             View candidate = body.view();
             result.loss = diff(candidate);
+            Data baselineLoss = result.loss;
 
             // Stage 2: GEOS (Color/Tone) - fine-tune after LUT
             if (!config.skip_geos)
@@ -174,6 +175,18 @@ namespace geos
             // Final loss measurement
             candidate = body.view();
             result.loss = diff(candidate);
+
+            // Baseline guard: never return worse than we started
+            if (result.loss.spectral > baselineLoss.spectral)
+            {
+                std::cerr << "[geos] GUARD: Final loss (" << result.loss.spectral
+                          << ") worse than baseline (" << baselineLoss.spectral
+                          << "), restoring neutral dials" << std::endl;
+                Theta neutralDials;
+                initNeutral(neutralDials);
+                writeDials(link, neutralDials);
+                result.loss = baselineLoss;
+            }
 
             return result;
         }

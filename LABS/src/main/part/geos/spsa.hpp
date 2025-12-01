@@ -172,6 +172,24 @@ namespace geos::internal
     // Dial values as float array
     using Theta = std::array<float, GEOS_DIAL_COUNT>;
 
+    // ============================================================
+    // Jacobian-informed gradient (feedforward from features)
+    // ============================================================
+
+    // Jacobian matrix: J[dial][feature] = dfeature/ddial
+    using JacobianMatrix = std::array<std::array<float, STYLE_DIM>, GEOS_DIAL_COUNT>;
+
+    // Load Jacobian from etc/jacob.json
+    bool loadJacobian(const std::string& path, JacobianMatrix& J);
+
+    // Compute analytic gradient from feature residual
+    // gradient[d] = sum_f( J[d][f] * weight[f] * (target[f] - current[f]) )
+    void computeJacobianGradient(
+        const JacobianMatrix& J,
+        const StyleFeatures& target,
+        const StyleFeatures& current,
+        Theta& gradient);
+
     // Read current dial values from link into theta
     void readDials(pipe::Body::Link& link, Theta& theta);
 

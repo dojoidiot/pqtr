@@ -4,9 +4,100 @@
 
 #include "raws.hpp"
 #include "sony.h"
+#include <opencv2/imgproc.hpp>
 #include <sstream>
+#include <cmath>
+#include <vector>
 
 namespace raws {
+
+// ============================================================
+// Base curve estimation (from scene-linear data to JPEG preview)
+// ============================================================
+
+static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, float* curve)
+{
+    // Initialize all 3 channels to identity
+    for (int c = 0; c < 3; c++)
+        for (int i = 0; i < 256; i++)
+            curve[c * 256 + i] = i / 255.0f;
+
+    if (data.empty() || preview.empty())
+        return;
+
+    // Resize preview to match data aspect ratio for comparison
+    cv::Mat data_cpu, preview_cpu;
+    data.copyTo(data_cpu);
+    preview.copyTo(preview_cpu);
+
+    // Resize data down to preview size for comparison
+    cv::Mat data_small;
+    cv::resize(data_cpu, data_small, preview_cpu.size(), 0, 0, cv::INTER_AREA);
+
+    // Convert data to 8-bit gamma-encoded for comparison
+    cv::Mat data_clamped;
+    cv::max(data_small, 0.0f, data_clamped);
+    cv::min(data_clamped, 1.0f, data_clamped);
+
+    cv::Mat data_gamma;
+    cv::pow(data_clamped, 1.0f / 2.2f, data_gamma);
+
+    cv::Mat data_8u;
+    data_gamma.convertTo(data_8u, CV_8UC3, 255.0);
+
+    // Per-channel curve estimation (BGR order in OpenCV)
+    // curve layout: [B0..B255, G0..G255, R0..R255] to match OpenCV BGR
+    std::vector<double> sum[3];
+    std::vector<double> count[3];
+    for (int c = 0; c < 3; c++) {
+        sum[c].resize(256, 0.0);
+        count[c].resize(256, 0.0);
+    }
+
+    for (int y = 0; y < data_8u.rows; y++)
+    {
+        const uchar* d_ptr = data_8u.ptr<uchar>(y);
+        const uchar* p_ptr = preview_cpu.ptr<uchar>(y);
+
+        for (int x = 0; x < data_8u.cols; x++)
+        {
+            for (int c = 0; c < 3; c++)  // B, G, R
+            {
+                int bin = d_ptr[x * 3 + c];
+                sum[c][bin] += p_ptr[x * 3 + c];
+                count[c][bin] += 1.0;
+            }
+        }
+    }
+
+    // Compute curve values per channel
+    for (int c = 0; c < 3; c++)
+    {
+        for (int i = 0; i < 256; i++)
+        {
+            if (count[c][i] > 0)
+                curve[c * 256 + i] = static_cast<float>(sum[c][i] / count[c][i]) / 255.0f;
+            else
+                curve[c * 256 + i] = i / 255.0f;  // Identity fallback
+        }
+
+        // Ensure monotonicity per channel
+        for (int i = 1; i < 256; i++)
+        {
+            if (curve[c * 256 + i] < curve[c * 256 + i - 1])
+                curve[c * 256 + i] = curve[c * 256 + i - 1];
+        }
+
+        // Light smoothing per channel
+        std::vector<float> smoothed(256);
+        smoothed[0] = curve[c * 256 + 0];
+        smoothed[255] = curve[c * 256 + 255];
+        for (int i = 1; i < 255; i++)
+            smoothed[i] = 0.25f * curve[c * 256 + i - 1] + 0.5f * curve[c * 256 + i] + 0.25f * curve[c * 256 + i + 1];
+        for (int i = 0; i < 256; i++)
+            curve[c * 256 + i] = smoothed[i];
+    }
+}
 
 // ============================================================
 // Format detection
@@ -77,6 +168,10 @@ static Result decodeSony(pqtr::Sink& sink)
     result.previewInfo["contrast"] = std::to_string(meta.contrast);
     result.previewInfo["saturation"] = std::to_string(meta.saturation);
     result.previewInfo["sharpness"] = std::to_string(meta.sharpness);
+
+    // Estimate base curve from data→preview comparison
+    estimateBaseCurve(result.data, result.preview, result.baseCurve);
+    result.hasBaseCurve = true;
 
     result.success = true;
     return result;

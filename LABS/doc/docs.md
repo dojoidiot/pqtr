@@ -60,7 +60,7 @@ Passive voice is acceptable for:
 - **Link** (named collection of modules in pipe)
 - **camera to web** (project scope statement)
 - **tune** (orchestrates geos + edge optimization)
-- **geos** (spectral optimizer: SPSA/ACEO/HYBRID, 45 style dials, 12D features)
+- **geos** (spectral optimizer: SPSA/ACEO/HYBRID, 45 style dials, 23D features)
 - **edge** (frequency loss: Laplacian variance for sharpness)
 - **diff** (the comparison tool/metric)
 - **HEAD → BODY → TAIL** (pipeline stages)
@@ -114,7 +114,7 @@ Passive voice is acceptable for:
 4. Module test coverage (test cases per module)
 5. Tool test sections:
    - Diff: spectral loss tests, frequency loss tests
-   - GeoS: optimizer tests (SPSA/ACEO/HYBRID, 45 dials, 12D features)
+   - GeoS: optimizer tests (SPSA/ACEO/HYBRID, 45 dials, 23D features)
    - Tune: integration tests, style transfer tests
 6. Running tests (commands, visual inspection)
 
@@ -178,13 +178,18 @@ Passive voice is acceptable for:
 Other (not optimized):
 - Geometric: 6 dials (user-controlled composition)
 
-**Feature Vector** (12D):
+**Feature Vector** (23D):
 - σ₁, σ₂, σ₃ (SVD singular values)
 - μ_L, μ_C (LCH means)
 - std_L, std_C (LCH stds)
 - skew_L (luminance skewness)
 - cov_LC, cov_HC (covariances)
 - μ_a, μ_b (Lab a/b means for color cast)
+- L_p10, L_p25, L_p75, L_p90 (luminance percentiles)
+- C_p50, C_p90 (chroma percentiles)
+- C_shadow (shadow chroma)
+- a_shadow, b_shadow (shadow color)
+- a_highlight, b_highlight (highlight color)
 
 **Optimizers:**
 - **SPSA**: Phased optimization, builds covariance

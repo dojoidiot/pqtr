@@ -1,189 +1,150 @@
-# Per-Camera Base Curve Learning
+# Base Curve
 
-## Problem
+[back](../README.md)
 
-The current pipeline produces "washed out" images because the RAW processing starts from a flat baseline. Camera JPEGs apply a base tone curve BEFORE their adjustments that we don't have.
+## Purpose
 
-**Measured gap:** Our max std_L = 0.1303, target = 0.2244 (42% shortfall)
+The base curve bridges the gap between flat RAW decode and camera JPEG appearance. RAWS estimates it automatically per-image from the RAW→preview comparison.
+
+## Problem Solved
+
+Camera JPEGs apply a tone curve (per picture style) BEFORE any adjustments. Without this, our output looks "washed out" compared to the camera preview.
+
+**Before base curve:** Loss = 17.3%
+**After base curve:** Loss = 13.1%
 
 ## Key Insight: Photographer Intent
 
-The base curve is not just a technical correction - it represents **what the photographer saw and intended**.
+The base curve represents **what the photographer saw and intended**.
 
 ```
 Photographer's Workflow:
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. Photographer sets camera to "Vivid" / "Standard" / etc.     │
-│ 2. Composes shot while looking at LCD preview (WITH base curve)│
-│ 3. Judges exposure and color based on what they SEE            │
-│ 4. Makes creative decisions assuming that visual baseline      │
-│ 5. Takes the shot                                              │
-│ 6. Later expects editing software to show similar baseline     │
-└─────────────────────────────────────────────────────────────────┘
+1. Sets camera to "Vivid" / "Standard" / etc.
+2. Composes shot while looking at LCD preview (WITH base curve)
+3. Judges exposure and color based on what they SEE
+4. Takes the shot
+5. Expects editing software to show similar baseline
 ```
 
-**The camera JPEG preview IS the photographer's reference point.**
+The camera JPEG preview IS the photographer's reference point. By matching it, we restore their creative intent.
 
-When we show them a "washed out" image, we're showing them something different from what they saw when they took the photo. This breaks their mental model and editing expectations.
-
-### Picture Style = Creative Intent
-
-| Camera Setting | Base Curve Effect | Photographer Intent |
-|----------------|-------------------|---------------------|
-| Vivid          | High contrast, saturated | "I want punchy, dramatic colors" |
-| Standard       | Balanced, neutral | "I want a clean starting point" |
-| Portrait       | Soft contrast, warm | "I want flattering skin tones" |
-| Landscape      | High contrast, cool | "I want crisp scenery" |
-| Neutral/Flat   | Minimal curve | "I'll grade this heavily in post" |
-
-### Implication for Our System
-
-We're not trying to find "objectively correct" rendering. We're trying to match:
-1. **What the photographer saw** when composing
-2. **What they expected** as their editing baseline
-3. **The creative direction** they chose via camera settings
-
-This is why matching the camera JPEG preview is the right target - it represents the photographer's visual intent at capture time.
-
-## Solution Architecture
+## Architecture
 
 ```
-RAW → [Camera Base Curve] → [Our Dials] → [LUT] → Output
-            ↑
-   Learned per camera/style
+RAWS (camera-specific):
+  1. Decode RAW → scene-linear data
+  2. Extract embedded JPEG → preview
+  3. Estimate per-channel curves: gamma-space RGB mapping data→preview
+  4. Return {data, preview, baseCurve[768]} (BGR × 256)
+
+pipe::Head:
+  - Stores baseCurve from raws::Result
+  - Exposes via head->baseCurve(), head->hasBaseCurve()
+
+Link (in BODY):
+  - link.baseCurve().setCurve(head->baseCurve())
+  - Applied after colorCorrection, before toneMapping
+  - Operates in gamma space (linear→gamma, apply LUT, gamma→linear)
 ```
 
-## Data Structure
+## Estimation Algorithm
 
-```
-etc/curves/
-  Sony/
-    ILCE-7M3/
-      standard.json     # Default picture style
-      vivid.json        # Vivid picture style
-      portrait.json     # Portrait picture style
-  Canon/
-    EOS_R5/
-      ...
-```
-
-## Curve Format (base_curve.json)
-
-```json
+```cpp
+// In RAWS
+static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, float* curve)
 {
-  "manufacturer": "Sony",
-  "model": "ILCE-7M3",
-  "style": "standard",
-  "training_images": 50,
-
-  "curve": {
-    "type": "parametric",  // or "lut"
-    "contrast_boost": 1.8,  // Multiplier to apply before dials
-    "black_point": 0.02,    // Lift shadows by this amount
-    "white_point": 0.98,    // Compress highlights above this
-    "gamma": 2.2            // Base gamma
-  },
-
-  "color_matrix": [         // Optional: base color correction
-    [1.0, 0.0, 0.0],
-    [0.0, 1.0, 0.0],
-    [0.0, 0.0, 1.0]
-  ]
+    // 1. Resize data to preview size
+    // 2. Convert data to gamma-encoded 8-bit
+    // 3. For each channel (B, G, R):
+    //    - For each input bin [0-255]:
+    //      - Accumulate corresponding output from preview
+    //    - curve[c*256+i] = average(output for input=i) / 255.0
+    // 4. Enforce monotonicity per channel
+    // 5. Apply smoothing per channel
 }
 ```
 
-## Learning Algorithm
+The curve is 768 floats (3 channels × 256) mapping gamma-space input to gamma-space output [0-1].
 
-1. For each camera model in training set:
-   a. Collect RAW+JPEG pairs
-   b. Process RAW with neutral dials (0.5)
-   c. Measure feature gap (especially std_L) between output and JPEG
-   d. Grid search over base curve parameters to minimize gap
-   e. Save learned curve
+## Resolution Independence
 
-2. Validation:
-   a. Run tune on held-out images WITH learned curve
-   b. Verify std_L is now achievable
-   c. Compare visual quality
+Testing confirms the embedded preview (1616×1080) is sufficient for accurate curve estimation:
 
-## Implementation Plan
+| Source | L2 vs Preview | Note |
+|--------|--------------|------|
+| Sidecar@preview | < 0.002 | Near-perfect match |
+| Sidecar@full | 0.003-0.019 | Often worse |
 
-### Phase 1: Infrastructure
-- [ ] Add base curve module to pipeline (before our dials)
-- [ ] Load curve from etc/curves/{mfr}/{model}/{style}.json
-- [ ] Fallback to identity if no curve found
+**Why resolution doesn't matter:**
+- Curve estimation averages millions of pixels into 256 bins
+- 1.7M pixels (preview) provides ample statistical samples
+- Higher resolution adds alignment noise, not signal
+- Geometric differences (crop, lens correction) amplify at full-res
 
-### Phase 2: Learning Tool
-- [ ] Create train_curve.cpp
-- [ ] Grid search over curve parameters
-- [ ] Output etc/curves/ files
+The embedded preview and full-res sidecar JPG use **identical camera processing**. The "reduced" preview loses no information for style extraction.
 
-### Phase 3: Integration
-- [ ] Modify tune to apply base curve before optimization
-- [ ] Update bounds diagnostic to test with curve
-- [ ] Re-run validation on training set
+## Application
 
-## Camera Model Detection
-
-From EXIF (verified available):
-```
-Make:           SONY
-Model:          ILCE-7M3
-Creative Style: Standard
+```cpp
+// In base_curve.cpp
+bool base_curve(const cv::UMat& input, cv::UMat& output, const float* curve)
+{
+    // For each pixel, each channel:
+    // 1. Clamp to [0, 1]
+    // 2. Linear → gamma: v^(1/2.2)
+    // 3. Apply LUT with interpolation
+    // 4. Gamma → linear: v^2.2
+}
 ```
 
-Exiftool tags:
-- `-Make` - Manufacturer
-- `-Model` or `-CameraModelName` - Camera model
-- `-CreativeStyle` (Sony), `-PictureStyle` (Canon), `-PictureControlName` (Nikon)
+The gamma space conversion is critical - the curve was estimated in gamma space (8-bit images), so it must be applied in gamma space.
 
-## Capture Protocol
+## Files
 
-**Equipment:**
-- X-Rite ColorChecker Classic (24 patch) - ~$70
-- Constant light source (D50/D65)
-- Tripod
+| File | Purpose |
+|------|---------|
+| `RAWS/inc/raws.hpp` | Result struct with baseCurve[768] |
+| `RAWS/src/main/raws.cpp` | estimateBaseCurve() function |
+| `LABS/inc/pipe.hpp` | Head::baseCurve(), Link::BaseCurve |
+| `LABS/src/main/part/pipe/pipe.cpp` | HeadImpl stores curve |
+| `LABS/src/main/part/pipe/link.cpp` | BaseCurveImpl |
+| `LABS/src/main/part/pipe/mods/base_curve.cpp` | Apply function |
+| `LABS/src/main/part/pipe/mods/mods.h` | Declarations |
+| `LABS/src/main/part/geos/task.cpp` | Baseline guard (line 179) |
 
-**Per camera, per style:**
+## Usage
+
+```cpp
+// In tune.cpp or any application
+auto head = pipe->open(sink);
+
+if (head->hasBaseCurve())
+{
+    link.baseCurve().setCurve(head->baseCurve());
+}
 ```
-1. Set picture style (Standard, Vivid, Portrait, etc.)
-2. Shoot RAW+JPEG of color card
-3. Repeat for each style
+
+## Advantages of Per-Image Approach
+
+| Per-Camera Files | Per-Image (Implemented) |
+|------------------|-------------------------|
+| Requires training data | Works immediately |
+| Average across images | Exact for this image |
+| Needs curve library | No files to distribute |
+| Style lookup needed | Derived automatically |
+
+The per-image approach is simpler and more accurate because it uses the actual preview from this specific shot.
+
+## Baseline Guard
+
+When the base curve achieves very low baseline loss (< 5%), the optimizer may make things worse by trading spectral quality for frequency matching (combined loss). A guard in `task.cpp` prevents this:
+
+```cpp
+if (result.loss.spectral > baselineLoss.spectral)
+{
+    writeDials(link, neutralDials);  // Restore neutral
+    result.loss = baselineLoss;      // Return baseline
+}
 ```
 
-**Output per camera:**
-```
-ColorCard_Standard.ARW + ColorCard_Standard.JPG
-ColorCard_Vivid.ARW    + ColorCard_Vivid.JPG
-ColorCard_Portrait.ARW + ColorCard_Portrait.JPG
-ColorCard_Landscape.ARW + ColorCard_Landscape.JPG
-ColorCard_Neutral.ARW  + ColorCard_Neutral.JPG
-```
-
-## Service Model
-
-**"YOUR Camera Tuned"** - Premium service for professional photographers.
-
-| Generic profile | YOUR camera tuned |
-|-----------------|-------------------|
-| Model average | Your specific sensor |
-| Manufacturing variance ignored | Captures your unit's quirks |
-| Same as everyone else | Bespoke to your serial number |
-
-**Workflow:**
-1. Pro sends their camera body
-2. Shoot color card in controlled lab with THEIR camera
-3. Extract curves for all picture styles
-4. Deliver personalized profile for their serial number
-
-**Value prop:** Not "Sony A7III profile" - it's "YOUR A7III, serial #3847291, tuned."
-
-## Priority
-
-HIGH - This is blocking the "washed out" problem which affects most images.
-
-## Related Files
-
-- `src/main/part/pipe/mods/tone_map.cpp` - Current tone mapping
-- `src/test/geos/bounds.cpp` - Feature achievability diagnostic
-- `etc/curves/` - Where learned curves will be stored
+This ensures the optimizer never degrades quality compared to base curve alone.

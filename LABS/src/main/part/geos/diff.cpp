@@ -32,6 +32,11 @@ namespace geos::internal
         cv::UMat lch;
         float mu_a;  // Mean Lab a* (green-magenta axis), signed
         float mu_b;  // Mean Lab b* (blue-yellow axis), signed
+        // Luminance-dependent color (for split tone optimization)
+        float a_shadow;     // Mean a* where L < L_p25
+        float b_shadow;     // Mean b* where L < L_p25
+        float a_highlight;  // Mean a* where L > L_p75
+        float b_highlight;  // Mean b* where L > L_p75
     };
 
     LCHResult convertToSafeLCH_impl(const cv::UMat& bgr)
@@ -61,6 +66,50 @@ namespace geos::internal
         // Normalize to [-1, 1] range (Lab a/b range is roughly [-128, 127])
         result.mu_a = static_cast<float>(cv::mean(a)[0]) / 128.0f;
         result.mu_b = static_cast<float>(cv::mean(b)[0]) / 128.0f;
+
+        // Compute luminance-dependent color (shadow/highlight a*/b*)
+        // First find L percentiles
+        cv::Mat L_norm = L / 255.0f;  // Normalize L to [0,1]
+        cv::Mat L_flat = L_norm.reshape(1, L_norm.total());
+        cv::Mat L_sorted;
+        cv::sort(L_flat, L_sorted, cv::SORT_ASCENDING);
+        int n = L_sorted.total();
+        float L_p25 = L_sorted.at<float>(n / 4);
+        float L_p75 = L_sorted.at<float>(3 * n / 4);
+
+        // Compute mean a/b in shadow and highlight regions
+        double a_shadow_sum = 0, b_shadow_sum = 0;
+        double a_highlight_sum = 0, b_highlight_sum = 0;
+        int shadow_count = 0, highlight_count = 0;
+
+        for (int row = 0; row < L_norm.rows; row++)
+        {
+            const float* lPtr = L_norm.ptr<float>(row);
+            const float* aPtr = a.ptr<float>(row);
+            const float* bPtr = b.ptr<float>(row);
+            for (int col = 0; col < L_norm.cols; col++)
+            {
+                float lum = lPtr[col];
+                if (lum < L_p25)
+                {
+                    a_shadow_sum += aPtr[col];
+                    b_shadow_sum += bPtr[col];
+                    shadow_count++;
+                }
+                else if (lum > L_p75)
+                {
+                    a_highlight_sum += aPtr[col];
+                    b_highlight_sum += bPtr[col];
+                    highlight_count++;
+                }
+            }
+        }
+
+        // Normalize to [-1, 1] range
+        result.a_shadow = (shadow_count > 0) ? static_cast<float>(a_shadow_sum / shadow_count) / 128.0f : 0.0f;
+        result.b_shadow = (shadow_count > 0) ? static_cast<float>(b_shadow_sum / shadow_count) / 128.0f : 0.0f;
+        result.a_highlight = (highlight_count > 0) ? static_cast<float>(a_highlight_sum / highlight_count) / 128.0f : 0.0f;
+        result.b_highlight = (highlight_count > 0) ? static_cast<float>(b_highlight_sum / highlight_count) / 128.0f : 0.0f;
 
         // Compute Chroma and Hue
         cv::Mat C, H;
@@ -116,8 +165,10 @@ namespace geos::internal
         return sorted.at<float>(idx);
     }
 
-    // Internal helper: extract style from LCH with pre-computed Lab a/b means
-    StyleFeatures extractStyleImpl(const cv::UMat& lch, float mu_a, float mu_b)
+    // Internal helper: extract style from LCH with pre-computed Lab color stats
+    StyleFeatures extractStyleImpl(const cv::UMat& lch, float mu_a, float mu_b,
+                                   float a_shadow, float b_shadow,
+                                   float a_highlight, float b_highlight)
     {
         StyleFeatures features;
 
@@ -200,17 +251,19 @@ namespace geos::internal
         if (shadowCount > 0)
             C_shadow /= shadowCount;
 
-        // Build 19D feature vector
+        // Build 23D feature vector
         features.v = {
             sigma1, sigma2, sigma3,           // [0-2]  SVD
             mu_L, mu_C,                       // [3-4]  means
             std_L, std_C,                     // [5-6]  stds
             skew_L,                           // [7]    skewness
             cov_LC, cov_HC,                   // [8-9]  covariances
-            mu_a, mu_b,                       // [10-11] color cast
+            mu_a, mu_b,                       // [10-11] global color cast
             L_p10, L_p25, L_p75, L_p90,       // [12-15] L percentiles (tone curve)
             C_p50, C_p90,                     // [16-17] C percentiles (saturation)
-            C_shadow                          // [18]   shadow chroma
+            C_shadow,                         // [18]   shadow chroma
+            a_shadow, b_shadow,               // [19-20] shadow color (split tone signal)
+            a_highlight, b_highlight          // [21-22] highlight color (split tone signal)
         };
 
         // Normalize to unit hypersphere (kept for backward compat, not used in loss)
@@ -233,18 +286,20 @@ namespace geos::internal
         return features;
     }
 
-    // Legacy API: extract style from pre-converted LCH (mu_a=0, mu_b=0)
+    // Legacy API: extract style from pre-converted LCH (no color stats)
     // Note: This doesn't capture color cast - use extractStyleFromBGR for full features
     StyleFeatures extractStyle(const cv::UMat& lch)
     {
-        return extractStyleImpl(lch, 0.0f, 0.0f);
+        return extractStyleImpl(lch, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
     }
 
-    // New API: extract style directly from BGR, capturing Lab a/b means for color cast
+    // New API: extract style directly from BGR, capturing all Lab color stats
     StyleFeatures extractStyleFromBGR(const cv::UMat& bgr)
     {
         LCHResult lchResult = convertToSafeLCH_impl(bgr);
-        return extractStyleImpl(lchResult.lch, lchResult.mu_a, lchResult.mu_b);
+        return extractStyleImpl(lchResult.lch, lchResult.mu_a, lchResult.mu_b,
+                               lchResult.a_shadow, lchResult.b_shadow,
+                               lchResult.a_highlight, lchResult.b_highlight);
     }
 
     // Feature names for diagnostic output
@@ -257,7 +312,9 @@ namespace geos::internal
         "mu_a", "mu_b",                // [10-11]
         "L_p10", "L_p25", "L_p75", "L_p90",  // [12-15]
         "C_p50", "C_p90",              // [16-17]
-        "C_shadow"                     // [18]
+        "C_shadow",                    // [18]
+        "a_shadow", "b_shadow",        // [19-20]
+        "a_highlight", "b_highlight"   // [21-22]
     };
 
     // Diagnostic: compute per-feature errors (unweighted absolute difference)

@@ -73,7 +73,7 @@ TRAIN_BIN = $(TEST_BIN_DIR)/train
 # Test input
 TEST_RAW = var/pics/DSC00202.ARW
 
-.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds
+.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds jacob
 
 LABS_VAR_DIR = tmp/var/labs
 
@@ -292,3 +292,19 @@ $(BOUNDS_OBJ): $(BOUNDS_SRC) | $(OBJ_DIR)
 bounds: $(BOUNDS_BIN)
 	@echo "=== Feature Bounds Diagnostic ==="
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BOUNDS_BIN)
+
+# Jacobian estimation sources
+JACOB_SRC = $(TEST_SRC)/jacob.cpp
+JACOB_OBJ = $(OBJ_DIR)/jacob.o
+JACOB_BIN = $(TEST_BIN_DIR)/jacob
+
+$(JACOB_BIN): $(JACOB_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(JACOB_OBJ): $(JACOB_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Jacobian: estimate dial→feature sensitivity matrix
+jacob: $(JACOB_BIN)
+	@echo "=== Jacobian Estimation ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(JACOB_BIN)

@@ -153,6 +153,111 @@ namespace geos::internal
 
     // Global covariance accumulator for SPSA runs
     static CovarianceAccumulator g_spsaCovAccum;
+
+    // ============================================================
+    // Jacobian-informed gradient (feedforward from features)
+    // ============================================================
+
+    // Global Jacobian (loaded once, reused across images)
+    static JacobianMatrix g_jacobian;
+    static bool g_jacobianLoaded = false;
+
+    bool loadJacobian(const std::string& path, JacobianMatrix& J)
+    {
+        std::ifstream file(path);
+        if (!file.is_open())
+        {
+            std::cerr << "[SPSA] Failed to load Jacobian: " << path << std::endl;
+            return false;
+        }
+
+        // Simple JSON parser for our specific format
+        std::string content((std::istreambuf_iterator<char>(file)),
+                            std::istreambuf_iterator<char>());
+
+        // Find "matrix": [ and parse the 45x23 array
+        size_t matrixStart = content.find("\"matrix\":");
+        if (matrixStart == std::string::npos)
+        {
+            std::cerr << "[SPSA] Invalid Jacobian format (no matrix)" << std::endl;
+            return false;
+        }
+
+        // Find the opening bracket
+        size_t pos = content.find('[', matrixStart);
+        if (pos == std::string::npos) return false;
+        pos++; // Skip '['
+
+        // Parse 45 rows
+        for (int d = 0; d < GEOS_DIAL_COUNT; d++)
+        {
+            // Find row start
+            pos = content.find('[', pos);
+            if (pos == std::string::npos) return false;
+            pos++; // Skip '['
+
+            // Parse 23 values
+            for (int f = 0; f < STYLE_DIM; f++)
+            {
+                // Skip whitespace and find number
+                while (pos < content.size() && (content[pos] == ' ' || content[pos] == '\n')) pos++;
+
+                // Parse float
+                size_t end;
+                J[d][f] = std::stof(content.substr(pos), &end);
+                pos += end;
+
+                // Skip comma if present
+                while (pos < content.size() && (content[pos] == ',' || content[pos] == ' ')) pos++;
+            }
+
+            // Find row end
+            pos = content.find(']', pos);
+            if (pos == std::string::npos) return false;
+            pos++; // Skip ']'
+        }
+
+        std::cerr << "[SPSA] Loaded Jacobian from: " << path << std::endl;
+        return true;
+    }
+
+    void computeJacobianGradient(
+        const JacobianMatrix& J,
+        const StyleFeatures& target,
+        const StyleFeatures& current,
+        Theta& gradient)
+    {
+        // gradient[d] = sum_f( J[d][f] * W[f] * (target[f] - current[f]) )
+        // This is J^T @ (W * residual)
+
+        for (int d = 0; d < GEOS_DIAL_COUNT; d++)
+        {
+            float sum = 0.0f;
+            for (int f = 0; f < STYLE_DIM; f++)
+            {
+                float residual = target.v[f] - current.v[f];
+                float weighted = FEATURE_WEIGHTS[f] * residual;
+                sum += J[d][f] * weighted;
+            }
+            gradient[d] = sum;
+        }
+
+        // Normalize gradient to unit length (direction only, magnitude from learning rate)
+        float norm = 0.0f;
+        for (int d = 0; d < GEOS_DIAL_COUNT; d++)
+        {
+            norm += gradient[d] * gradient[d];
+        }
+        norm = std::sqrt(norm);
+        if (norm > 1e-6f)
+        {
+            for (int d = 0; d < GEOS_DIAL_COUNT; d++)
+            {
+                gradient[d] /= norm;
+            }
+        }
+    }
+
     // ============================================================
     // Dial mapping: 45 dials <-> theta vector [0,1]^45
     // ============================================================
@@ -370,6 +475,60 @@ namespace geos::internal
     }
 
     // ============================================================
+    // Jacobian-informed perturbation direction
+    // ============================================================
+    // Returns sign of Jacobian gradient for each dial (biased SPSA)
+    // If Jacobian unavailable, returns random ±1 (fallback to pure SPSA)
+    void computeJacobianDelta(
+        pipe::Body& body,
+        const StyleFeatures& targetStyle,
+        const JacobianMatrix& J,
+        bool jacobianValid,
+        int blockStart,
+        int blockSize,
+        std::array<float, GEOS_DIAL_COUNT>& delta,
+        std::mt19937& rng,
+        float jacobianBlend = 0.7f)  // 70% Jacobian, 30% random
+    {
+        std::bernoulli_distribution coin(0.5);
+
+        if (!jacobianValid)
+        {
+            // Fallback: pure random SPSA
+            for (int i = 0; i < blockSize; i++)
+            {
+                delta[i] = coin(rng) ? 1.0f : -1.0f;
+            }
+            return;
+        }
+
+        // Get current features
+        View candidate = body.view();
+        cv::UMat candProxy = resizeProxy(candidate);
+        StyleFeatures currentStyle = extractStyleFromBGR(candProxy);
+
+        // Compute Jacobian gradient for each dial in block
+        for (int i = 0; i < blockSize; i++)
+        {
+            int d = blockStart + i;
+            float grad = 0.0f;
+            for (int f = 0; f < STYLE_DIM; f++)
+            {
+                float residual = targetStyle.v[f] - currentStyle.v[f];
+                grad += J[d][f] * FEATURE_WEIGHTS[f] * residual;
+            }
+
+            // Blend Jacobian direction with random
+            float jacobianDir = (grad > 0) ? 1.0f : -1.0f;
+            float randomDir = coin(rng) ? 1.0f : -1.0f;
+
+            // Use Jacobian direction most of the time, random occasionally
+            std::uniform_real_distribution<float> blend(0.0f, 1.0f);
+            delta[i] = (blend(rng) < jacobianBlend) ? jacobianDir : randomDir;
+        }
+    }
+
+    // ============================================================
     // Block SPSA: optimize a contiguous block of dials
     // ============================================================
     float optimizeBlock(
@@ -391,6 +550,16 @@ namespace geos::internal
         Theta bestTheta = theta;
         float bestLoss = evaluateLoss(body, targetStyle);
 
+        // Load Jacobian once (if available)
+        if (!g_jacobianLoaded)
+        {
+            g_jacobianLoaded = loadJacobian("etc/jacob.json", g_jacobian);
+            if (g_jacobianLoaded)
+            {
+                std::cerr << "[BLOCK] Using Jacobian-informed SPSA (hybrid mode)" << std::endl;
+            }
+        }
+
         std::cerr << "[BLOCK] Start phase=" << static_cast<int>(phase)
                   << " block[" << blockStart << ".." << blockStart + blockSize - 1 << "]"
                   << " startLoss=" << bestLoss << std::endl;
@@ -408,11 +577,9 @@ namespace geos::internal
             float a_k = computeA(k, params);
             float c_k = computeC(k, params);
 
-            // Generate perturbation for this block
-            for (int i = 0; i < blockSize; i++)
-            {
-                delta[i] = coin(rng) ? 1.0f : -1.0f;
-            }
+            // Generate perturbation - Jacobian-informed if available
+            computeJacobianDelta(body, targetStyle, g_jacobian, g_jacobianLoaded,
+                                blockStart, blockSize, delta, rng);
 
             // Evaluate L+ (theta + c_k * delta)
             Theta thetaPlus = theta;

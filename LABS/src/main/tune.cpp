@@ -211,27 +211,23 @@ int main(int argc, char** argv)
         std::cout << "\n[BODY] Creating pipeline..." << std::endl;
         pipe::Body& body = head->body(workingSize);
 
-        // Get body dimensions for exact target match
-        pipe::View bodyView = body.view();
-        cv::Mat bodyMat;
-        bodyView.copyTo(bodyMat);
+        // Get body dimensions for exact target match (before links added)
+        pipe::View initialView = body.view();
+        cv::Mat initialMat;
+        initialView.copyTo(initialMat);
 
         // Resize target to exactly match body
         cv::Mat targetForTune;
-        cv::resize(targetResized, targetForTune, cv::Size(bodyMat.cols, bodyMat.rows), 0, 0, cv::INTER_AREA);
+        cv::resize(targetResized, targetForTune, cv::Size(initialMat.cols, initialMat.rows), 0, 0, cv::INTER_AREA);
 
         // Create geos task with target
         cv::UMat targetUMat;
         targetForTune.copyTo(targetUMat);
         pqtr::Hold<geos::Task> geosTask = geos::make(targetUMat);
 
-        // Compute baseline loss
-        cv::UMat bodyUMat;
-        bodyMat.copyTo(bodyUMat);
-        geos::Data baseline = geosTask->diff(bodyUMat);
-        std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
-                  << baseline.spectral << " (" << std::setprecision(2)
-                  << (baseline.spectral * 100) << "%)" << std::endl;
+        // Note: Baseline loss computed AFTER link setup (with base curve)
+        // to show accurate starting point for optimization
+        cv::Mat bodyMat; // Will be captured after link setup
 
         // Progress callback (shared by all modes)
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
@@ -268,7 +264,14 @@ int main(int argc, char** argv)
             std::cout << "\n[FULL] Creating single holistic link (45 dials)..." << std::endl;
             pipe::Body::Link& fullLink = body.add("full");
 
-            // Initialize all dials to neutral (0.5)
+            // Apply base curve from RAW decoder
+            if (head->hasBaseCurve())
+            {
+                fullLink.baseCurve().setCurve(head->baseCurve());
+                std::cout << "[FULL] Base curve applied from RAW decoder" << std::endl;
+            }
+
+            // Initialize all dials to neutral (0.5) FIRST
             fullLink.colorCorrection().exposure().set(0.5f);
             fullLink.colorCorrection().whiteBalance().temperature(0.5f);
             fullLink.colorCorrection().whiteBalance().tint(0.5f);
@@ -282,6 +285,16 @@ int main(int argc, char** argv)
             fullLink.globalColor().vibrance().set(0.5f);
             fullLink.globalColor().saturation().set(0.5f);
             fullLink.globalColor().colourDensity().set(0.5f);
+
+            // NOW capture baseline (after base curve AND neutral dials)
+            pipe::View baselineView = body.view();
+            baselineView.copyTo(bodyMat);
+            cv::UMat bodyUMat;
+            bodyMat.copyTo(bodyUMat);
+            geos::Data baseline = geosTask->diff(bodyUMat);
+            std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
+                      << baseline.spectral << " (" << std::setprecision(2)
+                      << (baseline.spectral * 100) << "%)" << std::endl;
 
             std::cout << "[FULL] Optimizing all 45 dials holistically..." << std::endl;
 
@@ -319,7 +332,14 @@ int main(int argc, char** argv)
             std::cout << "\n[LINEAR] Creating scene-referred link..." << std::endl;
             pipe::Body::Link& linearLink = body.add("linear");
 
-            // Initialize all dials to neutral (0.5)
+            // Apply base curve from RAW decoder (on first link only)
+            if (head->hasBaseCurve())
+            {
+                linearLink.baseCurve().setCurve(head->baseCurve());
+                std::cout << "[LINEAR] Base curve applied from RAW decoder" << std::endl;
+            }
+
+            // Initialize all dials to neutral (0.5) FIRST
             linearLink.colorCorrection().exposure().set(0.5f);
             linearLink.colorCorrection().whiteBalance().temperature(0.5f);
             linearLink.colorCorrection().whiteBalance().tint(0.5f);
@@ -333,6 +353,16 @@ int main(int argc, char** argv)
             linearLink.globalColor().vibrance().set(0.5f);
             linearLink.globalColor().saturation().set(0.5f);
             linearLink.globalColor().colourDensity().set(0.5f);
+
+            // NOW capture baseline (after base curve AND neutral dials)
+            pipe::View baselineView = body.view();
+            baselineView.copyTo(bodyMat);
+            cv::UMat bodyUMat;
+            bodyMat.copyTo(bodyUMat);
+            geos::Data baseline = geosTask->diff(bodyUMat);
+            std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
+                      << baseline.spectral << " (" << std::setprecision(2)
+                      << (baseline.spectral * 100) << "%)" << std::endl;
 
             std::cout << "[LINEAR] Optimizing scene-referred dials (exposure, WB, clipping)..." << std::endl;
 

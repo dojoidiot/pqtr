@@ -1,8 +1,55 @@
 # LABS TLDR
 
-## System Overview
+## Core Insight: Photographers Select Based on Style
 
-We have **45 dials** that edit image appearance:
+Photographers don't see flat RAW. They see the camera's styled preview:
+
+1. **Compose** while looking at LCD (with picture style applied)
+2. **Expose** based on what they see (styled histogram, styled highlights)
+3. **Select** keepers based on that appearance
+4. **Edit** as adjustments TO what they chose, not FROM scratch
+
+**The camera JPEG isn't "a reference" - it's the photographer's intent.**
+
+This drives the entire architecture: **Style first, then tweaks.**
+
+---
+
+## Two-Layer Architecture: Style + Tweaks
+
+The pipeline separates **style** (automatic, from reference) from **tweaks** (per-image adjustments):
+
+```
+Reference Image (camera JPEG or edited photo)
+         ↓
+    [RAWS extracts style transforms]
+         ↓
+    Color Matrix (3x3) + Base Curve (1D×3)
+         ↓
+    [Style applied - already close to reference]
+         ↓
+    45 Dials (fine-tune per-image)
+         ↓
+    Output
+```
+
+**Key insight**: When matching camera JPEGs, dials converge to neutral (0.5) because the style transforms already capture the look. When matching edited photos, dials will deviate to capture the photographer's creative choices.
+
+## Style Transforms (Automatic)
+
+Extracted by RAWS from RAW→reference comparison:
+
+| Transform | Purpose | Captures |
+|-----------|---------|----------|
+| **Color Matrix (3x3)** | Cross-channel color | Hue rotation, color grading |
+| **Base Curve (1D×3)** | Per-channel tone | Contrast, brightness, channel balance |
+
+These are **deterministic** - same camera + style = same transforms.
+
+## Tweaks (45 Dials)
+
+For per-image adjustments on top of the style:
+
 - 3 color correction (exposure, temperature, tint)
 - 7 tone mapping (contrast, highlights, shadows, toe, shoulder, black, white)
 - 3 global color (vibrance, saturation, density)
@@ -10,78 +57,68 @@ We have **45 dials** that edit image appearance:
 - 24 selective color (8 hues × 3 HSL)
 - 4 detail (sharpen amount/radius, denoise luma/chroma)
 
-Processing is split into:
-- **Scene-linear link** (5 dials): exposure, WB, clipping - physics-based
-- **Display link** (36 dials + 17³ LUT): tone curves, color grading - perceptual
+## Feature Space (23D)
 
-## Feature Space (19D)
-
-Images are reduced to a **19-dimensional feature vector**:
+Images are compared via a **23-dimensional feature vector**:
 
 ```
-[0-2]   σ₁, σ₂, σ₃       # SVD singular values (energy distribution)
-[3]     μ_L               # Mean luminance (brightness)
-[4]     μ_C               # Mean chroma (saturation)
-[5]     std_L             # Luminance std (CONTRAST - critical)
-[6]     std_C             # Chroma std (saturation spread)
-[7]     skew_L            # Luminance skewness (high-key vs low-key)
-[8-9]   cov_LC, cov_HC    # Correlations (color harmony)
-[10-11] μ_a, μ_b          # Lab a*/b* means (COLOR CAST - critical)
-[12-15] L_p10, L_p25, L_p75, L_p90  # Luminance percentiles (TONE CURVE)
-[16-17] C_p50, C_p90      # Chroma percentiles (saturation level)
-[18]    C_shadow          # Shadow chroma (preserve color in darks)
+[0-2]   σ₁, σ₂, σ₃           # SVD singular values
+[3-4]   μ_L, μ_C             # Mean luminance, chroma
+[5-6]   std_L, std_C         # Contrast, saturation spread
+[7]     skew_L               # Tone asymmetry
+[8-9]   cov_LC, cov_HC       # Correlations
+[10-11] μ_a, μ_b             # Global color cast
+[12-15] L_p10..L_p90         # Tone curve percentiles
+[16-17] C_p50, C_p90         # Saturation percentiles
+[18]    C_shadow             # Shadow chroma
+[19-20] a_shadow, b_shadow   # Shadow color (split tone signal)
+[21-22] a_highlight, b_highlight  # Highlight color
 ```
 
-## Loss Function
+## Current Results (2024-12-01)
 
-**Weighted L2 loss** (not geodesic):
+With base curve + baseline guard:
+
+| Baseline Range | Count | Final |
+|----------------|-------|-------|
+| 3-5% | 3 | Same (guard preserves) |
+| 5-13% | 6 | Improved |
+| 35% | 1 | 16% (DSC01531 outlier) |
+
+**Baseline guard:** Optimizer never degrades quality. If combined loss improves but spectral worsens, neutral dials are restored.
+
+**DSC01531 outlier:** Complex cross-channel colors (saturated greens/reds) that per-channel curves can't capture. Needs color matrix estimation.
+
+## Architecture
 
 ```
-Loss = Σ weights[i] × (feature[i] - target[i])²
+RAWS:
+  1. Decode RAW → scene-linear data
+  2. Extract embedded JPEG → preview
+  3. Estimate colorMatrix[9] from data→preview (cross-channel)
+  4. Estimate baseCurve[768] from data→preview (BGR × 256)
+  5. Return {data, preview, colorMatrix, baseCurve}
+
+pipe::Link:
+  colorCorrection → colorMatrix → baseCurve → toneMapping → ...
 ```
 
-Weights are trained via batch analysis. Critical features (std_L, percentiles, color cast) have high weights (5.0).
+## Use Cases
 
-## Optimizers
+**Camera JPEG matching** (current):
+- Style = camera's picture style (Standard, Vivid, etc.)
+- Dials ≈ 0.5 (neutral) - style does all the work
 
-| Optimizer | Strategy | Use Case |
-|-----------|----------|----------|
-| **SPSA** | Gradient-free, phased exploration | Default, builds covariance |
-| **ACEO** | CMA-ES eigenspace from prior | Fast when covariance known |
-| **HYBRID** | ACEO direction → SPSA polish | Best of both |
+**Photographer style matching** (future):
+- Style = base transforms learned from edited examples
+- Dials = creative adjustments the photographer made
+- Can apply same style to new images
 
-## Trained Artifacts
+## Key Files
 
 | File | Purpose |
 |------|---------|
-| `etc/cnst.json` | Feature weights (19 values) |
-| `etc/prms.json` | SPSA phase params (a0, c0 per block) |
-| `etc/cvar.json` | 45×45 covariance matrix for ACEO |
-
-## Current Status
-
-**Discovery:** The "washed out" problem is a pipeline capability gap, not optimizer issue.
-
-```
-Target std_L:   0.2244 (camera JPEG contrast)
-Max achievable: 0.1303 (our dials at extremes)
-Gap:            42% unreachable
-```
-
-**Root cause:** Camera JPEGs apply a base tone curve (per picture style) BEFORE adjustments. We start from flat baseline.
-
-**Next step:** Learn per-camera base curves to expand achievable range. See `doc/base_curve.md`.
-
-## Training Tools
-
-```bash
-make -f Makefile.tune bounds         # Check achievable feature bounds
-make -f Makefile.tune sweep          # Single-dial loss landscape
-make -f Makefile.tune train-greedy   # Worst-case analysis
-make -f Makefile.tune train-prms     # Phase param grid search
-make -f Makefile.tune batch-tune     # Run tune on all images
-```
-
-## Key Insight
-
-The base curve represents **photographer intent** - the camera preview is what they SAW when composing and what they EXPECT as editing baseline. Matching it restores their creative intent.
+| `RAWS/src/main/raws.cpp` | Style extraction |
+| `LABS/src/main/part/pipe/mods/color_matrix.cpp` | Matrix application |
+| `LABS/src/main/part/pipe/mods/base_curve.cpp` | Curve application |
+| `etc/cnst.json` | Feature weights (23 values) |

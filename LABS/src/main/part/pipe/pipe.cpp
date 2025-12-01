@@ -165,14 +165,33 @@ class HeadImpl : public Head
     DataImpl m_working;
     std::unique_ptr<BodyImpl> m_body;
     int m_current_working_size = 0;
+    float m_baseCurve[CURVE_SIZE];
+    bool m_hasBaseCurve = false;
 
 public:
-    HeadImpl(Info dataInfo, View dataView, Info viewInfo, View viewImage)
+    HeadImpl(Info dataInfo, View dataView, Info viewInfo, View viewImage,
+             const float* baseCurve, bool hasBaseCurve)
         : m_data(std::move(dataInfo), std::move(dataView))
-        , m_view(std::move(viewInfo), std::move(viewImage)) {}
+        , m_view(std::move(viewInfo), std::move(viewImage))
+        , m_hasBaseCurve(hasBaseCurve)
+    {
+        if (baseCurve && hasBaseCurve)
+        {
+            for (int i = 0; i < CURVE_SIZE; i++)
+                m_baseCurve[i] = baseCurve[i];
+        }
+        else
+        {
+            // Identity curve
+            for (int i = 0; i < CURVE_SIZE; i++)
+                m_baseCurve[i] = i / 255.0f;
+        }
+    }
 
     Data& data() override { return m_data; }
     Data& view() override { return m_view; }
+    const float* baseCurve() const override { return m_baseCurve; }
+    bool hasBaseCurve() const override { return m_hasBaseCurve; }
 
     Body& body(int working_size) override
     {
@@ -222,7 +241,8 @@ public:
 
         return pqtr::Hold<Head>(new HeadImpl(
             std::move(raw.dataInfo), std::move(raw.data),
-            std::move(raw.previewInfo), std::move(raw.preview)));
+            std::move(raw.previewInfo), std::move(raw.preview),
+            raw.baseCurve, raw.hasBaseCurve));
     }
 };
 

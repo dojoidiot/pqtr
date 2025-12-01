@@ -43,6 +43,7 @@ PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp \
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
             $(SRC_DIR)/part/pipe/mods/exposure.cpp \
             $(SRC_DIR)/part/pipe/mods/white_balance.cpp \
+            $(SRC_DIR)/part/pipe/mods/base_curve.cpp \
             $(SRC_DIR)/part/pipe/mods/tone_map.cpp \
             $(SRC_DIR)/part/pipe/mods/global_color.cpp \
             $(SRC_DIR)/part/pipe/mods/selective_color.cpp \
@@ -68,6 +69,7 @@ PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o \
 MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/exposure.o \
             $(OBJ_DIR)/mods/white_balance.o \
+            $(OBJ_DIR)/mods/base_curve.o \
             $(OBJ_DIR)/mods/tone_map.o \
             $(OBJ_DIR)/mods/global_color.o \
             $(OBJ_DIR)/mods/selective_color.o \

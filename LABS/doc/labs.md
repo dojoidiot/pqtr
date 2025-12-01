@@ -125,7 +125,7 @@ data::link::toJson(result.link, "sunset/tune.json");
 ```
 
 **The roles:**
-- **Style** (45 dials): Automated via SPSA/ACEO/HYBRID + 12D spectral loss (~5min)
+- **Style** (45 dials): Automated via SPSA/ACEO/HYBRID + 23D spectral loss (~5min)
 - **Geometry** (6 dials): User-controlled per image
 
 ### Pattern 3: Real-Time Dial Tuning (`pipe` + `diff`)
@@ -178,7 +178,7 @@ The `LABS` system targets specific performance metrics to ensure efficient opera
 
 *Full Optimization (45 style dials)*
 - 45 dials optimized via SPSA/ACEO/HYBRID
-- 12D feature vector (spectral + color cast)
+- 23D feature vector (spectral + color cast + percentiles + split tone)
 - ~60ms per iteration (2 pipe evaluations + spectral diff)
 - Prior covariance from `etc/aceo_full.json`
 - **Total**: ~5 minutes
