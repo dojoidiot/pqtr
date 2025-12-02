@@ -36,16 +36,27 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
     cv::Mat data_small;
     cv::resize(data_cpu, data_small, preview_cpu.size(), 0, 0, cv::INTER_AREA);
 
-    // Convert data to 8-bit gamma-encoded for comparison
+    // Convert data to 8-bit sRGB-encoded for comparison
     cv::Mat data_clamped;
     cv::max(data_small, 0.0f, data_clamped);
     cv::min(data_clamped, 1.0f, data_clamped);
 
-    cv::Mat data_gamma;
-    cv::pow(data_clamped, 1.0f / 2.2f, data_gamma);
+    // Apply sRGB transfer function (matches toDisplayView in LABS)
+    cv::Mat data_srgb = data_clamped.clone();
+    for (int y = 0; y < data_srgb.rows; y++)
+    {
+        float* ptr = data_srgb.ptr<float>(y);
+        for (int x = 0; x < data_srgb.cols * 3; x++)
+        {
+            float v = ptr[x];
+            ptr[x] = (v <= 0.0031308f)
+                ? v * 12.92f
+                : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+        }
+    }
 
     cv::Mat data_8u;
-    data_gamma.convertTo(data_8u, CV_8UC3, 255.0);
+    data_srgb.convertTo(data_8u, CV_8UC3, 255.0);
 
     // Per-channel curve estimation (BGR order in OpenCV)
     // curve layout: [B0..B255, G0..G255, R0..R255] to match OpenCV BGR
@@ -60,11 +71,8 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
         count[c].resize(256, 0.0);
     }
 
-    // Chroma threshold for "neutral" pixels (in 0-255 space)
-    // A pixel is neutral if max(R,G,B) - min(R,G,B) < threshold
-    // 30 ≈ 12% of range - allows slight color cast but excludes saturated colors
-    const int chroma_threshold = 30;
-
+    // Use ALL pixels for curve estimation
+    // The per-channel approach naturally averages out hue-dependent variations
     for (int y = 0; y < data_8u.rows; y++)
     {
         const uchar* d_ptr = data_8u.ptr<uchar>(y);
@@ -72,24 +80,11 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
 
         for (int x = 0; x < data_8u.cols; x++)
         {
-            int b = d_ptr[x * 3 + 0];
-            int g = d_ptr[x * 3 + 1];
-            int r = d_ptr[x * 3 + 2];
-
-            // Compute chroma as max - min (simple saturation measure)
-            int max_val = std::max({b, g, r});
-            int min_val = std::min({b, g, r});
-            int chroma = max_val - min_val;
-
-            // Only use near-neutral pixels for curve estimation
-            if (chroma < chroma_threshold)
+            for (int c = 0; c < 3; c++)  // B, G, R
             {
-                for (int c = 0; c < 3; c++)  // B, G, R
-                {
-                    int bin = d_ptr[x * 3 + c];
-                    sum[c][bin] += p_ptr[x * 3 + c];
-                    count[c][bin] += 1.0;
-                }
+                int bin = d_ptr[x * 3 + c];
+                sum[c][bin] += p_ptr[x * 3 + c];
+                count[c][bin] += 1.0;
             }
         }
     }
@@ -120,6 +115,10 @@ static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, flo
             smoothed[i] = 0.25f * curve[c * 256 + i - 1] + 0.5f * curve[c * 256 + i] + 0.25f * curve[c * 256 + i + 1];
         for (int i = 0; i < 256; i++)
             curve[c * 256 + i] = smoothed[i];
+
+        // Force endpoints: black→black, white→white (preserve neutrals)
+        curve[c * 256 + 0] = 0.0f;
+        curve[c * 256 + 255] = 1.0f;
     }
 }
 

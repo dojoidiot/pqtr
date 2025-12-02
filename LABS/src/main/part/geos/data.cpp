@@ -223,6 +223,21 @@ std::string toJson(pipe::Body::Link& link)
     ss << std::fixed << std::setprecision(4);
     ss << "{\n";
     ss << "  \"name\": \"" << link.name() << "\",\n";
+
+    // Polynomial coefficients (Camera Math) - if active
+    if (link.polyColor().isActive())
+    {
+        ss << "  \"poly_coeffs\": [";
+        const float* coeffs = link.polyColor().coeffs();
+        for (int i = 0; i < 30; i++)
+        {
+            if (i > 0) ss << ", ";
+            ss << std::setprecision(6) << coeffs[i];
+        }
+        ss << "],\n";
+        ss << std::setprecision(4);
+    }
+
     ss << "  \"modules\": {\n";
 
     // Color Correction
@@ -314,6 +329,30 @@ static float parseFloat(const std::string& json, const std::string& key, float d
 
 bool fromJson(pipe::Body::Link& link, const std::string& json)
 {
+    // Polynomial coefficients (Camera Math) - if present
+    size_t polyPos = json.find("\"poly_coeffs\"");
+    if (polyPos != std::string::npos)
+    {
+        size_t arrStart = json.find('[', polyPos);
+        size_t arrEnd = json.find(']', arrStart);
+        if (arrStart != std::string::npos && arrEnd != std::string::npos)
+        {
+            std::string arrStr = json.substr(arrStart + 1, arrEnd - arrStart - 1);
+            std::istringstream iss(arrStr);
+            float coeffs[30];
+            int count = 0;
+            std::string token;
+            while (std::getline(iss, token, ',') && count < 30)
+            {
+                coeffs[count++] = std::stof(token);
+            }
+            if (count == 30)
+            {
+                link.polyColor().setCoeffs(coeffs);
+            }
+        }
+    }
+
     // Color Correction
     link.colorCorrection().exposure().set(parseFloat(json, "exposure"));
     link.colorCorrection().whiteBalance().temperature(parseFloat(json, "temperature"));

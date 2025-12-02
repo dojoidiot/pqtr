@@ -121,29 +121,27 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 **Key file:** `etc/jacob.json` (45×23 matrix with dial/feature names)
 
-## Current Results (2024-12-01)
+## Current Results (2024-12-02)
 
-### Camera Math Results
+### Three-Phase Results
 
-| Image | DRO Level | Polynomial Error | Status |
-|-------|-----------|-----------------|--------|
-| DSC00159 | 0 (reduced) | **3.1%** | ✅ Camera Math sufficient |
-| DSC00144 | 3 | **3.7%** | ✅ Camera Math sufficient |
-| DSC01531 | 3 (heavy DRO) | **15.1%** | ⚠️ Needs Camera Vibe |
+| Image | After Poly | After Dials | Notes |
+|-------|-----------|-------------|-------|
+| DSC00202 | **2.6%** | **3.2%** | ✅ Excellent - green foliage, neutral wood |
+| DSC00144 | **12.8%** | **13.7%** | ⚠️ Higher error - different characteristics |
+| DSC01531 | **8.1%** | **7.9%** | ✅ Good - foliage, better than expected |
 
-### Camera Vibe
+### Key Finding
 
-For DRO-heavy scenes (foliage, complex shadows):
-- Camera Math hits ~15% floor due to spatial effects
-- Camera Vibe optimizes dials to close the gap
-- Target: embedded camera preview
+The polynomial transform (Camera Math) provides the heavy lifting:
+- DSC00202: 2.6% error from polynomial alone
+- Visual output shows proper greens, neutral wood (no more pink cast)
 
-### User Vibe
+Dials (Camera Vibe) provide minor refinements - the bulk of the work is done by the deterministic polynomial.
 
-For matching photographer edits:
-- Same 45 dials, target = edited reference
-- Captures creative intent beyond camera matching
-- Exportable as .pipe.json for batch application
+### Jacobian Retraining
+
+The `etc/jacob.json` was trained with different baseline assumptions. Consider retraining for optimal convergence with the new polynomial-first architecture.
 
 ## Why DRO-Heavy Scenes Hit 15% Floor
 

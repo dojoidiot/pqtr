@@ -1,19 +1,13 @@
 // labs.cpp
-// Pipe runner: Processes RAW through pipeline with tune settings
-//
-// WORKFLOW:
-//   tune <source.ARW> <target> --save-area dir   → vibe.json
-//   labs <source.ARW> --tune vibe.json --output out.png
-//   labs ... --debug                             → saves pipeline stages
+// Applies a vibe to a RAW image
 //
 // Usage:
 //   labs <source.ARW> --output <image.png> [--tune <vibe.json>] [--debug]
 //
-// Options:
-//   --output <image.png>    Output file (required)
-//   --tune <vibe.json>      Style settings from tune
-//   --size <pixels>         Max output dimension (default: full res)
-//   --debug                 Save intermediate pipeline stages
+// Debug outputs (in same dir as output):
+//   head.png - reference (camera preview)
+//   tail.png - pipeline output
+//   diff.png - difference (amplified 5x)
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -23,6 +17,7 @@
 #include <iostream>
 #include <fstream>
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 void printUsage(const char* prog)
 {
@@ -31,23 +26,7 @@ void printUsage(const char* prog)
     std::cerr << "  --output <image.png>    Output file (required)\n";
     std::cerr << "  --tune <vibe.json>      Style settings from tune\n";
     std::cerr << "  --size <pixels>         Max output dimension (default: full res)\n";
-    std::cerr << "  --debug                 Save intermediate pipeline stages\n";
-}
-
-// Save debug image helper
-void saveDebug(const std::string& basePath, const std::string& stage, pipe::View view)
-{
-    // Convert to 8-bit for saving
-    cv::Mat cpu;
-    view.copyTo(cpu);
-
-    // Clamp and convert to 8-bit
-    cv::Mat out;
-    cpu.convertTo(out, CV_8UC3, 255.0);
-
-    std::string path = basePath + "_" + stage + ".png";
-    cv::imwrite(path, out);
-    std::cout << "  [debug] " << stage << " → " << path << std::endl;
+    std::cerr << "  --debug                 Save head.png, tail.png, diff.png\n";
 }
 
 int main(int argc, char** argv)
@@ -90,10 +69,11 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Debug base path (strip extension from output)
-    std::string debugBase = outputPath;
-    size_t dotPos = debugBase.rfind('.');
-    if (dotPos != std::string::npos) debugBase = debugBase.substr(0, dotPos);
+    // Debug directory (same as output)
+    std::string debugDir = outputPath;
+    size_t slashPos = debugDir.rfind('/');
+    if (slashPos != std::string::npos) debugDir = debugDir.substr(0, slashPos);
+    else debugDir = ".";
 
     try
     {
@@ -102,7 +82,6 @@ int main(int argc, char** argv)
         std::cout << "Output: " << outputPath << std::endl;
         if (!tunePath.empty()) std::cout << "Tune: " << tunePath << std::endl;
         if (maxSize > 0) std::cout << "Size: " << maxSize << "px" << std::endl;
-        if (debug) std::cout << "Debug: ON" << std::endl;
 
         // Create pipe and load RAW
         pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
@@ -120,65 +99,63 @@ int main(int argc, char** argv)
         std::cout << "  Camera: " << info["camera_model"] << std::endl;
         std::cout << "  BaseCurve: " << (head->hasBaseCurve() ? "yes" : "no") << std::endl;
 
-        // Debug: save flat (scene-linear) data
-        if (debug)
-        {
-            saveDebug(debugBase, "0_flat", head->data().view());
-            saveDebug(debugBase, "0_preview", head->view().view());
-        }
-
         // Create body
         std::cout << "\n[BODY] Processing..." << std::endl;
         pipe::Body& body = head->body(maxSize);
 
-        // Create links (two-link architecture: linear + display)
-        pipe::Body::Link& linearLink = body.add("linear");
-        pipe::Body::Link& displayLink = body.add("display");
-        std::vector<pipe::Body::Link*> links = {&linearLink, &displayLink};
-
-        // Always apply base curve from camera
-        if (head->hasBaseCurve())
-        {
-            linearLink.baseCurve().setCurve(head->baseCurve());
-            std::cout << "  Applied base curve" << std::endl;
-        }
+        std::vector<pipe::Body::Link*> links;
 
         // Load tune settings if provided
         if (!tunePath.empty())
         {
-            std::ifstream check(tunePath);
-            if (!check.good())
+            // Read tune file to count links
+            std::ifstream file(tunePath);
+            if (!file.good())
             {
                 throw std::runtime_error("Tune file not found: " + tunePath);
             }
-            check.close();
+            std::string json((std::istreambuf_iterator<char>(file)),
+                              std::istreambuf_iterator<char>());
+            file.close();
 
+            // Count links in JSON (look for "name": patterns)
+            std::vector<std::string> linkNames;
+            size_t pos = 0;
+            while ((pos = json.find("\"name\":", pos)) != std::string::npos)
+            {
+                size_t start = json.find("\"", pos + 7);
+                size_t end = json.find("\"", start + 1);
+                if (start != std::string::npos && end != std::string::npos)
+                {
+                    linkNames.push_back(json.substr(start + 1, end - start - 1));
+                }
+                pos = end;
+            }
+
+            // Create links
+            for (const auto& name : linkNames)
+            {
+                pipe::Body::Link& link = body.add(name);
+                links.push_back(&link);
+            }
+
+            // BaseCurve is baked into tune.json if needed
+            // Don't auto-apply here
+
+            // Load settings
             if (!data::links::load(links, tunePath))
             {
                 throw std::runtime_error("Failed to load tune: " + tunePath);
             }
-            std::cout << "  Applied tune settings" << std::endl;
-
-            if (displayLink.lutCurve().isEstimated())
-            {
-                std::cout << "  Includes 3D LUT" << std::endl;
-            }
+            std::cout << "  Applied " << links.size() << " link(s)" << std::endl;
         }
         else
         {
-            std::cout << "  No tune (baseline)" << std::endl;
-        }
-
-        // Debug: save after each link
-        if (debug)
-        {
-            // Get working data and apply links one at a time
-            pipe::View working;
-            body.data().view().copyTo(working);
-
-            // After base curve (linear link partial)
-            // Note: can't easily get intermediate - save full link results
-            saveDebug(debugBase, "1_body", body.view(maxSize));
+            // No tune - create single baseline link
+            // Skip estimated baseCurve - it's unreliable
+            pipe::Body::Link& link = body.add("baseline");
+            links.push_back(&link);
+            std::cout << "  No tune (flat baseline)" << std::endl;
         }
 
         // Save output
@@ -187,9 +164,38 @@ int main(int argc, char** argv)
         {
             throw std::runtime_error("Failed to save: " + outputPath);
         }
+        std::cout << "  " << outputPath << std::endl;
 
-        std::cout << "  Saved: " << outputPath << std::endl;
-        std::cout << "\n[OK] Done" << std::endl;
+        // Debug: head.png, tail.png, diff.png
+        if (debug)
+        {
+            // Get reference (camera preview) - already 8-bit BGR
+            cv::Mat head8;
+            head->view().view().copyTo(head8);
+
+            // Get tail (pipeline output) - already 8-bit from toDisplayView
+            cv::Mat tail8;
+            body.view(maxSize).copyTo(tail8);
+
+            // Resize head to match tail dimensions
+            cv::Mat headResized;
+            cv::resize(head8, headResized, cv::Size(tail8.cols, tail8.rows), 0, 0, cv::INTER_AREA);
+
+            // Compute diff (amplified 5x)
+            cv::Mat diff8;
+            cv::absdiff(headResized, tail8, diff8);
+            diff8.convertTo(diff8, -1, 5.0);
+
+            // Save
+            cv::imwrite(debugDir + "/head.png", headResized);
+            cv::imwrite(debugDir + "/tail.png", tail8);
+            cv::imwrite(debugDir + "/diff.png", diff8);
+            std::cout << "  " << debugDir << "/head.png (reference)" << std::endl;
+            std::cout << "  " << debugDir << "/tail.png (output)" << std::endl;
+            std::cout << "  " << debugDir << "/diff.png (difference x5)" << std::endl;
+        }
+
+        std::cout << "\n[OK]" << std::endl;
         return 0;
     }
     catch (const std::exception& e)

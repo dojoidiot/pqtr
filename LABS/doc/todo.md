@@ -38,11 +38,11 @@
   - **Finding**: BaseCurve (768 params) achieves 12.63% baseline vs PolyColor (30 params) at 13.51%
   - BaseCurve remains primary transform; PolyColor available for experimentation
 
-## Current: Simplified Workflow (2024-12-02)
+## Current: Three-Phase Architecture (2024-12-02)
 
 ```bash
-# 1. Optimize dials to match a reference
-tune photo.ARW reference.jpg --save-area output/
+# 1. Run tune (creates tune.json with poly_coeffs + dials)
+tune photo.ARW preview --save-area output/
 
 # 2. Apply the vibe
 labs photo.ARW --tune output/tune.json --output photo.png
@@ -52,21 +52,31 @@ labs photo.ARW --tune output/tune.json --output photo.png --debug
 ```
 
 Debug outputs:
-- `photo_0_flat.png` - Scene-linear RAW (before processing)
-- `photo_0_preview.png` - Camera's embedded JPEG
-- `photo_1_body.png` - After all links applied
+- `head.png` - Camera preview (reference)
+- `tail.png` - Pipeline output
+- `diff.png` - Difference (amplified 5x)
 
 ### Recent Completions
+
+- [x] **Three-phase architecture** (2024-12-02)
+  - Phase 0: Camera Math - polynomial transform from RAWS
+  - Phase 1: Camera Vibe - optimize 45 dials to match preview
+  - Phase 2: User Vibe - optimize dials to match user edit (if target != preview)
+  - Results: DSC00202 achieves 2.6% error after poly, 3.2% final
+
+- [x] **Polynomial serialization** (2024-12-02)
+  - `poly_coeffs[30]` saved to tune.json
+  - Loaded and applied by labs.cpp
+  - `data.cpp` handles JSON serialization
 
 - [x] **Simplified CLI** (2024-12-02)
   - Removed `--camera-vibe` switch from labs (internal detail)
   - Added `--debug` to labs for pipeline artifact inspection
-  - Updated README.md and tldr.md with workflow
+  - tune outputs three-phase results with clear metrics
 
-- [x] **PolyColor pipeline integration** (2024-12-02)
-  - BaseCurve (768 params) achieves 12.63% baseline
-  - PolyColor (30 params) achieves 13.51% baseline
-  - BaseCurve is primary; PolyColor available for experimentation
+### Pending
+
+- [ ] **Jacobian retraining** - Current jacob.json was trained with flat baseline; consider retraining with poly-first architecture for optimal convergence
 
 ### Deferred
 

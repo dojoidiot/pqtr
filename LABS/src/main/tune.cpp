@@ -1,44 +1,17 @@
 // tune.cpp
-// Headless tool: Automatically finds optimal pipe dial values to match a target image
-//
-// WORKFLOW:
-//   tune <source.ARW> <target.png> --save-area <dir>
-//   → Loads RAW through HEAD
-//   → Uses target.png as reference (or embedded preview if target is "preview")
-//   → Runs GEOS + EDGE optimization
-//   → Saves optimized Link settings to <dir>/tune.json
+// Three-phase vibe creation:
+//   Phase 0 (Camera Math): Apply polynomial transform from RAWS (deterministic)
+//   Phase 1 (Camera Vibe): Optimize dials to match camera preview (on top of poly)
+//   Phase 2 (User Vibe): Optimize dials to match user's edit (on top of camera vibe)
 //
 // Usage:
-//   tune <source.ARW> <target.png> [options]
-//   tune <source.ARW> preview [options]      # Use embedded camera preview as target
+//   tune <source.ARW> <target.png> --save-area <dir>
 //
-// Options:
-//   --save-area <dir>       Output directory for tune.json (required)
-//   --threshold <value>     Stop when spectral loss below this (default: 0.005 = 0.5%)
-//   --size <pixels>         Working size for optimization (default: 1080)
-//   --mode <mode>           Optimization mode: blockwise, full35d, linear (default: blockwise)
-//   --optimizer <algo>      Optimizer: spsa, aceo, hybrid (default: spsa)
-//   --full                  Full ACEO mode: single-pass 45-dial optimization (no LUT, no two-link)
-//   --camera-vibe           Camera Vibe mode: target=preview, saves camera.pipe.json
-//   --skip-lut              Skip 3D LUT estimation (pure dial optimization)
-//   --logs                  Verbose progress output (dome.r, edge.ratio)
-//   --fine                  Save intermediate images + meta.json
-//   --fine-area <dir>       Directory for --fine outputs (default: --save-area)
+// If target is "preview", only Phase 0+1 run (camera math + camera vibe).
+// If target is an image file, all three phases run.
 //
-// ACEO Covariance Options:
-//   --with-cov <path>       Load prior covariance to blend with
-//   --save-cov <path>       Save accumulated covariance after run
-//
-// Examples:
-//   tune photo.ARW preview --save-area ./out                # Match camera JPEG
-//   tune photo.ARW reference.png --save-area ./out          # Match external reference
-//   tune photo.ARW preview --save-area ./out --mode linear  # Linear ops only
-//   tune photo.ARW preview --save-area ./out --logs --fine  # Verbose + intermediates
-//
-// ACEO Covariance Chaining:
-//   tune img1.ARW preview --save-area ./out --optimizer aceo --save-cov tmp/cov1.json
-//   tune img2.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov1.json --save-cov tmp/cov2.json
-//   tune img3.ARW preview --save-area ./out --optimizer aceo --with-cov tmp/cov2.json --save-cov etc/aceo_full.json
+// Debug with labs:
+//   labs photo.ARW --tune ./out/tune.json --output photo.png --debug
 
 #include <tool.hpp>
 #include <sink.hpp>
@@ -49,28 +22,32 @@
 #include <iostream>
 #include <iomanip>
 #include <cstring>
+#include <sstream>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
+// Parse comma-separated poly_coeffs from info string
+static bool parsePolyCoeffs(const std::string& str, float* coeffs, int count)
+{
+    std::istringstream iss(str);
+    std::string token;
+    int i = 0;
+    while (std::getline(iss, token, ',') && i < count)
+    {
+        try { coeffs[i++] = std::stof(token); }
+        catch (...) { return false; }
+    }
+    return i == count;
+}
+
 void printUsage(const char* prog)
 {
-    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> --save-area <dir> [options]\n\n";
-    std::cerr << "Options:\n";
-    std::cerr << "  --save-area <dir>       Output directory for tune.json (required)\n";
-    std::cerr << "  --threshold <value>     Stop when spectral loss below (default: 0.005)\n";
-    std::cerr << "  --size <pixels>         Working size (default: 1080)\n";
-    std::cerr << "  --mode <mode>           blockwise, full35d, linear (default: blockwise)\n";
-    std::cerr << "  --optimizer <algo>      spsa, aceo (default: spsa)\n";
-    std::cerr << "  --full                  Full 45-dial mode: single-pass, no LUT, no two-link\n";
-    std::cerr << "  --camera-vibe           Camera Vibe: target=preview, output=camera.pipe.json\n";
-    std::cerr << "  --skip-lut              Skip 3D LUT estimation\n";
-    std::cerr << "  --regional              Enable regional refinement (slower, off by default)\n";
-    std::cerr << "  --logs                  Verbose progress (dome.r, edge.ratio)\n";
-    std::cerr << "  --fine                  Save intermediate images + meta.json\n";
-    std::cerr << "  --fine-area <dir>       Directory for --fine outputs (default: --save-area)\n";
-    std::cerr << "\nACEO covariance options:\n";
-    std::cerr << "  --with-cov <path>       Load prior covariance to blend with\n";
-    std::cerr << "  --save-cov <path>       Save accumulated covariance after run\n";
+    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> --save-area <dir>\n\n";
+    std::cerr << "Three-phase optimization:\n";
+    std::cerr << "  Phase 0: Camera Math - apply polynomial transform (deterministic)\n";
+    std::cerr << "  Phase 1: Camera Vibe - match embedded preview (45 dials)\n";
+    std::cerr << "  Phase 2: User Vibe - match target (if not 'preview')\n\n";
+    std::cerr << "Use 'labs --debug' to inspect results.\n";
 }
 
 int main(int argc, char** argv)
@@ -92,49 +69,11 @@ int main(int argc, char** argv)
     std::string sourcePath = argv[1];
     std::string targetPath = argv[2];
     std::string saveArea;
-    std::string fineArea;
-    std::string withCov;   // ACEO: prior covariance path
-    std::string saveCov;   // ACEO: save covariance path
-    float threshold = 0.005f;
-    int workingSize = 1080;
-    geos::Mode mode = geos::Mode::BLOCKWISE;
-    geos::Optimizer optimizer = geos::Optimizer::SPSA;
-    bool skipLut = false;
-    bool skipRegional = true;  // Off by default (faster)
-    bool fullMode = false;     // Full 45-dial single-pass mode
-    bool cameraVibe = false;   // Camera Vibe mode: target=preview, output=camera.pipe.json
-    bool logs = false;
-    bool fine = false;
 
     for (int i = 3; i < argc; i++)
     {
         std::string arg = argv[i];
         if (arg == "--save-area" && i + 1 < argc) saveArea = argv[++i];
-        else if (arg == "--fine-area" && i + 1 < argc) fineArea = argv[++i];
-        else if (arg == "--threshold" && i + 1 < argc) threshold = std::stof(argv[++i]);
-        else if (arg == "--size" && i + 1 < argc) workingSize = std::stoi(argv[++i]);
-        else if (arg == "--skip-lut") skipLut = true;
-        else if (arg == "--regional") skipRegional = false;  // Enable regional refinement
-        else if (arg == "--full") fullMode = true;  // Full 45-dial single-pass mode
-        else if (arg == "--camera-vibe") cameraVibe = true;  // Camera Vibe mode
-        else if (arg == "--logs") logs = true;
-        else if (arg == "--fine") fine = true;
-        else if (arg == "--mode" && i + 1 < argc)
-        {
-            std::string m = argv[++i];
-            if (m == "full35d" || m == "full") mode = geos::Mode::FULL_35D;
-            else if (m == "linear" || m == "lin") mode = geos::Mode::LINEAR_ONLY;
-            else mode = geos::Mode::BLOCKWISE;
-        }
-        else if (arg == "--optimizer" && i + 1 < argc)
-        {
-            std::string o = argv[++i];
-            if (o == "aceo" || o == "ACEO") optimizer = geos::Optimizer::ACEO;
-            else if (o == "hybrid" || o == "HYBRID") optimizer = geos::Optimizer::HYBRID;
-            else optimizer = geos::Optimizer::SPSA;
-        }
-        else if (arg == "--with-cov" && i + 1 < argc) withCov = argv[++i];
-        else if (arg == "--save-cov" && i + 1 < argc) saveCov = argv[++i];
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
@@ -146,39 +85,12 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Default fine-area to save-area
-    if (fineArea.empty()) fineArea = saveArea;
-
-    // Camera Vibe mode: force preview target, imply fullMode
-    if (cameraVibe)
-    {
-        targetPath = "preview";
-        fullMode = true;  // Camera Vibe uses full 45-dial mode
-    }
-
-    // Output filename based on mode
-    std::string outputFilename = cameraVibe ? "camera.pipe.json" : "tune.json";
-
     try
     {
-        const char* modeName = cameraVibe ? "CAMERA_VIBE" :
-                               fullMode ? "FULL_45D" :
-                               (mode == geos::Mode::FULL_35D) ? "FULL_35D" :
-                               (mode == geos::Mode::LINEAR_ONLY) ? "LINEAR_ONLY" : "BLOCKWISE";
-        const char* optimizerName = (optimizer == geos::Optimizer::ACEO) ? "ACEO" : "SPSA";
-
         std::cout << "=== TUNE ===" << std::endl;
         std::cout << "Source: " << sourcePath << std::endl;
-        std::cout << "Target: " << targetPath << (cameraVibe ? " (Camera Vibe)" : "") << std::endl;
-        std::cout << "Save area: " << saveArea << std::endl;
-        std::cout << "Output: " << outputFilename << std::endl;
-        std::cout << "Mode: " << modeName << (fullMode ? " (single-pass, no LUT)" : "") << std::endl;
-        std::cout << "Optimizer: " << optimizerName << std::endl;
-        std::cout << "Working size: " << workingSize << "px" << std::endl;
-        if (!withCov.empty()) std::cout << "With covariance: " << withCov << std::endl;
-        if (!saveCov.empty()) std::cout << "Save covariance: " << saveCov << std::endl;
-        if (logs) std::cout << "Logs: enabled" << std::endl;
-        if (fine) std::cout << "Fine area: " << fineArea << std::endl;
+        std::cout << "Target: " << targetPath << std::endl;
+        std::cout << "Output: " << saveArea << "/tune.json" << std::endl;
 
         // Create pipe and load RAW
         pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
@@ -197,322 +109,214 @@ int main(int argc, char** argv)
         std::cout << "  BaseCurve: " << (head->hasBaseCurve() ? "yes" : "no") << std::endl;
         std::cout << "  PolyCoeffs: " << (info.count("poly_coeffs") ? "yes" : "no") << std::endl;
 
-        // Get target image
-        cv::Mat targetMat;
-        bool usePreview = (targetPath == "preview" || targetPath == "Preview" || targetPath == "PREVIEW");
+        // Check if target is preview-only or external reference
+        bool isPreviewOnly = (targetPath == "preview" || targetPath == "Preview" || targetPath == "PREVIEW");
 
-        if (usePreview)
+        // Get camera preview (always needed for Phase 1)
+        cv::Mat previewMat;
+        head->view().view().copyTo(previewMat);
+
+        // Get user target if not preview-only
+        cv::Mat userTargetMat;
+        if (!isPreviewOnly)
         {
-            std::cout << "\n[TARGET] Using embedded camera preview..." << std::endl;
-            pipe::View previewView = head->view().view();
-            previewView.copyTo(targetMat);
-        }
-        else
-        {
-            std::cout << "\n[TARGET] Loading external reference..." << std::endl;
-            targetMat = cv::imread(targetPath);
-            if (targetMat.empty())
+            userTargetMat = cv::imread(targetPath);
+            if (userTargetMat.empty())
             {
                 throw std::runtime_error("Failed to load target: " + targetPath);
             }
         }
-        std::cout << "  Target size: " << targetMat.cols << "x" << targetMat.rows << std::endl;
 
-        // Resize target to working size
-        cv::Mat targetResized;
-        int maxDim = std::max(targetMat.cols, targetMat.rows);
-        float scale = static_cast<float>(workingSize) / maxDim;
-        cv::resize(targetMat, targetResized, cv::Size(), scale, scale, cv::INTER_AREA);
-        std::cout << "  Resized to: " << targetResized.cols << "x" << targetResized.rows << std::endl;
+        // Working size
+        const int workingSize = 1080;
 
-        // Create body with working size
+        // Create body
         std::cout << "\n[BODY] Creating pipeline..." << std::endl;
         pipe::Body& body = head->body(workingSize);
 
-        // Get body dimensions for exact target match (before links added)
+        // Get body dimensions
         pipe::View initialView = body.view();
         cv::Mat initialMat;
         initialView.copyTo(initialMat);
+        cv::Size bodySize(initialMat.cols, initialMat.rows);
 
-        // Resize target to exactly match body
-        cv::Mat targetForTune;
-        cv::resize(targetResized, targetForTune, cv::Size(initialMat.cols, initialMat.rows), 0, 0, cv::INTER_AREA);
+        // Resize preview to match body
+        cv::Mat previewResized;
+        cv::resize(previewMat, previewResized, bodySize, 0, 0, cv::INTER_AREA);
 
-        // Create geos task with target
-        cv::UMat targetUMat;
-        targetForTune.copyTo(targetUMat);
-        pqtr::Hold<geos::Task> geosTask = geos::make(targetUMat);
-
-        // Note: Baseline loss computed AFTER link setup (with base curve)
-        // to show accurate starting point for optimization
-        cv::Mat bodyMat; // Will be captured after link setup
-
-        // Progress callback (shared by all modes)
+        // Progress callback
         const char* phaseNames[] = {"HUGE", "MIDS", "TINY"};
-        auto progressCallback = [&phaseNames, logs](const geos::Progress& p) {
+        auto progressCallback = [&phaseNames](const geos::Progress& p) {
             if (p.stage == geos::Progress::Stage::GEOS)
             {
                 std::cout << "\r  [" << phaseNames[static_cast<int>(p.phase)] << "] "
                           << std::setw(3) << p.iteration << "/" << p.max_iterations
-                          << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral;
-                if (logs) std::cout << "  r=" << std::setprecision(3) << p.dome.r;
-                std::cout << "     " << std::flush;
+                          << "  loss=" << std::fixed << std::setprecision(4) << p.loss.spectral
+                          << "     " << std::flush;
             }
             else if (p.stage == geos::Progress::Stage::EDGE)
             {
                 std::cout << "\r  [EDGE] "
                           << std::setw(3) << p.iteration << "/" << p.max_iterations
-                          << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency;
-                if (logs) std::cout << "  ratio=" << std::setprecision(3) << p.edge.ratio;
-                std::cout << "     " << std::flush;
+                          << "  freq=" << std::fixed << std::setprecision(4) << p.loss.frequency
+                          << "     " << std::flush;
             }
             return true;
         };
 
-        // Storage for links (need stable addresses for save)
-        pipe::Body::Link* linkPtr = nullptr;
-        std::vector<pipe::Body::Link*> links;
+        // Optimizer config
+        geos::Config config;
+        config.skip_edge = false;
+        config.skip_lut = true;
+        config.skip_regional = true;
+        config.geos_max_iter = 500;
+        config.geos_threshold = 0.005f;
+        config.geos_mode = geos::Mode::FULL_35D;
+        config.optimizer = geos::Optimizer::HYBRID;
 
-        if (fullMode)
+        // ============================================================
+        // PHASE 0: Camera Math - apply polynomial transform
+        // ============================================================
+        std::cout << "\n=== PHASE 0: Camera Math ===" << std::endl;
+
+        // Create camera link
+        pipe::Body::Link& cameraLink = body.add("camera");
+
+        // Load polynomial coefficients if available
+        bool hasPolyCoeffs = false;
+        if (info.count("poly_coeffs") && !info["poly_coeffs"].empty())
         {
-            // ============================================================
-            // FULL MODE: Single-pass holistic 45-dial optimization
-            // No LUT, no two-link split - pure dial matching
-            // ============================================================
-            std::cout << "\n[FULL] Creating single holistic link (45 dials)..." << std::endl;
-            pipe::Body::Link& fullLink = body.add("full");
-
-            // Apply base curve from RAW decoder (primary camera transform)
-            if (head->hasBaseCurve())
+            float polyCoeffs[30];
+            if (parsePolyCoeffs(info["poly_coeffs"], polyCoeffs, 30))
             {
-                fullLink.baseCurve().setCurve(head->baseCurve());
-                std::cout << "[FULL] Base curve applied from RAW decoder" << std::endl;
+                cameraLink.polyColor().setCoeffs(polyCoeffs);
+                hasPolyCoeffs = true;
+                std::cout << "  Applied 30-coefficient polynomial transform" << std::endl;
             }
-
-            // Note: polyColor (Camera Math) is available but not used by default
-            // It captures cross-channel interactions but has fewer parameters than baseCurve
-            // Use --poly-color flag to enable (TODO: implement flag)
-
-            // Initialize all dials to neutral (0.5) FIRST
-            fullLink.colorCorrection().exposure().set(0.5f);
-            fullLink.colorCorrection().whiteBalance().temperature(0.5f);
-            fullLink.colorCorrection().whiteBalance().tint(0.5f);
-            fullLink.toneMapping().contrast().set(0.5f);
-            fullLink.toneMapping().curveAdjustment().highlights().set(0.5f);
-            fullLink.toneMapping().curveAdjustment().shadows().set(0.5f);
-            fullLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
-            fullLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
-            fullLink.toneMapping().clippingPoint().white().set(0.5f);
-            fullLink.toneMapping().clippingPoint().black().set(0.5f);
-            fullLink.globalColor().vibrance().set(0.5f);
-            fullLink.globalColor().saturation().set(0.5f);
-            fullLink.globalColor().colourDensity().set(0.5f);
-
-            // NOW capture baseline (after base curve AND neutral dials)
-            pipe::View baselineView = body.view();
-            baselineView.copyTo(bodyMat);
-            cv::UMat bodyUMat;
-            bodyMat.copyTo(bodyUMat);
-            geos::Data baseline = geosTask->diff(bodyUMat);
-            std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
-                      << baseline.spectral << " (" << std::setprecision(2)
-                      << (baseline.spectral * 100) << "%)" << std::endl;
-
-            std::cout << "[FULL] Optimizing all 45 dials holistically..." << std::endl;
-
-            geos::Config fullConfig;
-            fullConfig.skip_edge = false;
-            fullConfig.skip_lut = true;   // No LUT in full mode - pure dials
-            fullConfig.skip_regional = skipRegional;
-            fullConfig.geos_max_iter = 500;  // More iterations for 45 dials
-            fullConfig.geos_threshold = threshold;
-            fullConfig.geos_mode = geos::Mode::FULL_35D;  // Uses all dials
-            fullConfig.optimizer = optimizer;
-            fullConfig.aceo_with_cov = withCov;
-            fullConfig.aceo_save_cov = saveCov;
-
-            geos::Result fullResult = geosTask->run(body, fullLink, fullConfig, progressCallback);
-            std::cout << std::endl;
-            std::cout << "  Full iterations: " << fullResult.geos_iterations << std::endl;
-            std::cout << "  Final spectral: " << std::fixed << std::setprecision(4)
-                      << fullResult.loss.spectral << " (" << std::setprecision(2)
-                      << (fullResult.loss.spectral * 100) << "%)" << std::endl;
-
-            linkPtr = &fullLink;
-            links = {&fullLink};
+            else
+            {
+                std::cout << "  Warning: Failed to parse poly_coeffs" << std::endl;
+            }
         }
         else
         {
-            // ============================================================
-            // TWO-LINK ARCHITECTURE: linear (scene-referred) + display (display-referred)
-            // ============================================================
-
-            // ------------------------------------------------------------
-            // LINK 1: Linear (scene-referred)
-            // Dials: exposure, temperature, tint, black_point, white_point
-            // ------------------------------------------------------------
-            std::cout << "\n[LINEAR] Creating scene-referred link..." << std::endl;
-            pipe::Body::Link& linearLink = body.add("linear");
-
-            // Apply base curve from RAW decoder (on first link only)
-            if (head->hasBaseCurve())
-            {
-                linearLink.baseCurve().setCurve(head->baseCurve());
-                std::cout << "[LINEAR] Base curve applied from RAW decoder" << std::endl;
-            }
-
-            // Initialize all dials to neutral (0.5) FIRST
-            linearLink.colorCorrection().exposure().set(0.5f);
-            linearLink.colorCorrection().whiteBalance().temperature(0.5f);
-            linearLink.colorCorrection().whiteBalance().tint(0.5f);
-            linearLink.toneMapping().contrast().set(0.5f);
-            linearLink.toneMapping().curveAdjustment().highlights().set(0.5f);
-            linearLink.toneMapping().curveAdjustment().shadows().set(0.5f);
-            linearLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
-            linearLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
-            linearLink.toneMapping().clippingPoint().white().set(0.5f);
-            linearLink.toneMapping().clippingPoint().black().set(0.5f);
-            linearLink.globalColor().vibrance().set(0.5f);
-            linearLink.globalColor().saturation().set(0.5f);
-            linearLink.globalColor().colourDensity().set(0.5f);
-
-            // NOW capture baseline (after base curve AND neutral dials)
-            pipe::View baselineView = body.view();
-            baselineView.copyTo(bodyMat);
-            cv::UMat bodyUMat;
-            bodyMat.copyTo(bodyUMat);
-            geos::Data baseline = geosTask->diff(bodyUMat);
-            std::cout << "  Baseline spectral: " << std::fixed << std::setprecision(4)
-                      << baseline.spectral << " (" << std::setprecision(2)
-                      << (baseline.spectral * 100) << "%)" << std::endl;
-
-            std::cout << "[LINEAR] Optimizing scene-referred dials (exposure, WB, clipping)..." << std::endl;
-
-            geos::Config linearConfig;
-            linearConfig.skip_edge = true;  // No sharpness for linear
-            linearConfig.skip_lut = true;   // No LUT for linear
-            linearConfig.skip_regional = true;  // Never regional for 5-dial linear
-            linearConfig.geos_max_iter = 150;  // Fewer iterations for 5 dials
-            linearConfig.geos_threshold = threshold;
-            linearConfig.geos_mode = geos::Mode::SCENE_LINEAR;
-            linearConfig.optimizer = optimizer;
-            linearConfig.aceo_with_cov = withCov;
-            linearConfig.aceo_save_cov = saveCov;
-
-            geos::Result linearResult = geosTask->run(body, linearLink, linearConfig, progressCallback);
-            std::cout << std::endl;
-            std::cout << "  Linear iterations: " << linearResult.geos_iterations << std::endl;
-            std::cout << "  Linear loss: " << std::fixed << std::setprecision(4)
-                      << linearResult.loss.spectral << " (" << std::setprecision(2)
-                      << (linearResult.loss.spectral * 100) << "%)" << std::endl;
-
-            // ------------------------------------------------------------
-            // LINK 2: Display (display-referred)
-            // Dials: contrast, curves, saturation, split tone, selective color + LUT
-            // ------------------------------------------------------------
-            std::cout << "\n[DISPLAY] Creating display-referred link..." << std::endl;
-            pipe::Body::Link& displayLink = body.add("display");
-
-            // Initialize all dials to neutral (0.5) - linear dials stay neutral
-            displayLink.colorCorrection().exposure().set(0.5f);
-            displayLink.colorCorrection().whiteBalance().temperature(0.5f);
-            displayLink.colorCorrection().whiteBalance().tint(0.5f);
-            displayLink.toneMapping().contrast().set(0.5f);
-            displayLink.toneMapping().curveAdjustment().highlights().set(0.5f);
-            displayLink.toneMapping().curveAdjustment().shadows().set(0.5f);
-            displayLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
-            displayLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
-            displayLink.toneMapping().clippingPoint().white().set(0.5f);
-            displayLink.toneMapping().clippingPoint().black().set(0.5f);
-            displayLink.globalColor().vibrance().set(0.5f);
-            displayLink.globalColor().saturation().set(0.5f);
-            displayLink.globalColor().colourDensity().set(0.5f);
-
-            std::cout << "[DISPLAY] Optimizing display-referred dials (contrast, color, style)..." << std::endl;
-
-            geos::Config displayConfig;
-            displayConfig.skip_edge = false;
-            displayConfig.skip_lut = skipLut;  // LUT applies to display link
-            displayConfig.skip_regional = skipRegional;  // Regional refinement (off by default)
-            displayConfig.geos_max_iter = 350;  // More iterations for 36 dials
-            displayConfig.geos_threshold = threshold;
-            displayConfig.geos_mode = geos::Mode::DISPLAY;
-            displayConfig.optimizer = optimizer;
-            displayConfig.aceo_with_cov = withCov;
-            displayConfig.aceo_save_cov = saveCov;
-
-            geos::Result displayResult = geosTask->run(body, displayLink, displayConfig, progressCallback);
-            std::cout << std::endl;
-            std::cout << "  Display iterations: " << displayResult.geos_iterations << std::endl;
-            std::cout << "  Final spectral: " << std::fixed << std::setprecision(4)
-                      << displayResult.loss.spectral << " (" << std::setprecision(2)
-                      << (displayResult.loss.spectral * 100) << "%)" << std::endl;
-
-            linkPtr = &displayLink;
-            links = {&linearLink, &displayLink};
+            std::cout << "  No poly_coeffs available (using identity)" << std::endl;
         }
 
-        // ------------------------------------------------------------
-        // Save link(s)
-        // ------------------------------------------------------------
-        std::cout << "\n[SAVE] Writing tune settings (" << links.size() << " link" << (links.size() > 1 ? "s" : "") << ")..." << std::endl;
-        std::string tunePath = saveArea + "/" + outputFilename;
+        // Create preview UMat for comparison (used in both phases)
+        cv::UMat previewUMat;
+        previewResized.copyTo(previewUMat);
+
+        // Measure error after Camera Math
+        cv::Mat afterPolyMat;
+        body.view().copyTo(afterPolyMat);
+        cv::UMat afterPolyUMat;
+        afterPolyMat.copyTo(afterPolyUMat);
+        pqtr::Hold<geos::Task> measureTask = geos::make(previewUMat);
+        geos::Data afterPoly = measureTask->diff(afterPolyUMat);
+        std::cout << "  After poly: " << std::fixed << std::setprecision(1)
+                  << (afterPoly.spectral * 100) << "%" << std::endl;
+
+        // ============================================================
+        // PHASE 1: Camera Vibe - match embedded preview with dials
+        // ============================================================
+        std::cout << "\n=== PHASE 1: Camera Vibe ===" << std::endl;
+        std::cout << "Target: embedded preview" << std::endl;
+
+        // Initialize dials to neutral - poly already did heavy lifting
+        cameraLink.colorCorrection().exposure().set(0.5f);
+        cameraLink.colorCorrection().whiteBalance().temperature(0.5f);
+        cameraLink.colorCorrection().whiteBalance().tint(0.5f);
+        cameraLink.toneMapping().contrast().set(0.5f);
+        cameraLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+        cameraLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+        cameraLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
+        cameraLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
+        cameraLink.toneMapping().clippingPoint().white().set(0.5f);
+        cameraLink.toneMapping().clippingPoint().black().set(0.5f);
+        cameraLink.globalColor().vibrance().set(0.5f);
+        cameraLink.globalColor().saturation().set(0.5f);
+        cameraLink.globalColor().colourDensity().set(0.5f);
+
+        // Create geos task for preview optimization
+        pqtr::Hold<geos::Task> cameraTask = geos::make(previewUMat);
+
+        // Baseline (after poly, before dial optimization)
+        std::cout << "  Starting from: " << std::fixed << std::setprecision(1)
+                  << (afterPoly.spectral * 100) << "%" << std::endl;
+
+        // Optimize camera link
+        geos::Result cameraResult = cameraTask->run(body, cameraLink, config, progressCallback);
+        std::cout << std::endl;
+        std::cout << "  Camera Vibe: " << std::fixed << std::setprecision(1)
+                  << (cameraResult.loss.spectral * 100) << "%" << std::endl;
+
+        // Storage for links to save
+        std::vector<pipe::Body::Link*> links = {&cameraLink};
+
+        // ============================================================
+        // PHASE 2: User Vibe - match user's edit (if not preview-only)
+        // ============================================================
+        if (!isPreviewOnly)
+        {
+            std::cout << "\n=== PHASE 2: User Vibe ===" << std::endl;
+            std::cout << "Target: " << targetPath << std::endl;
+
+            // Resize user target to match body
+            cv::Mat userResized;
+            cv::resize(userTargetMat, userResized, bodySize, 0, 0, cv::INTER_AREA);
+
+            // Create user link (on top of camera link)
+            pipe::Body::Link& userLink = body.add("user");
+
+            // Initialize to neutral (no base curve - camera link has it)
+            userLink.colorCorrection().exposure().set(0.5f);
+            userLink.colorCorrection().whiteBalance().temperature(0.5f);
+            userLink.colorCorrection().whiteBalance().tint(0.5f);
+            userLink.toneMapping().contrast().set(0.5f);
+            userLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+            userLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+            userLink.toneMapping().curveAdjustment().toePivot().set(0.5f);
+            userLink.toneMapping().curveAdjustment().shoulderPivot().set(0.5f);
+            userLink.toneMapping().clippingPoint().white().set(0.5f);
+            userLink.toneMapping().clippingPoint().black().set(0.5f);
+            userLink.globalColor().vibrance().set(0.5f);
+            userLink.globalColor().saturation().set(0.5f);
+            userLink.globalColor().colourDensity().set(0.5f);
+
+            // Create geos task for user target
+            cv::UMat userUMat;
+            userResized.copyTo(userUMat);
+            pqtr::Hold<geos::Task> userTask = geos::make(userUMat);
+
+            // Baseline (after camera link)
+            cv::Mat afterCameraMat;
+            body.view().copyTo(afterCameraMat);
+            cv::UMat afterCameraUMat;
+            afterCameraMat.copyTo(afterCameraUMat);
+            geos::Data userBaseline = userTask->diff(afterCameraUMat);
+            std::cout << "  After Camera: " << std::fixed << std::setprecision(1)
+                      << (userBaseline.spectral * 100) << "%" << std::endl;
+
+            // Optimize user link
+            geos::Result userResult = userTask->run(body, userLink, config, progressCallback);
+            std::cout << std::endl;
+            std::cout << "  User Vibe: " << std::fixed << std::setprecision(1)
+                      << (userResult.loss.spectral * 100) << "%" << std::endl;
+
+            links.push_back(&userLink);
+        }
+
+        // Save
+        std::cout << "\n[SAVE]" << std::endl;
+        std::string tunePath = saveArea + "/tune.json";
         if (!data::links::save(links, tunePath))
         {
             throw std::runtime_error("Failed to save: " + tunePath);
         }
-        std::cout << "  Saved: " << tunePath << std::endl;
+        std::cout << "  " << tunePath << " (" << links.size() << " link" << (links.size() > 1 ? "s" : "") << ")" << std::endl;
 
-        // Save fine outputs if requested
-        if (fine)
-        {
-            std::cout << "\n[FINE] Saving intermediate images and metadata..." << std::endl;
-
-            // meta.json - camera metadata
-            std::string metaPath = fineArea + "/meta.json";
-            if (data::info::save(info, metaPath))
-            {
-                std::cout << "  Saved: " << metaPath << " (camera metadata)" << std::endl;
-            }
-
-            // tune.jpg - original target (camera JPEG or reference)
-            if (!usePreview)
-            {
-                // Copy the original target file as tune.jpg
-                cv::imwrite(fineArea + "/tune.jpg", targetMat);
-                std::cout << "  Saved: " << fineArea << "/tune.jpg (original target)" << std::endl;
-            }
-            else
-            {
-                // Save the preview as tune.jpg
-                cv::imwrite(fineArea + "/tune.jpg", targetMat);
-                std::cout << "  Saved: " << fineArea << "/tune.jpg (camera preview)" << std::endl;
-            }
-
-            // head.png - target resized to working size
-            cv::imwrite(fineArea + "/head.png", targetForTune);
-            std::cout << "  Saved: " << fineArea << "/head.png (target at working size)" << std::endl;
-
-            // body.png - baseline before optimization
-            cv::imwrite(fineArea + "/body.png", bodyMat);
-            std::cout << "  Saved: " << fineArea << "/body.png (baseline)" << std::endl;
-
-            // tail.png - result after optimization
-            cv::UMat optView = body.view();
-            cv::Mat optMat;
-            optView.copyTo(optMat);
-            cv::imwrite(fineArea + "/tail.png", optMat);
-            std::cout << "  Saved: " << fineArea << "/tail.png (optimized result)" << std::endl;
-
-            // diff.png - visual difference (target vs tail, amplified 5x)
-            cv::Mat diffMat;
-            cv::absdiff(optMat, targetForTune, diffMat);
-            diffMat.convertTo(diffMat, -1, 5.0);  // Amplify 5x for visibility
-            cv::imwrite(fineArea + "/diff.png", diffMat);
-            std::cout << "  Saved: " << fineArea << "/diff.png (difference x5)" << std::endl;
-        }
-
-        std::cout << "\n[OK] Done" << std::endl;
+        std::cout << "\n[OK]" << std::endl;
         return 0;
     }
     catch (const std::exception& e)

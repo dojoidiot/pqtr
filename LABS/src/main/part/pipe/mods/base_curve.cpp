@@ -58,21 +58,25 @@ namespace mods
                         // Clamp to [0, 1]
                         v = std::max(0.0f, std::min(1.0f, v));
 
-                        // Linear → gamma (curve was estimated in gamma space)
-                        float gamma_v = std::pow(v, 1.0f / 2.2f);
+                        // Linear → sRGB (matches toDisplayView)
+                        float srgb_v = (v <= 0.0031308f)
+                            ? v * 12.92f
+                            : 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
 
                         // Map to per-channel LUT with interpolation
-                        float pos = gamma_v * 255.0f;
+                        float pos = srgb_v * 255.0f;
                         int idx0 = static_cast<int>(pos);
                         int idx1 = std::min(idx0 + 1, 255);
                         float frac = pos - idx0;
 
                         // Per-channel curve: curve[c*256 + idx]
                         int base = c * 256;
-                        float out_gamma = curve[base + idx0] + frac * (curve[base + idx1] - curve[base + idx0]);
+                        float out_srgb = curve[base + idx0] + frac * (curve[base + idx1] - curve[base + idx0]);
 
-                        // Gamma → linear
-                        out_ptr[x * 3 + c] = std::pow(out_gamma, 2.2f);
+                        // sRGB → linear (back to scene-linear for pipeline)
+                        out_ptr[x * 3 + c] = (out_srgb <= 0.04045f)
+                            ? out_srgb / 12.92f
+                            : std::pow((out_srgb + 0.055f) / 1.055f, 2.4f);
                     }
                 }
             }
@@ -93,6 +97,24 @@ namespace mods
         for (int c = 0; c < 3; c++)
             for (int i = 0; i < 256; i++)
                 curve[c * 256 + i] = i / 255.0f;
+    }
+
+    // Generate S-curve for contrast (768 values)
+    // Simple sigmoid-like curve that adds "pop"
+    void base_curve_s_contrast(float* curve, float strength = 0.3f)
+    {
+        for (int c = 0; c < 3; c++)
+        {
+            for (int i = 0; i < 256; i++)
+            {
+                float x = i / 255.0f;
+                // S-curve: more contrast in midtones, preserve endpoints
+                // Using sin-based curve for smooth rolloff
+                float s = x + strength * std::sin(x * 3.14159f);
+                s = std::max(0.0f, std::min(1.0f, s));
+                curve[c * 256 + i] = s;
+            }
+        }
     }
 
 } // namespace mods
