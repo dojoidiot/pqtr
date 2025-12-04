@@ -121,17 +121,17 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 **Key file:** `etc/jacob.json` (45×23 matrix with dial/feature names)
 
-## Current Results (2025-12-04)
+## Current Results (2025-12-05)
 
-### BASE Metrics (eeeaf91)
+### Latest Metrics (435b907 - HYBRID fix)
 
 | Image | After Poly | After Dials | Notes |
 |-------|-----------|-------------|-------|
-| DSC00202 | **2.6%** | **3.2%** | Excellent - green foliage, neutral wood |
-| DSC00144 | **12.8%** | **13.7%** | Hard image - narrow gamut, warm neutrals |
-| DSC01531 | - | **8.1%** | Foliage scene, DRO-heavy |
+| DSC00202 | **2.6%** | **3.7%** | Green foliage, neutral wood |
+| DSC00144 | **12.8%** | **12.0%** | Hard image - narrow gamut |
+| DSC01559 | **7.2%** | **8.0%** | High resolution test |
 
-This is the **research baseline**. Hypothesis tests build on top of this commit.
+HYBRID fix: SPSA now preserves ACEO progress instead of resetting to neutral.
 
 ### Key Finding
 

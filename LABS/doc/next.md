@@ -1,62 +1,67 @@
 # Next Steps
 
-## Current State (2025-12-04)
+## Current State (2025-12-05)
 
-**BASE** = e9eae97 (verified baseline)
-**HEAD** = 2ece566 (axis contrast integrated, disabled)
+**BASE** = 435b907 (HYBRID fix committed)
 
-### Baseline Metrics
-| Image | Loss | Notes |
-|-------|------|-------|
-| DSC00144 | 13.7% | Hard image - narrow gamut |
-| DSC00202 | 3.2% | Excellent |
-| DSC01531 | 8.1% | Foliage/DRO |
+### Latest Metrics
 
-## Hypothesis 3: Axis Contrast Preservation
+| Image | Poly | Final | Notes |
+|-------|------|-------|-------|
+| DSC00144 | 12.8% | **12.0%** | Hard image - narrow gamut |
+| DSC00202 | 2.6% | **3.7%** | Green foliage, neutral wood |
+| DSC01559 | 7.2% | **8.0%** | Higher resolution test |
 
-**Status:** Code integrated, DISABLED (weight=0), ready to test
+### HYBRID Fix (Committed)
 
-**Finding:** DSC01531's R-C axis collapses -65% during optimization. Red window frames lose saturation while greens boost. This is the "averaging" problem.
+SPSA was resetting dials to neutral (`initNeutral`) at start, throwing away ACEO's progress in HYBRID mode. Changed to `readDials` to preserve current values.
 
-### To Enable and Test:
+Commit: 435b907 "Fix HYBRID mode: SPSA now preserves ACEO progress"
 
-1. Find where `evaluateCombinedLoss` is called in optimization loop (task.cpp or aceo.cpp)
+### Hypothesis 3: Axis Contrast (Removed)
 
-2. At startup, measure target axis contrast:
-```cpp
-cv::UMat targetProxy = resizeProxy(targetBGR);
-AxisContrast targetAxis = measureAxisContrast(targetProxy);
+Tested with 15% weight - made things worse. Code removed in fix commit.
+
+## Next Ideas to Explore
+
+### 1. Two-Pass Optimization
+
+First pass: lock tone dials, only optimize color.
+Second pass: lock color dials, only optimize tone.
+Prevents color and tone from fighting each other.
+
+### 2. Regional Weighting
+
+Weight the loss by region saturation. Highly saturated regions (like green foliage) should contribute more to saturation dial gradients. Currently all pixels weighted equally.
+
+### 3. Preserve Contrast Constraint
+
+Add hard constraint that contrast dial can't drop below threshold. Prevents the "flattening" problem seen in DSC00144.
+
+### 4. Separate Loss Functions for Dial Groups
+
+- Color dials optimize against chroma features only
+- Tone dials optimize against luminance features only
+- Currently everything optimizes against everything, causing interference
+
+## Observations
+
+- **DSC00144 (narrow gamut)**: Boosting saturation globally flattens contrast to compensate. Needs decoupled optimization.
+
+- **DSC00202 (green subject)**: Selective color works (green pops), but global tone dials lift background to match overall luminance. Needs regional awareness.
+
+- **DSC01559 (high-res)**: 6000x4000 image, different lens characteristics.
+
+## Test Outputs
+
 ```
+tmp/var/tune/DSC00144/
+  head.png    - camera preview (reference)
+  tail.png    - pipeline output
+  diff.png    - difference x5
+  result.png  - final output
+  tune.json   - dial settings
 
-3. Pass to loss function:
-```cpp
-float loss = evaluateCombinedLoss(body, targetStyle, targetLapVar,
-    FREQ_WEIGHT, &targetAxis, 0.15f);  // 15% axis weight
+tmp/var/tune/DSC00202/
+tmp/var/tune/DSC01559/
 ```
-
-4. Test on DSC01531:
-```bash
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
-  ~/base/pics/pqtr-test/DSC01531.ARW preview \
-  --save-area tmp/var/tune/DSC01531
-```
-
-5. Compare R-C axis before/after with axis_balance test
-
-### Expected Outcome:
-- DSC01531: R-C axis preserved, loss should decrease
-- DSC00202: No regression (already good, low axis contrast)
-- DSC00144: No change (problem is not axis collapse)
-
-## Other Notes
-
-- DSC00144's 13.7% is NOT an axis problem - axes are preserved
-- DSC00202 over-saturates B-Y axis (+122%) - may need ceiling
-- Hypothesis test code backed up in `/tmp/hypothesis_backup/`
-
-## Files to Review
-
-- `doc/idea.md` - Full hypothesis documentation with empirical data
-- `src/main/part/geos/diff.hpp` - AxisContrast struct
-- `src/main/part/geos/spsa.cpp` - evaluateCombinedLoss with axis support
-- `src/test/geos/axis_balance.cpp` - Test harness
