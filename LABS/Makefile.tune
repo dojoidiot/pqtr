@@ -73,7 +73,7 @@ TRAIN_BIN = $(TEST_BIN_DIR)/train
 # Test input
 TEST_RAW = var/pics/DSC00202.ARW
 
-.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds jacob
+.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds jacob axis-balance
 
 LABS_VAR_DIR = tmp/var/labs
 
@@ -308,3 +308,19 @@ $(JACOB_OBJ): $(JACOB_SRC) | $(OBJ_DIR)
 jacob: $(JACOB_BIN)
 	@echo "=== Jacobian Estimation ==="
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(JACOB_BIN)
+
+# Axis balance test sources (Hypothesis 3)
+AXIS_SRC = $(TEST_SRC)/axis_balance.cpp
+AXIS_OBJ = $(OBJ_DIR)/axis_balance.o
+AXIS_BIN = $(TEST_BIN_DIR)/axis_balance
+
+$(AXIS_BIN): $(AXIS_OBJ) | $(TEST_BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(AXIS_OBJ): $(AXIS_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Axis balance: test opponent-axis contrast preservation
+axis-balance: $(AXIS_BIN)
+	@echo "=== Axis Balance Test (Hypothesis 3) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(AXIS_BIN)

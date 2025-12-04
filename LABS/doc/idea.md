@@ -6,6 +6,109 @@ Theoretical enhancements not yet in scope. For empirical findings, see [analysis
 
 ---
 
+## Axis Contrast Preservation (Hypothesis 3)
+
+**Status:** 🔬 ACTIVE HYPOTHESIS (2025-12-04)
+
+**Problem:** Holistic optimization averages opponent color pairs instead of preserving both.
+
+### Observation
+
+| Image | Axis Content | Result |
+|-------|--------------|--------|
+| DSC00202 (3.2%) | G only (no R) | Good - one-sided push works |
+| DSC01531 (8.1%) | R **and** G present | Wash out - optimizer compromises |
+| DSC00144 (13.7%) | Y only (no B) | Pink drift - unanchored axis |
+
+When both poles of an opponent axis exist in the target, our optimizer averages them toward grey instead of preserving contrast on that axis.
+
+### Theory: Opponent Color Axes
+
+From `colours.md` - the 4 primary opponent axes through white:
+
+```
+        Yellow (255,255,0)
+           |
+  Orange   |   Chartreuse
+     \     |     /
+      \    |    /
+Red ----[ WHITE ]---- Green
+(255,0,0)  |   (0,255,0)
+      /    |    \
+     /     |     \
+  Magenta  |   Cyan
+           |
+        Blue (0,0,255)
+```
+
+**Axes:**
+1. **R ↔ C** (Red ↔ Cyan) - classic temperature
+2. **G ↔ M** (Green ↔ Magenta) - tint axis
+3. **B ↔ Y** (Blue ↔ Yellow) - strongest perceptual axis
+4. **O ↔ T** (Orange ↔ Teal) - cinematic look
+
+**Rule from `opposites.md`:** "Boost opposite pairs equally to preserve realism."
+
+### Current Behavior (Wrong)
+
+When target has both R and G saturated:
+- Per-pixel L2 loss sees error on both
+- Optimizer finds middle ground (desaturated)
+- Result: axis contrast collapses
+
+### Proposed: Axis Contrast Loss
+
+```cpp
+struct AxisBalance {
+    float r_c;  // Red vs Cyan saturation difference
+    float g_m;  // Green vs Magenta
+    float b_y;  // Blue vs Yellow
+};
+
+AxisBalance measureAxes(const cv::Mat& img) {
+    // For each pixel, compute which axis pole it belongs to
+    // Return mean saturation per pole
+}
+
+float axisContrastLoss(const AxisBalance& target, const AxisBalance& candidate) {
+    // Penalize if we're collapsing an axis that exists in target
+    // Reward if we're preserving/enhancing axis contrast
+
+    float loss = 0;
+
+    // If target has R-C contrast, penalize reducing it
+    if (std::abs(target.r_c) > threshold) {
+        loss += std::abs(std::abs(target.r_c) - std::abs(candidate.r_c));
+    }
+    // ... same for other axes
+
+    return loss;
+}
+```
+
+### Test Plan
+
+**Phase 1: Synthetic validation**
+- Create test images with known opponent pairs (R+C, G+M, B+Y)
+- Verify axis measurement is correct
+- Verify loss penalizes collapse
+
+**Phase 2: Integration**
+- Add axis_contrast_loss to holistic loss
+- Weight TBD (start with 0.2)
+- Test on DSC01531 (R+G scene)
+
+**Phase 3: Evaluate**
+- Does 1531 improve without hurting 202?
+- Does 144 stabilize (stop drifting pink)?
+
+### Files
+
+- `src/test/geos/axis_balance.cpp` - Test harness with synthetic images
+- Future: integrate into `src/main/part/geos/spsa.cpp`
+
+---
+
 ## Luminance-Split LUTs
 
 **Status:** ❌ ATTEMPTED 2024-11. Soft blending approach failed - creates color artifacts.
