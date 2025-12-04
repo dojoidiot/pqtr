@@ -121,15 +121,17 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 **Key file:** `etc/jacob.json` (45×23 matrix with dial/feature names)
 
-## Current Results (2024-12-02)
+## Current Results (2025-12-04)
 
-### Three-Phase Results
+### BASE Metrics (eeeaf91)
 
 | Image | After Poly | After Dials | Notes |
 |-------|-----------|-------------|-------|
-| DSC00202 | **2.6%** | **3.2%** | ✅ Excellent - green foliage, neutral wood |
-| DSC00144 | **12.8%** | **13.7%** | ⚠️ Higher error - different characteristics |
-| DSC01531 | **8.1%** | **7.9%** | ✅ Good - foliage, better than expected |
+| DSC00202 | **2.6%** | **3.2%** | Excellent - green foliage, neutral wood |
+| DSC00144 | **12.8%** | **13.7%** | Hard image - narrow gamut, warm neutrals |
+| DSC01531 | - | **8.1%** | Foliage scene, DRO-heavy |
+
+This is the **research baseline**. Hypothesis tests build on top of this commit.
 
 ### Key Finding
 
