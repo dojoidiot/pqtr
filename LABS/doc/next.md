@@ -1,10 +1,12 @@
 # Next Steps
 
-## Current State (2025-12-05)
+## Context
 
-**BASE** = 435b907 (HYBRID fix committed)
+Read this file after `README.md` to understand current LABS development state.
 
-### Latest Metrics
+**BASE** = 435b907 (2025-12-05)
+
+### Where We Are
 
 | Image | Poly | Final | Notes |
 |-------|------|-------|-------|
@@ -12,45 +14,76 @@
 | DSC00202 | 2.6% | **3.7%** | Green foliage, neutral wood |
 | DSC01559 | 7.2% | **8.0%** | Higher resolution test |
 
-### HYBRID Fix (Committed)
+TUNE works. The 45 dials optimize to match reference images. But dial interference limits accuracy on hard images.
 
-SPSA was resetting dials to neutral (`initNeutral`) at start, throwing away ACEO's progress in HYBRID mode. Changed to `readDials` to preserve current values.
+---
 
-Commit: 435b907 "Fix HYBRID mode: SPSA now preserves ACEO progress"
+## Current Direction: Stage-Aware Optimization
 
-### Hypothesis 3: Axis Contrast (Removed)
+**Full documentation: [stages.md](stages.md)**
 
-Tested with 15% weight - made things worse. Code removed in fix commit.
+### The Problem
 
-## Next Ideas to Explore
+All 45 dials optimize against one loss function. VIEW dials (contrast, exposure) fight POPS dials (saturation, vibrance) because they both affect the same loss features.
 
-### 1. Two-Pass Optimization
+Example (DSC00144): Optimizer boosts saturation → this affects luminance perception → optimizer flattens contrast to compensate → result is muddy.
 
-First pass: lock tone dials, only optimize color.
-Second pass: lock color dials, only optimize tone.
-Prevents color and tone from fighting each other.
+### The Semantic Reframe
 
-### 2. Regional Weighting
+Instead of "optimize 45 dials", think in **stages**:
 
-Weight the loss by region saturation. Highly saturated regions (like green foliage) should contribute more to saturation dial gradients. Currently all pixels weighted equally.
+```
+RAWS → FLAT → VIEW → POPS
+```
 
-### 3. Preserve Contrast Constraint
+| Stage | Purpose | Dials | Loss |
+|-------|---------|-------|------|
+| RAWS | Camera → Linear | 0 | Deterministic |
+| FLAT | Checkpoint | 0 | Verify decode |
+| VIEW | Linear → Display | 5 | **Absolute tone** |
+| POPS | Display → Style | 40 | **Relative color** |
 
-Add hard constraint that contrast dial can't drop below threshold. Prevents the "flattening" problem seen in DSC00144.
+### Key Insight
 
-### 4. Separate Loss Functions for Dial Groups
+**VIEW** = absolute structure ("shadows at L=0.03")
+**POPS** = relative relationships ("greens pop 20% more than neutrals")
 
-- Color dials optimize against chroma features only
-- Tone dials optimize against luminance features only
-- Currently everything optimizes against everything, causing interference
+The reference encodes both. But optimizing both with one loss causes interference.
 
-## Observations
+### Implementation Plan
 
-- **DSC00144 (narrow gamut)**: Boosting saturation globally flattens contrast to compensate. Needs decoupled optimization.
+1. **Stage-aware loss functions**
+   - `viewLoss()`: Weight `std_L, skew_L, L_p10-90` heavily
+   - `popsLoss()`: Weight `mu_C, std_C, C_p50, C_shadow` heavily
 
-- **DSC00202 (green subject)**: Selective color works (green pops), but global tone dials lift background to match overall luminance. Needs regional awareness.
+2. **Mode::STAGED optimizer**
+   - Phase 1: VIEW dials with viewLoss()
+   - Phase 2: POPS dials with popsLoss()
+   - Phase 3: Optional joint refinement
 
-- **DSC01559 (high-res)**: 6000x4000 image, different lens characteristics.
+3. **Test on problem images**
+
+---
+
+## Key Files
+
+| File | Purpose |
+|------|---------|
+| `doc/stages.md` | Full stage-aware optimization documentation |
+| `doc/hack.md` | Reverse engineering notes, camera color science |
+| `src/main/part/geos/spsa.cpp` | SPSA optimizer implementation |
+| `src/main/part/geos/diff.cpp` | Loss function (geodesic distance) |
+| `inc/dials.h` | Dial definitions |
+
+## Test Commands
+
+```bash
+cd LABS
+LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
+  var/pics/DSC00144.ARW preview \
+  --save-area tmp/var/tune \
+  --full --optimizer hybrid --fine --logs
+```
 
 ## Test Outputs
 
@@ -61,7 +94,4 @@ tmp/var/tune/DSC00144/
   diff.png    - difference x5
   result.png  - final output
   tune.json   - dial settings
-
-tmp/var/tune/DSC00202/
-tmp/var/tune/DSC01559/
 ```

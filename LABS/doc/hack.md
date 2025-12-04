@@ -513,3 +513,47 @@ RAW
 - Camera Vibe (dial optimization) handles foliage/DRO scenes
 - User Vibe captures photographer intent
 - No need for true spatial LTM - Camera Vibe handles it with dials
+
+---
+
+## The Four-Stage Model: RAWS → FLAT → VIEW → POPS
+
+See [stages.md](stages.md) for full documentation.
+
+### Semantic Reframe
+
+The three-phase architecture describes **what** we process. The four-stage model describes **how** to think about optimization:
+
+```
+RAWS → FLAT → VIEW → POPS
+```
+
+| Stage | Purpose | Dials | Loss Function |
+|-------|---------|-------|---------------|
+| RAWS | Camera → Linear | None | Deterministic |
+| FLAT | Checkpoint | None | Verify clean decode |
+| VIEW | Linear → Display | 5 | Absolute tone structure |
+| POPS | Display → Style | 40 | Relative relationships |
+
+### Why This Matters
+
+**The problem:** All 45 dials optimize against one loss function. VIEW dials (contrast, exposure) fight POPS dials (saturation, vibrance) because they both affect the same features.
+
+**The fix:** Stage-aware loss functions. VIEW stage optimizes tone percentiles only. POPS stage optimizes color ratios only. Cross-interference eliminated.
+
+### POPS: The Key Insight
+
+POPS (style adjustments) are **relative**, not absolute:
+- "Greens pop 20% more than neutrals" (not "green chroma = 0.45")
+- "Shadows warmer than highlights" (not "shadow a* = 0.08")
+- "Saturated areas more vivid" (not "C_p90 = 0.72")
+
+The reference image encodes these ratios mathematically. We don't need object recognition - we measure if our pops are right by comparing ratios, not absolute values.
+
+### Connection to Camera Processing
+
+From the analysis above, cameras precompute POPS as LUTs ("Landscape", "Portrait", "Vivid"). They separate:
+1. **VIEW**: Tone mapping, exposure (scene-dependent)
+2. **POPS**: Creative style (LUT selection)
+
+We do the same, but per-image instead of per-class.
