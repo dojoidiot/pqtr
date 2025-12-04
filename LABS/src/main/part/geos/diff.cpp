@@ -545,4 +545,100 @@ namespace geos::internal
         return ra;
     }
 
+    // ============================================================
+    // Axis Contrast Preservation (Hypothesis 3)
+    // ============================================================
+
+    AxisContrast measureAxisContrast(const cv::UMat& bgr)
+    {
+        AxisContrast contrast = {0, 0, 0};
+
+        cv::Mat mat;
+        bgr.copyTo(mat);
+
+        // Track saturation of each pole
+        double sum_r = 0, sum_c = 0;
+        double sum_g = 0, sum_m = 0;
+        double sum_b = 0, sum_y = 0;
+        int count = 0;
+
+        for (int y = 0; y < mat.rows; y++)
+        {
+            for (int x = 0; x < mat.cols; x++)
+            {
+                cv::Vec3b pixel = mat.at<cv::Vec3b>(y, x);
+                float b = pixel[0] / 255.0f;
+                float g = pixel[1] / 255.0f;
+                float r = pixel[2] / 255.0f;
+
+                // Red saturation: R high, G and B low
+                float r_sat = r - std::max(g, b);
+                if (r_sat > 0) sum_r += r_sat;
+
+                // Cyan saturation: G and B high, R low
+                float c_sat = std::min(g, b) - r;
+                if (c_sat > 0) sum_c += c_sat;
+
+                // Green saturation
+                float g_sat = g - std::max(r, b);
+                if (g_sat > 0) sum_g += g_sat;
+
+                // Magenta saturation
+                float m_sat = std::min(r, b) - g;
+                if (m_sat > 0) sum_m += m_sat;
+
+                // Blue saturation
+                float b_sat = b - std::max(r, g);
+                if (b_sat > 0) sum_b += b_sat;
+
+                // Yellow saturation
+                float y_sat = std::min(r, g) - b;
+                if (y_sat > 0) sum_y += y_sat;
+
+                count++;
+            }
+        }
+
+        if (count > 0)
+        {
+            // Contrast = geometric mean of both poles (high only if both present)
+            contrast.r_c = std::sqrt((sum_r / count) * (sum_c / count));
+            contrast.g_m = std::sqrt((sum_g / count) * (sum_m / count));
+            contrast.b_y = std::sqrt((sum_b / count) * (sum_y / count));
+        }
+
+        return contrast;
+    }
+
+    float axisContrastLoss(const AxisContrast& target, const AxisContrast& candidate)
+    {
+        // Penalize if we're collapsing an axis that exists in target
+        constexpr float threshold = 0.005f;  // Minimum contrast to care about
+
+        float loss = 0;
+
+        // R-C axis
+        if (target.r_c > threshold)
+        {
+            float reduction = std::max(0.0f, target.r_c - candidate.r_c);
+            loss += reduction;
+        }
+
+        // G-M axis
+        if (target.g_m > threshold)
+        {
+            float reduction = std::max(0.0f, target.g_m - candidate.g_m);
+            loss += reduction;
+        }
+
+        // B-Y axis
+        if (target.b_y > threshold)
+        {
+            float reduction = std::max(0.0f, target.b_y - candidate.b_y);
+            loss += reduction;
+        }
+
+        return loss;
+    }
+
 } // namespace geos::internal

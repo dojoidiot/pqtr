@@ -423,6 +423,41 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "=== Output: " << outDir << " ===" << std::endl;
+    std::cout << std::endl;
+
+    // Test on real images if path provided
+    if (argc > 1) {
+        std::cout << "=== Real Image Analysis ===" << std::endl;
+
+        for (int i = 1; i < argc; i++) {
+            std::string path = argv[i];
+            cv::Mat img = cv::imread(path);
+            if (img.empty()) {
+                std::cout << "Failed to load: " << path << std::endl;
+                continue;
+            }
+
+            // Extract filename
+            size_t pos = path.find_last_of("/");
+            std::string name = (pos != std::string::npos) ? path.substr(pos + 1) : path;
+
+            AxisContrast contrast = measureAxisContrast(img);
+            std::cout << std::endl;
+            contrast.print(name);
+
+            // Identify dominant axis
+            float maxAxis = std::max({contrast.r_c, contrast.g_m, contrast.b_y});
+            if (maxAxis == contrast.r_c && contrast.r_c > 0.01) {
+                std::cout << "  → Dominant: R-C axis (temperature variation)\n";
+            } else if (maxAxis == contrast.g_m && contrast.g_m > 0.01) {
+                std::cout << "  → Dominant: G-M axis (tint variation)\n";
+            } else if (maxAxis == contrast.b_y && contrast.b_y > 0.01) {
+                std::cout << "  → Dominant: B-Y axis (warm/cool variation)\n";
+            } else {
+                std::cout << "  → Low axis contrast (narrow gamut or desaturated)\n";
+            }
+        }
+    }
 
     return 0;
 }

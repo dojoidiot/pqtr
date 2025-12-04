@@ -423,13 +423,15 @@ namespace geos::internal
         return geodesicLoss(targetStyle, candStyle);
     }
 
-    // Compute combined loss: spectral + frequency (for holistic optimization)
+    // Compute combined loss: spectral + frequency + axis (for holistic optimization)
     // Used by --full mode where edge dials are optimized together with color/tone
     float evaluateCombinedLoss(
         pipe::Body& body,
         const StyleFeatures& targetStyle,
         float targetLaplacianVar,
-        float freqWeight)  // Frequency weight (default 15% - specified in header)
+        float freqWeight,  // Frequency weight (default 15% - specified in header)
+        const AxisContrast* targetAxis = nullptr,  // Optional: axis contrast target
+        float axisWeight = 0.0f)  // Axis contrast weight (0 = disabled)
     {
         View candidate = body.view();
         cv::UMat candProxy = resizeProxy(candidate);
@@ -446,10 +448,19 @@ namespace geos::internal
         else
             frequency = std::abs(candLaplacianVar - targetLaplacianVar) / targetLaplacianVar;
 
-        // Combined: spectral dominates, frequency contributes
         // Clamp frequency to reasonable range (can be >1)
         frequency = std::min(frequency, 2.0f);
-        return spectral + freqWeight * frequency;
+
+        // Axis contrast loss (Hypothesis 3)
+        float axis = 0.0f;
+        if (targetAxis != nullptr && axisWeight > 0.0f)
+        {
+            AxisContrast candAxis = measureAxisContrast(candProxy);
+            axis = axisContrastLoss(*targetAxis, candAxis);
+        }
+
+        // Combined: spectral dominates, frequency and axis contribute
+        return spectral + freqWeight * frequency + axisWeight * axis;
     }
 
     // Compute loss with regional support (for DISPLAY mode)

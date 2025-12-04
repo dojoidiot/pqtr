@@ -107,6 +107,27 @@ float axisContrastLoss(const AxisBalance& target, const AxisBalance& candidate) 
 - `src/test/geos/axis_balance.cpp` - Test harness with synthetic images
 - Future: integrate into `src/main/part/geos/spsa.cpp`
 
+### Empirical Validation (2025-12-04)
+
+Tested axis contrast on real images (target vs output):
+
+| Image | Loss | R-C Δ | G-M Δ | B-Y Δ | Finding |
+|-------|------|-------|-------|-------|---------|
+| DSC00144 | 13.7% | -1% | -80% | +5% | **Axes preserved** - problem is elsewhere |
+| DSC00202 | 3.2% | +2% | +31% | **+122%** | Over-saturation, not collapse |
+| DSC01531 | 8.1% | **-65%** | +34% | -29% | **R-C collapsed** - hypothesis confirmed |
+
+**Key insight:** DSC01531's wash-out is specifically R-C axis collapse. Red window frames lose saturation while greens boost. This is the averaging problem.
+
+### Implementation Plan
+
+1. Add `measureAxisContrast()` to diff.cpp (already proven in test harness)
+2. Add `axisContrastLoss()` to loss calculation in spsa.cpp
+3. Weight: start with 0.15-0.20 (lower than perHue since more targeted)
+4. Test on DSC01531 - expect R-C preservation, lower loss
+5. Verify DSC00202 doesn't regress (already good)
+6. DSC00144 needs separate investigation (not an axis problem)
+
 ---
 
 ## Luminance-Split LUTs

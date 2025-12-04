@@ -185,4 +185,27 @@ namespace geos::internal
         const cv::UMat& candidate,
         const TargetFeatures& target);
 
+    // ============================================================
+    // Axis Contrast Preservation (Hypothesis 3)
+    // ============================================================
+
+    // Opponent axis contrast: measures how much both poles of each axis are present
+    // High contrast = both poles saturated (R and C both present)
+    // Low contrast = one-sided or desaturated
+    struct AxisContrast
+    {
+        float r_c;  // Red vs Cyan axis
+        float g_m;  // Green vs Magenta axis
+        float b_y;  // Blue vs Yellow axis
+
+        float total() const { return r_c + g_m + b_y; }
+    };
+
+    // Measure axis contrast in a BGR image
+    AxisContrast measureAxisContrast(const cv::UMat& bgr);
+
+    // Axis contrast loss: penalize collapsing axes that exist in target
+    // Returns 0 if no axes to preserve, positive if contrast is lost
+    float axisContrastLoss(const AxisContrast& target, const AxisContrast& candidate);
+
 } // namespace geos::internal
