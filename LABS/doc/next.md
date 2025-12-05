@@ -4,128 +4,56 @@
 
 Read this file after `README.md` to understand current LABS development state.
 
-**BASE** = e90c188 (2025-12-05)
+**BASE** = bc8304e (2025-12-05)
 
 ---
 
-## Current Direction: Clean Architecture
+## Current Issue: Pink Color Cast
 
-**Goal:** Pure separation - RAWS decodes, Pipe processes, vibes configure.
+LABS output shows pink/magenta tint on neutral subjects (metal appears pink instead of gray).
 
-### Architecture Insight
+### Known Facts
+- Camera preview (embedded JPEG): gray metal ✓
+- Darktable output: gray metal ✓
+- LABS output: pink metal ✗
 
-The pipeline drifted. Need to refactor:
+### Root Cause
+RGB/BGR channel mismatch somewhere in pipeline. Not yet located.
 
-**Current (messy):**
-- RAWS: decode + some processing baked in
-- view.cpp: sigmoid baked into display conversion
-- Processing scattered across layers
+### Next Action
+Methodically trace channel order through pipeline:
+1. Verify RAWS demosaic output channel order
+2. Verify color matrix preserves order
+3. Verify sigmoid preserves order
+4. Verify imwrite receives correct order
 
-**Target (clean):**
-- RAWS: pure decode only (libraw replacement) → scene-linear RGB out
-- Pipe: ALL processing via configurable links
-  - Modules handle everything: exposure, WB, sigmoid, tone mapping
-  - DARK vibe = dial settings that match darktable defaults
-- View: pure sRGB gamma encoding, nothing else
-
-### Why
-
-- RAWS should be a clean-room libraw replacement, nothing more
-- All "look" decisions belong in the pipe as configurable dials
-- A "darktable look" is just a vibe (preset), not special code
-- Easier to reason about: decode → process → display
+Do NOT attempt fixes until exact swap location is found.
 
 ---
 
-## Findings from Darktable Comparison
+## Architecture (Working)
 
-Tested LABS vs darktable on same RAW:
-
-| Metric | Without Vibe | With +1.2 EV Vibe |
-|--------|--------------|-------------------|
-| Mean diff | 15.9% | 17.4% |
-| Lum ratio | 0.678 (darker) | 1.103 (brighter) |
-
-The issue isn't just exposure - there are fundamental differences in:
-1. What RAWS outputs (may have processing baked in)
-2. Sigmoid implementation details
-3. Color matrix / white balance handling
-
----
-
-## Immediate Next Steps
-
-1. ~~**Audit RAWS** - what processing is currently embedded?~~ ✓ Done
-2. **Remove sigmoid from view.cpp** - move to pipe module
-3. ~~**Design clean separation** - RAWS = decode only~~ ✓ Done
-4. **Create DARK vibe** - dial settings matching darktable defaults
-
-### RAWS Audit Result (2025-12-05)
-
-RAWS now has **pure decode mode** via `raws::Options`:
-
-```cpp
-raws::Options opts;
-opts.undistort = false;  // Skip lens distortion for pure decode
-raws::Result result = raws::decode(sink, opts);
+```
+RAWS (decode) → Pipe (links) → Sigmoid → Gamma → Display
 ```
 
-**Pipeline stages:**
-| Stage | Operation | Pure Decode | Now Configurable |
-|-------|-----------|-------------|------------------|
-| 1 | BLC | ✓ | No |
-| 2 | WB (Bayer) | ✓ | No |
-| 3 | Demosaic | ✓ | No |
-| 4 | Color Matrix | ✓ | No |
-| 5 | Undistort | Processing | **Yes** |
-| 6 | Crop | ✓ | No |
-
-Default behavior unchanged (undistort=true). Pure decode available when needed.
+- **RAWS:** Pure decode → scene-linear RGB
+- **Pipe:** Links process scene-linear
+- **Sigmoid:** Scene→display tone mapping (in pipe.cpp)
+- **View:** Pure sRGB gamma encoding only
 
 ---
 
-## Testing Strategy: Darktable as Oracle
+## Completed
 
-Once we achieve darktable baseline equivalence, darktable becomes our dial testing framework:
-
-1. **Match darktable baseline** → proves decode + sigmoid are correct
-2. **Change one darktable module** (e.g., exposure +1 EV) → export reference
-3. **Set corresponding LABS dial** → render output
-4. **Compare** → if match, dial is correct
-
-This lets us validate each of our 45 dials in isolation. Darktable is the oracle - we test against it, not embedded JPEGs.
+1. ✓ Remove sigmoid from view.cpp - moved to pipe module
+2. ✓ Design clean separation - RAWS = decode only
+3. ✓ Create dark.json neutral vibe
 
 ---
 
 ## Parked
 
-- VIBE neural prediction (per-camera vibes may be sufficient)
-- Per-image optimization (DRO is spatially-varying, can't match globally)
-
----
-
-## Key Files
-
-| File | Purpose |
-|------|---------|
-| `src/main/part/pipe/view.cpp` | Display conversion (has sigmoid - to remove) |
-| `src/main/part/pipe/mods/sigmoid.cpp` | Sigmoid module (keep) |
-| `inc/RAWS/raws.hpp` | RAWS interface (audit for embedded processing) |
-| `etc/vibes/darktable.json` | Darktable-matching vibe (WIP) |
-
-## Test Commands
-
-```bash
-cd LABS
-
-# Generate darktable reference
-../dark/lib/dark/bin/darktable-cli \
-  image.ARW tmp/darktable_output.png
-
-# LABS render
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/labs \
-  image.ARW --output tmp/labs_output.png
-
-# Compare
-compare tmp/labs_output.png tmp/darktable_output.png tmp/diff.png
-```
+- Darktable baseline validation (blocked by color cast)
+- VIBE neural prediction
+- Per-image optimization

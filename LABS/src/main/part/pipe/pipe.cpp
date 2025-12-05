@@ -1,10 +1,14 @@
 // pipe.cpp
 // PIMPL implementation of pipe.hpp
 // HEAD→BODY→TAIL builder pattern
+//
+// Pipeline flow:
+//   HEAD (decode) → BODY (links process scene-linear) → sigmoid → gamma → display
 
 #include <pipe.hpp>
 #include "view.hpp"
 #include "link.hpp"
+#include "mods/mods.h"
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 #include <stdexcept>
@@ -67,10 +71,16 @@ public:
         for (auto& link : m_links)
             linear = link->run(linear);
 
-        View display = toDisplayView(linear);
+        // Sigmoid: scene→display tone mapping (darktable scene-referred default)
+        View tonemapped;
+        mods::sigmoid_default(linear, tonemapped);
 
+        View display = toDisplayView(tonemapped);
+
+        // Convert RGB to BGR for OpenCV imwrite
         cv::Mat cpu;
         display.copyTo(cpu);
+        cv::cvtColor(cpu, cpu, cv::COLOR_RGB2BGR);
 
         return cv::imwrite(path, cpu);
     }
@@ -93,7 +103,11 @@ public:
         for (auto& link : m_links)
             linear = link->run(linear);
 
-        return toDisplayView(linear);
+        // Sigmoid: scene→display tone mapping (darktable scene-referred default)
+        View tonemapped;
+        mods::sigmoid_default(linear, tonemapped);
+
+        return toDisplayView(tonemapped);
     }
 };
 
@@ -144,7 +158,11 @@ public:
         for (auto& link : m_links)
             linear = link->run(linear);
 
-        return toDisplayView(linear, max_dim);
+        // Sigmoid: scene→display tone mapping (darktable scene-referred default)
+        View tonemapped;
+        mods::sigmoid_default(linear, tonemapped);
+
+        return toDisplayView(tonemapped, max_dim);
     }
 
     Tail& tail() override

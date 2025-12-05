@@ -1,6 +1,6 @@
 // demosaic.cpp
 // Demosaic Module - Scene-Referred
-// Converts Bayer pattern to RGB (not BGR)
+// Converts Bayer pattern to RGB
 //
 // Input: CV_32FC1 (white-balanced Bayer, normalized [0,1+])
 // Output: CV_32FC3 (linear RGB)
@@ -35,11 +35,11 @@ namespace sony
         try
         {
             // Map custom pattern codes to OpenCV RGB output codes
-            // Pipeline uses RGB internally; convert to BGR at output stage
+            // Pipeline uses RGB internally for consistency with image processing conventions
             int cv_pattern_code;
             switch (metadata.bayer_pattern)
             {
-            case 46: // RGGB - CFA tag says RGGB, trust it
+            case 46: // RGGB
                 cv_pattern_code = cv::COLOR_BayerRG2RGB;
                 break;
             case 47: // GRBG

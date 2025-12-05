@@ -1,9 +1,13 @@
 // view.cpp
 // Display conversion utilities (linear → sRGB)
-// Includes darktable-compatible sigmoid tone mapping
+// Pure sRGB gamma encoding - sigmoid moved to pipe module
+//
+// ARCHITECTURE NOTE:
+// This is now PURE display conversion. All "look" processing (including sigmoid)
+// belongs in the pipe as configurable modules. The flow is:
+//   RAWS (decode) → Pipe (process via links) → View (gamma only) → Display
 
 #include "view.hpp"
-#include "mods/mods.h"
 #include <opencv2/imgproc.hpp>
 
 namespace pipe::internal
@@ -13,6 +17,7 @@ namespace pipe::internal
     {
         cv::UMat clamped;
         cv::max(linear, 0.0f, clamped);
+        cv::min(clamped, 1.0f, clamped);  // Clamp to [0,1] for display
 
         cv::UMat lowMask, highMask;
         cv::compare(clamped, 0.0031308f, lowMask, cv::CMP_LE);
@@ -48,14 +53,10 @@ namespace pipe::internal
             }
         }
 
-        // Apply sigmoid tone mapping (darktable scene-referred default)
-        // This compresses HDR scene-linear values into display range
-        cv::UMat tonemapped;
-        mods::sigmoid_default(scaled, tonemapped);
-
-        // Apply sRGB gamma encoding
+        // Pure sRGB gamma encoding
+        // Sigmoid (scene→display compression) should be applied in the pipe
         cv::UMat gamma;
-        applyGamma(tonemapped, gamma);
+        applyGamma(scaled, gamma);
 
         cv::UMat out8;
         gamma.convertTo(out8, CV_8UC3, 255.0);
