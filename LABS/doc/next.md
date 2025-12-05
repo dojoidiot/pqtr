@@ -62,6 +62,19 @@ The issue isn't just exposure - there are fundamental differences in:
 
 ---
 
+## Testing Strategy: Darktable as Oracle
+
+Once we achieve darktable baseline equivalence, darktable becomes our dial testing framework:
+
+1. **Match darktable baseline** → proves decode + sigmoid are correct
+2. **Change one darktable module** (e.g., exposure +1 EV) → export reference
+3. **Set corresponding LABS dial** → render output
+4. **Compare** → if match, dial is correct
+
+This lets us validate each of our 45 dials in isolation. Darktable is the oracle - we test against it, not embedded JPEGs.
+
+---
+
 ## Parked
 
 - VIBE neural prediction (per-camera vibes may be sufficient)
