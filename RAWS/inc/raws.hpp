@@ -9,6 +9,13 @@
 
 namespace raws {
 
+    // Decode options - control what processing is applied
+    struct Options {
+        bool undistort = true;   // Apply lens distortion correction (default: on)
+        // Future options:
+        // bool crop = true;     // Apply optical black crop
+    };
+
     // Decoded RAW result
     struct Result {
         bool success = false;
@@ -51,6 +58,7 @@ namespace raws {
 
     // Decode a RAW file
     // Auto-detects format from file signature
-    Result decode(pqtr::Sink& sink);
+    // Default options: full processing (undistort enabled)
+    Result decode(pqtr::Sink& sink, const Options& opts = Options{});
 
 } // namespace raws

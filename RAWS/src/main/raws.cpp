@@ -276,7 +276,7 @@ static Format detectFormat(pqtr::Sink& sink)
 // Sony decoder
 // ============================================================
 
-static Result decodeSony(pqtr::Sink& sink)
+static Result decodeSony(pqtr::Sink& sink, const Options& opts)
 {
     Result result;
 
@@ -287,7 +287,11 @@ static Result decodeSony(pqtr::Sink& sink)
     if (!sony::Decoder::prepare(sink, bayer, sonyInfo, meta))
         return result;
 
-    if (!sony::Decoder::process_linear(bayer, meta, result.data))
+    // Convert raws::Options to sony::ProcessOptions
+    sony::ProcessOptions sonyOpts;
+    sonyOpts.undistort = opts.undistort;
+
+    if (!sony::Decoder::process_linear(bayer, meta, result.data, sonyOpts))
         return result;
 
     // Data info: scene-linear metadata
@@ -345,13 +349,13 @@ static Result decodeSony(pqtr::Sink& sink)
 // Public API
 // ============================================================
 
-Result decode(pqtr::Sink& sink)
+Result decode(pqtr::Sink& sink, const Options& opts)
 {
     Format fmt = detectFormat(sink);
 
     switch (fmt) {
         case Format::SonyARW:
-            return decodeSony(sink);
+            return decodeSony(sink, opts);
 
         // Future decoders:
         // case Format::CanonCR2:

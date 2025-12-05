@@ -55,10 +55,32 @@ The issue isn't just exposure - there are fundamental differences in:
 
 ## Immediate Next Steps
 
-1. **Audit RAWS** - what processing is currently embedded?
+1. ~~**Audit RAWS** - what processing is currently embedded?~~ ✓ Done
 2. **Remove sigmoid from view.cpp** - move to pipe module
-3. **Design clean separation** - RAWS = decode only
+3. ~~**Design clean separation** - RAWS = decode only~~ ✓ Done
 4. **Create DARK vibe** - dial settings matching darktable defaults
+
+### RAWS Audit Result (2025-12-05)
+
+RAWS now has **pure decode mode** via `raws::Options`:
+
+```cpp
+raws::Options opts;
+opts.undistort = false;  // Skip lens distortion for pure decode
+raws::Result result = raws::decode(sink, opts);
+```
+
+**Pipeline stages:**
+| Stage | Operation | Pure Decode | Now Configurable |
+|-------|-----------|-------------|------------------|
+| 1 | BLC | ✓ | No |
+| 2 | WB (Bayer) | ✓ | No |
+| 3 | Demosaic | ✓ | No |
+| 4 | Color Matrix | ✓ | No |
+| 5 | Undistort | Processing | **Yes** |
+| 6 | Crop | ✓ | No |
+
+Default behavior unchanged (undistort=true). Pure decode available when needed.
 
 ---
 

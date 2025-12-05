@@ -15,6 +15,11 @@ namespace sony
     // Info type (matches pipe::Info)
     using Info = std::map<std::string, std::string>;
 
+    // Processing options
+    struct ProcessOptions {
+        bool undistort = true;   // Apply lens distortion correction
+    };
+
     // Internal TIFF/ARW2 structures and functions
     namespace internal
     {
@@ -122,9 +127,10 @@ namespace sony
         // For use with external display-referred processing
         // Input:  bayer    - Bayer data from prepare() (CV_16UC1)
         //         metadata - Metadata from prepare()
+        //         opts     - Processing options (optional, defaults to full processing)
         // Output: rgb      - Linear RGB image (CV_32FC3, camera space, [0,1+] range)
         // Returns: true on success, false on error
-        static bool process_linear(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb);
+        static bool process_linear(const cv::UMat &bayer, const sony::RawMetadata &metadata, cv::UMat &rgb, const ProcessOptions &opts = ProcessOptions{});
 
         // Apply gamma OETF (public for external pipeline use)
         // Input:  linear   - Linear RGB (CV_32FC3)
