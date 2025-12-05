@@ -8,9 +8,9 @@ Read this file after `README.md` to understand current LABS development state.
 
 ---
 
-## Current Issue: Pink Color Cast
+## Current: Pink Color Cast
 
-LABS output shows pink/magenta tint on neutral subjects (metal appears pink instead of gray).
+LABS output shows pink/magenta tint on neutral subjects.
 
 ### Known Facts
 - Camera preview (embedded JPEG): gray metal ✓
@@ -34,13 +34,13 @@ Do NOT attempt fixes until exact swap location is found.
 ## Architecture (Working)
 
 ```
-RAWS (decode) → Pipe (links) → Sigmoid → Gamma → Display
+RAWS (decode) → Pipe HEAD → BODY (links) → TAIL (sigmoid/gamma)
 ```
 
-- **RAWS:** Pure decode → scene-linear RGB
-- **Pipe:** Links process scene-linear
-- **Sigmoid:** Scene→display tone mapping (in pipe.cpp)
-- **View:** Pure sRGB gamma encoding only
+- **RAWS:** Pure decode → scene-linear RGB + embedded preview
+- **Pipe HEAD:** Holds decoded data
+- **Pipe BODY:** Links process scene-linear (45 dials)
+- **Pipe TAIL:** Sigmoid → Gamma → Display
 
 ---
 
@@ -49,6 +49,7 @@ RAWS (decode) → Pipe (links) → Sigmoid → Gamma → Display
 1. ✓ Remove sigmoid from view.cpp - moved to pipe module
 2. ✓ Design clean separation - RAWS = decode only
 3. ✓ Create dark.json neutral vibe
+4. ✓ Remove curve/poly estimation from RAWS (belongs in LABS/TUNE)
 
 ---
 
