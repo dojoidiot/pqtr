@@ -4,64 +4,80 @@
 
 Read this file after `README.md` to understand current LABS development state.
 
-**BASE** = 435b907 (2025-12-05)
-
-### Where We Are
-
-| Image | Poly | Final | Notes |
-|-------|------|-------|-------|
-| DSC00144 | 12.8% | **12.0%** | Hard image - narrow gamut |
-| DSC00202 | 2.6% | **3.7%** | Green foliage, neutral wood |
-| DSC01559 | 7.2% | **8.0%** | Higher resolution test |
-
-TUNE works. The 45 dials optimize to match reference images. But dial interference limits accuracy on hard images.
+**BASE** = 633c1aa (2025-12-05)
 
 ---
 
-## Current Direction: Stage-Aware Optimization
+## Current Direction: VIBE Neural Dial Prediction
 
-**Full documentation: [stages.md](stages.md)**
+**Goal:** Replace slow optimizer with instant MLP prediction.
 
-### The Problem
+### Status: Trained, Testing Render Modes
 
-All 45 dials optimize against one loss function. VIEW dials (contrast, exposure) fight POPS dials (saturation, vibrance) because they both affect the same loss features.
+Training complete on 537 ARW+JPG pairs. MLP trained with 0.23% validation loss.
 
-Example (DSC00144): Optimizer boosts saturation → this affects luminance perception → optimizer flattens contrast to compensate → result is muddy.
+**Problem discovered:** Raw MLP predictions are conservative (dials cluster near 0.5). The optimizer learned to match camera JPGs by pulling back our pipeline's saturation.
 
-### The Semantic Reframe
+**Solution:** Camera Base + Deltas mode. Use average dials across training as "camera base", then add per-image deltas from MLP.
 
-Instead of "optimize 45 dials", think in **stages**:
+### Render Modes
+
+```bash
+# Raw MLP prediction (conservative)
+bin/vibe render image.ARW --model etc/camera.vibe --out tmp/
+
+# With lush boost (+0.15 to vibrance/saturation)
+bin/vibe render image.ARW --model etc/camera.vibe --out tmp/ --lush 0.15
+
+# Camera base + deltas (recommended)
+bin/vibe render image.ARW --model etc/camera.vibe --out tmp/ --base
+```
+
+### Camera Base Dials
+
+Mean across 537 training samples:
+- **VIEW:** exposure=0.574, contrast=0.535, highlights=0.465, shadows=0.491
+- **POPS:** vibrance=0.461, saturation=0.463, colourDensity=0.468
+
+The sub-0.5 color dials reveal: our pipeline's neutral is more saturated than camera JPGs.
+
+### Architecture
 
 ```
-RAWS → FLAT → VIEW → POPS
+Features (23) → MLP → Raw Dials (45)
+                         ↓
+              Delta = Raw - 0.5
+                         ↓
+              Final = CameraBase + Delta
 ```
 
-| Stage | Purpose | Dials | Loss |
-|-------|---------|-------|------|
-| RAWS | Camera → Linear | 0 | Deterministic |
-| FLAT | Checkpoint | 0 | Verify decode |
-| VIEW | Linear → Display | 5 | **Absolute tone** |
-| POPS | Display → Style | 40 | **Relative color** |
+### Next Steps
 
-### Key Insight
+1. Evaluate --base mode on more images
+2. Consider per-vibe-class base dials (portrait_off, vivid_on, etc.)
+3. Warm-start optimizer integration
 
-**VIEW** = absolute structure ("shadows at L=0.03")
-**POPS** = relative relationships ("greens pop 20% more than neutrals")
+See `doc/vibe.md` for full details.
 
-The reference encodes both. But optimizing both with one loss causes interference.
+---
 
-### Implementation Plan
+## Previous Direction: Grid Search VIEW
 
-1. **Stage-aware loss functions**
-   - `viewLoss()`: Weight `std_L, skew_L, L_p10-90` heavily
-   - `popsLoss()`: Weight `mu_C, std_C, C_p50, C_shadow` heavily
+Tested but didn't improve DSC00144 beyond 12.8%. The problem isn't VIEW search - it's that dial optimization has limits. Neural prediction may generalize better.
 
-2. **Mode::STAGED optimizer**
-   - Phase 1: VIEW dials with viewLoss()
-   - Phase 2: POPS dials with popsLoss()
-   - Phase 3: Optional joint refinement
+---
 
-3. **Test on problem images**
+## Completed: Stage-Aware Optimization
+
+### Implementation
+
+| Component | File | Status |
+|-----------|------|--------|
+| `viewLoss()` | `diff.cpp` | Done |
+| `popsLoss()` | `diff.cpp` | Done |
+| `Mode::STAGED` | `geos.hpp` | Done |
+| `optimizeStaged()` | `staged.cpp` | Done |
+| `bin/gold` | `gold.cpp` | Done |
 
 ---
 
@@ -69,29 +85,30 @@ The reference encodes both. But optimizing both with one loss causes interferenc
 
 | File | Purpose |
 |------|---------|
-| `doc/stages.md` | Full stage-aware optimization documentation |
-| `doc/hack.md` | Reverse engineering notes, camera color science |
-| `src/main/part/geos/spsa.cpp` | SPSA optimizer implementation |
-| `src/main/part/geos/diff.cpp` | Loss function (geodesic distance) |
-| `inc/dials.h` | Dial definitions |
+| `src/main/vibe.cpp` | VIBE training/inference binary |
+| `src/main/part/vibe/mlp.hpp` | MLP forward/backward |
+| `etc/camera.vibe` | Trained Stage 1 model |
+| `tmp/var/vibe/train_full.json` | 537 training samples |
 
 ## Test Commands
 
 ```bash
 cd LABS
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
-  var/pics/DSC00144.ARW preview \
-  --save-area tmp/var/tune \
-  --full --optimizer hybrid --fine --logs
+
+# VIBE render with camera base
+LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/vibe render \
+  /home/z/base/pics/DSC00144.ARW \
+  --model etc/camera.vibe \
+  --out tmp/var/vibe/base \
+  --base
 ```
 
 ## Test Outputs
 
 ```
-tmp/var/tune/DSC00144/
-  head.png    - camera preview (reference)
-  tail.png    - pipeline output
-  diff.png    - difference x5
-  result.png  - final output
-  tune.json   - dial settings
+tmp/var/vibe/base/DSC00144/
+  _preview.png  - camera preview (reference)
+  _vibe.png     - pipeline with predicted dials
+  _camera.png   - camera JPG resized
+  _diff.png     - difference x5
 ```

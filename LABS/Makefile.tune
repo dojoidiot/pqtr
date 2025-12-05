@@ -73,7 +73,7 @@ TRAIN_BIN = $(TEST_BIN_DIR)/train
 # Test input
 TEST_RAW = var/pics/DSC00202.ARW
 
-.PHONY: all clean tune labs test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds jacob axis-balance
+.PHONY: all clean tune labs gold test-fast test-full test test-rnd test-labs test-batch diag train batch-tune train-greedy train-prms train-exhaustive sweep bounds jacob axis-balance test-gold
 
 LABS_VAR_DIR = tmp/var/labs
 
@@ -324,3 +324,46 @@ $(AXIS_OBJ): $(AXIS_SRC) | $(OBJ_DIR)
 axis-balance: $(AXIS_BIN)
 	@echo "=== Axis Balance Test (Hypothesis 3) ==="
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(AXIS_BIN)
+
+# Gold binary (stage-aware optimizer test)
+GOLD_SRC = $(MAIN_SRC)/gold.cpp
+GOLD_OBJ = $(OBJ_DIR)/gold.o
+GOLD_BIN = $(BIN_DIR)/gold
+
+$(GOLD_BIN): $(GOLD_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(GOLD_OBJ): $(GOLD_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+gold: $(GOLD_BIN)
+
+# Run gold on DSC00144 (the hard image)
+test-gold: $(GOLD_BIN)
+	@mkdir -p $(VAR_DIR)
+	@echo "=== Gold Test (Stage-Aware Optimizer) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(GOLD_BIN) var/pics/DSC00144.ARW preview --save-area $(VAR_DIR)
+
+# Vibe binary (neural dial predictor)
+VIBE_SRC = $(MAIN_SRC)/vibe.cpp
+VIBE_OBJ = $(OBJ_DIR)/vibe.o
+VIBE_BIN = $(BIN_DIR)/vibe
+
+$(VIBE_BIN): $(VIBE_OBJ) | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -fopenmp $(LDFLAGS) -o $@ $^ $(LIBS)
+
+$(VIBE_OBJ): $(VIBE_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) -fopenmp $(INCLUDES) -c $< -o $@
+
+vibe: $(VIBE_BIN)
+
+# Extract training data from pics
+vibe-extract: $(VIBE_BIN)
+	@mkdir -p tmp/var/vibe
+	@echo "=== Vibe Extract (features from 537 pairs) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(VIBE_BIN) extract /home/z/base/pics --out tmp/var/vibe/train.json
+
+# Train vibe model
+vibe-train: $(VIBE_BIN)
+	@echo "=== Vibe Train (MLP on extracted data) ==="
+	LD_LIBRARY_PATH=$(OPENCV_LIB) $(VIBE_BIN) train tmp/var/vibe/train.json --out etc/camera.vibe

@@ -383,6 +383,89 @@ namespace geos::internal
         return std::min(1.0f, loss);
     }
 
+    // ============================================================
+    // Stage-specific loss functions
+    // ============================================================
+
+    // VIEW weights: luminance/tone features cranked up, chroma suppressed
+    // Goal: establish brightness, contrast, tone curve shape
+    static constexpr std::array<float, STYLE_DIM> VIEW_WEIGHTS = {
+        0.3f, 0.3f, 0.3f,   // [0-2]  sigma1, sigma2, sigma3 (shape - minor)
+        3.0f,               // [3]    mu_L (brightness - important)
+        0.2f,               // [4]    mu_C (saturation - suppress)
+        6.0f,               // [5]    std_L (contrast - CRITICAL)
+        0.2f,               // [6]    std_C (chroma spread - suppress)
+        6.0f,               // [7]    skew_L (tone asymmetry - CRITICAL)
+        0.3f, 0.1f,         // [8-9]  cov_LC, cov_HC (correlations - minor)
+        0.2f, 0.2f,         // [10-11] mu_a, mu_b (color cast - suppress)
+        6.0f,               // [12]   L_p10 (black point - CRITICAL)
+        6.0f,               // [13]   L_p25 (shadow region - CRITICAL)
+        6.0f,               // [14]   L_p75 (highlight region - CRITICAL)
+        6.0f,               // [15]   L_p90 (white point - CRITICAL)
+        0.2f,               // [16]   C_p50 (chroma median - suppress)
+        0.2f,               // [17]   C_p90 (chroma peak - suppress)
+        0.2f,               // [18]   C_shadow (shadow chroma - suppress)
+        0.1f, 0.1f,         // [19-20] a_shadow, b_shadow (suppress)
+        0.1f, 0.1f          // [21-22] a_highlight, b_highlight (suppress)
+    };
+
+    // POPS weights: chroma/color features cranked up, luminance lightly weighted
+    // Goal: match saturation, color balance, split tones
+    // Light luminance weight keeps tone structure from drifting
+    static constexpr std::array<float, STYLE_DIM> POPS_WEIGHTS = {
+        0.5f, 0.5f, 0.5f,   // [0-2]  sigma1, sigma2, sigma3 (shape)
+        1.0f,               // [3]    mu_L (brightness - light anchor)
+        5.0f,               // [4]    mu_C (saturation - CRITICAL)
+        1.0f,               // [5]    std_L (contrast - light anchor)
+        5.0f,               // [6]    std_C (chroma spread - CRITICAL)
+        1.0f,               // [7]    skew_L (tone - light anchor)
+        0.5f, 0.5f,         // [8-9]  cov_LC, cov_HC (correlations)
+        5.0f, 5.0f,         // [10-11] mu_a, mu_b (color cast - CRITICAL)
+        1.0f,               // [12]   L_p10 (black point - anchor)
+        1.0f,               // [13]   L_p25 (shadow region - anchor)
+        1.0f,               // [14]   L_p75 (highlight region - anchor)
+        1.0f,               // [15]   L_p90 (white point - anchor)
+        5.0f,               // [16]   C_p50 (chroma median - CRITICAL)
+        4.0f,               // [17]   C_p90 (chroma peak - important)
+        5.0f,               // [18]   C_shadow (shadow chroma - CRITICAL)
+        4.0f, 4.0f,         // [19-20] a_shadow, b_shadow (split tone - important)
+        4.0f, 4.0f          // [21-22] a_highlight, b_highlight (split tone - important)
+    };
+
+    float viewLoss(const StyleFeatures& a, const StyleFeatures& b)
+    {
+        float sumWeightedSq = 0.0f;
+        float sumWeights = 0.0f;
+
+        for (int i = 0; i < STYLE_DIM; i++)
+        {
+            float diff = a.v[i] - b.v[i];
+            float w = VIEW_WEIGHTS[i];
+            sumWeightedSq += w * diff * diff;
+            sumWeights += w;
+        }
+
+        float loss = std::sqrt(sumWeightedSq / sumWeights);
+        return std::min(1.0f, loss);
+    }
+
+    float popsLoss(const StyleFeatures& a, const StyleFeatures& b)
+    {
+        float sumWeightedSq = 0.0f;
+        float sumWeights = 0.0f;
+
+        for (int i = 0; i < STYLE_DIM; i++)
+        {
+            float diff = a.v[i] - b.v[i];
+            float w = POPS_WEIGHTS[i];
+            sumWeightedSq += w * diff * diff;
+            sumWeights += w;
+        }
+
+        float loss = std::sqrt(sumWeightedSq / sumWeights);
+        return std::min(1.0f, loss);
+    }
+
     std::pair<float, float> computeDome(const StyleFeatures& target, const StyleFeatures& candidate)
     {
         // Dot product

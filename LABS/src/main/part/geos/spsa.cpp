@@ -1312,6 +1312,10 @@ namespace geos::internal
         {
             result = optimizeDisplay(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated, targetFeatures);
         }
+        else if (config.geos_mode == Mode::STAGED)
+        {
+            result = optimizeStaged(body, link, targetStyle, targetLaplacianVar, config, progress);
+        }
         else
         {
             result = optimizeBlockwise(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated);

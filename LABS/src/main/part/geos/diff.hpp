@@ -115,6 +115,20 @@ namespace geos::internal
     // Geodesic loss: 1 - |<a|b>|^2
     float geodesicLoss(const StyleFeatures& a, const StyleFeatures& b);
 
+    // ============================================================
+    // Stage-specific loss functions (for staged optimization)
+    // ============================================================
+
+    // VIEW loss: heavily weights luminance/tone features
+    // Use for optimizing: exposure, contrast, highlights, shadows, black, white
+    // Features emphasized: std_L, skew_L, L_p10, L_p25, L_p75, L_p90
+    float viewLoss(const StyleFeatures& a, const StyleFeatures& b);
+
+    // POPS loss: heavily weights chroma/color features
+    // Use for optimizing: everything else (saturation, vibrance, split tone, selective color)
+    // Features emphasized: mu_C, std_C, C_p50, C_p90, C_shadow, split tone
+    float popsLoss(const StyleFeatures& a, const StyleFeatures& b);
+
     // Diagnostic: per-feature error analysis
     extern const char* FEATURE_NAMES[STYLE_DIM];
     std::array<float, STYLE_DIM> perFeatureError(const StyleFeatures& target, const StyleFeatures& candidate);

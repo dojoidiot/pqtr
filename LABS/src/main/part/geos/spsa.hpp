@@ -231,4 +231,20 @@ namespace geos::internal
         const TargetFeatures* targetFeatures = nullptr
     );
 
+    // ============================================================
+    // STAGED mode optimizer (separate from SPSA)
+    // ============================================================
+
+    // Run staged optimization: VIEW (6 tone dials) then POPS (39 color dials)
+    // Each phase uses stage-specific loss functions (viewLoss, popsLoss)
+    // Returns number of iterations performed
+    int optimizeStaged(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const StyleFeatures& targetStyle,
+        float targetLaplacianVar,
+        const Config& config,
+        Callback progress
+    );
+
 } // namespace geos::internal

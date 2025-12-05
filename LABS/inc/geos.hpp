@@ -64,7 +64,8 @@ namespace geos
         FULL_35D,      // Single-phase: all 45 dials simultaneously
         LINEAR_ONLY,   // Linear ops only: skip ToneMapping (dials 3-9)
         SCENE_LINEAR,  // Scene-referred: exposure(0), temp(1), tint(2), black(8), white(9) only
-        DISPLAY        // Display-referred: skip scene-linear dials, optimize rest + LUT
+        DISPLAY,       // Display-referred: skip scene-linear dials, optimize rest + LUT
+        STAGED         // Stage-aware: VIEW (6 tone dials) then POPS (39 color dials)
     };
 
     // Optimizer algorithm selection

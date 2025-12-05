@@ -58,6 +58,14 @@ Debug outputs:
 
 ### Recent Completions
 
+- [x] **STAGED optimizer** (2025-12-05)
+  - Phase 1: VIEW (6 tone dials) with viewLoss() - luminance features weighted high
+  - Phase 2: POPS (31 color dials) with popsLoss() - chroma features weighted high
+  - Phase 3: Joint (45 dials) with geodesicLoss() - final polish
+  - POPS uses axis-based groups: GLOBAL, SPLIT, R-C, G-M, B-Y, O-P (opponent color pairs)
+  - `staged.cpp`, `diff.cpp` (viewLoss/popsLoss), `gold.cpp` (test binary)
+  - Results: DSC00202 achieves 2.4% (better than HYBRID's 3.7%)
+
 - [x] **Three-phase architecture** (2024-12-02)
   - Phase 0: Camera Math - polynomial transform from RAWS
   - Phase 1: Camera Vibe - optimize 45 dials to match preview
@@ -76,6 +84,7 @@ Debug outputs:
 
 ### Pending
 
+- [ ] **VIEW phase improvements** - Hard images (DSC00144) oscillate due to non-convex loss landscape. Options: lower learning rate, multi-start, coordinate descent.
 - [ ] **Jacobian retraining** - Current jacob.json was trained with flat baseline; consider retraining with poly-first architecture for optimal convergence
 
 ### Deferred
@@ -146,6 +155,9 @@ Potential use (not yet implemented):
 
 ### Key Files
 
+- `src/main/part/geos/staged.cpp` - STAGED optimizer (VIEW → POPS → Joint)
+- `src/main/part/geos/diff.cpp` - viewLoss(), popsLoss(), geodesicLoss()
+- `src/main/gold.cpp` - Test binary for STAGED mode
 - `RAWS/inc/raws.hpp` - Result has baseCurve[768], hasBaseCurve
 - `RAWS/src/main/raws.cpp` - estimateBaseCurve() function
 - `LABS/inc/pipe.hpp` - Head::baseCurve(), Link::BaseCurve simplified
