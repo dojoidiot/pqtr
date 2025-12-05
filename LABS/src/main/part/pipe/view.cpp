@@ -1,7 +1,9 @@
 // view.cpp
 // Display conversion utilities (linear → sRGB)
+// Includes darktable-compatible sigmoid tone mapping
 
 #include "view.hpp"
+#include "mods/mods.h"
 #include <opencv2/imgproc.hpp>
 
 namespace pipe::internal
@@ -46,8 +48,14 @@ namespace pipe::internal
             }
         }
 
+        // Apply sigmoid tone mapping (darktable scene-referred default)
+        // This compresses HDR scene-linear values into display range
+        cv::UMat tonemapped;
+        mods::sigmoid_default(scaled, tonemapped);
+
+        // Apply sRGB gamma encoding
         cv::UMat gamma;
-        applyGamma(scaled, gamma);
+        applyGamma(tonemapped, gamma);
 
         cv::UMat out8;
         gamma.convertTo(out8, CV_8UC3, 255.0);

@@ -68,11 +68,39 @@ namespace mods
     void base_curve_identity(float* curve);
 
     //--------------------------------------------------------------------------
-    // Tone Mapping (7 dials)
+    // Sigmoid Tone Mapping (darktable scene-referred default)
+    //--------------------------------------------------------------------------
+
+    // Sigmoid - darktable-compatible scene-referred tone mapping
+    // Generalized log-logistic sigmoid modeling film + paper response
+    //
+    // This is the RECOMMENDED tone mapper for scene-linear to display conversion.
+    // It matches darktable's default scene-referred workflow.
+    //
+    // Parameters:
+    //   contrast:     Curve steepness (0.1-10.0, default 1.5)
+    //   skewness:     Shift contrast to shadows(-) or highlights(+) (-1 to +1, default 0)
+    //   white_target: Display white level (0.5-1.6, default 1.0)
+    //   black_target: Display black level (0-0.15, default 0.000152)
+    bool sigmoid(
+        const cv::UMat& input,
+        cv::UMat& output,
+        float contrast = 1.5f,
+        float skewness = 0.0f,
+        float white_target = 1.0f,
+        float black_target = 0.000152f);
+
+    // Apply sigmoid with darktable defaults (convenience)
+    bool sigmoid_default(const cv::UMat& input, cv::UMat& output);
+
+    //--------------------------------------------------------------------------
+    // Tone Mapping (7 dials) - Legacy/Creative
     //--------------------------------------------------------------------------
 
     // Tone Mapping - HDR → SDR compression
     // Filmic curve with 7 dials for complete control
+    // NOTE: For baseline processing, use sigmoid() instead.
+    //       This is for creative adjustments on top of sigmoid.
     //
     // All dials: 0.0-1.0, default 0.5 (neutral)
     //   contrast:       Global curve contrast (0.5→1.0 neutral)

@@ -74,6 +74,7 @@ MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/white_balance.o \
             $(OBJ_DIR)/mods/base_curve.o \
             $(OBJ_DIR)/mods/tone_map.o \
+            $(OBJ_DIR)/mods/sigmoid.o \
             $(OBJ_DIR)/mods/global_color.o \
             $(OBJ_DIR)/mods/selective_color.o \
             $(OBJ_DIR)/mods/geometric.o \

@@ -4,75 +4,68 @@
 
 Read this file after `README.md` to understand current LABS development state.
 
-**BASE** = a1fb942 (2025-12-05)
+**BASE** = e90c188 (2025-12-05)
 
 ---
 
-## Current Direction: Reset & Darktable Alignment
+## Current Direction: Clean Architecture
 
-**Goal:** Validate pipeline against darktable, shift to per-camera vibes.
+**Goal:** Pure separation - RAWS decodes, Pipe processes, vibes configure.
 
-### Strategic Shift (from recommendations.md)
+### Architecture Insight
 
-1. **Stop** per-image optimization against embedded JPEGs
-2. **Stop** neural dial prediction (parked for now)
-3. **Start** per-camera calibration → fixed vibes
-4. **Start** manual dial adjustment in DESK UI
+The pipeline drifted. Need to refactor:
+
+**Current (messy):**
+- RAWS: decode + some processing baked in
+- view.cpp: sigmoid baked into display conversion
+- Processing scattered across layers
+
+**Target (clean):**
+- RAWS: pure decode only (libraw replacement) → scene-linear RGB out
+- Pipe: ALL processing via configurable links
+  - Modules handle everything: exposure, WB, sigmoid, tone mapping
+  - DARK vibe = dial settings that match darktable defaults
+- View: pure sRGB gamma encoding, nothing else
 
 ### Why
 
-- DRO (Dynamic Range Optimizer) is spatially-varying - no global transform can match it
-- Per-image optimization was solving the wrong problem
-- Industry approach: calibrate once per camera, user adjusts from baseline
-
-### Darktable Integration
-
-Built darktable in `dark/` (gitignored). Using CLI for reference renders:
-
-```bash
-# Process RAW with darktable defaults
-/home/z/base/code/pqtr/dark/lib/dark/bin/darktable-cli \
-  image.ARW output_dir/ \
-  --out-ext png --verbose \
-  --core --configdir /home/z/base/code/pqtr/dark/tmp/config
-```
-
-### Validation Plan
-
-1. **Compare darktable vs LABS output** - same RAW, both with neutral settings
-2. **Identify gaps** - where does our decode differ?
-3. **Map darktable modules → LABS dials** - create translation table
-4. **Manual validation in DESK** - can you match darktable output with the 45 sliders?
+- RAWS should be a clean-room libraw replacement, nothing more
+- All "look" decisions belong in the pipe as configurable dials
+- A "darktable look" is just a vibe (preset), not special code
+- Easier to reason about: decode → process → display
 
 ---
 
-## Parked: VIBE Neural Prediction
+## Findings from Darktable Comparison
 
-MLP trained on 537 samples, 0.23% validation loss. Predictions are conservative (dials cluster near 0.5). Parked because:
+Tested LABS vs darktable on same RAW:
 
-- Per-image prediction may be wrong target
-- Per-camera vibe (simple averaging) may be sufficient
-- Can resurrect for scene classification later
+| Metric | Without Vibe | With +1.2 EV Vibe |
+|--------|--------------|-------------------|
+| Mean diff | 15.9% | 17.4% |
+| Lum ratio | 0.678 (darker) | 1.103 (brighter) |
 
----
-
-## Key Architecture Points (validated)
-
-| Aspect | Status |
-|--------|--------|
-| Pipeline order (RAWS→FLAT→VIEW→POPS) | ✓ Matches darktable |
-| 45 dials coverage | ✓ Complete for Lightroom parity |
-| DESK UI | ✓ Ready for manual adjustment |
-| Scene-referred workflow | ✓ Implemented |
+The issue isn't just exposure - there are fundamental differences in:
+1. What RAWS outputs (may have processing baked in)
+2. Sigmoid implementation details
+3. Color matrix / white balance handling
 
 ---
 
 ## Immediate Next Steps
 
-1. Compare darktable default output vs LABS output
-2. Create darktable module → LABS dial mapping
-3. Test DESK with manual dial adjustment
-4. Create per-camera `.vibe` from darktable style settings
+1. **Audit RAWS** - what processing is currently embedded?
+2. **Remove sigmoid from view.cpp** - move to pipe module
+3. **Design clean separation** - RAWS = decode only
+4. **Create DARK vibe** - dial settings matching darktable defaults
+
+---
+
+## Parked
+
+- VIBE neural prediction (per-camera vibes may be sufficient)
+- Per-image optimization (DRO is spatially-varying, can't match globally)
 
 ---
 
@@ -80,25 +73,24 @@ MLP trained on 537 samples, 0.23% validation loss. Predictions are conservative 
 
 | File | Purpose |
 |------|---------|
-| `doc/recommendations.md` | Pipeline strategy synthesis |
-| `note.md` | Reset mode thinking |
-| `dark/lib/dark/bin/darktable-cli` | Reference renderer |
-| `DESK/bin/desk` | Manual dial adjustment UI |
+| `src/main/part/pipe/view.cpp` | Display conversion (has sigmoid - to remove) |
+| `src/main/part/pipe/mods/sigmoid.cpp` | Sigmoid module (keep) |
+| `inc/RAWS/raws.hpp` | RAWS interface (audit for embedded processing) |
+| `etc/vibes/darktable.json` | Darktable-matching vibe (WIP) |
 
 ## Test Commands
 
 ```bash
 cd LABS
 
-# LABS render (current pipeline)
+# Generate darktable reference
+../dark/lib/dark/bin/darktable-cli \
+  image.ARW tmp/darktable_output.png
+
+# LABS render
 LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/labs \
   image.ARW --output tmp/labs_output.png
 
-# Darktable render (reference)
-../dark/lib/dark/bin/darktable-cli \
-  image.ARW tmp/ --out-ext png --verbose \
-  --core --configdir ../dark/tmp/config
-
-# Compare outputs
-compare tmp/labs_output.png tmp/image.png -compose src tmp/diff.png
+# Compare
+compare tmp/labs_output.png tmp/darktable_output.png tmp/diff.png
 ```
