@@ -4,80 +4,75 @@
 
 Read this file after `README.md` to understand current LABS development state.
 
-**BASE** = 633c1aa (2025-12-05)
+**BASE** = a1fb942 (2025-12-05)
 
 ---
 
-## Current Direction: VIBE Neural Dial Prediction
+## Current Direction: Reset & Darktable Alignment
 
-**Goal:** Replace slow optimizer with instant MLP prediction.
+**Goal:** Validate pipeline against darktable, shift to per-camera vibes.
 
-### Status: Trained, Testing Render Modes
+### Strategic Shift (from recommendations.md)
 
-Training complete on 537 ARW+JPG pairs. MLP trained with 0.23% validation loss.
+1. **Stop** per-image optimization against embedded JPEGs
+2. **Stop** neural dial prediction (parked for now)
+3. **Start** per-camera calibration → fixed vibes
+4. **Start** manual dial adjustment in DESK UI
 
-**Problem discovered:** Raw MLP predictions are conservative (dials cluster near 0.5). The optimizer learned to match camera JPGs by pulling back our pipeline's saturation.
+### Why
 
-**Solution:** Camera Base + Deltas mode. Use average dials across training as "camera base", then add per-image deltas from MLP.
+- DRO (Dynamic Range Optimizer) is spatially-varying - no global transform can match it
+- Per-image optimization was solving the wrong problem
+- Industry approach: calibrate once per camera, user adjusts from baseline
 
-### Render Modes
+### Darktable Integration
+
+Built darktable in `dark/` (gitignored). Using CLI for reference renders:
 
 ```bash
-# Raw MLP prediction (conservative)
-bin/vibe render image.ARW --model etc/camera.vibe --out tmp/
-
-# With lush boost (+0.15 to vibrance/saturation)
-bin/vibe render image.ARW --model etc/camera.vibe --out tmp/ --lush 0.15
-
-# Camera base + deltas (recommended)
-bin/vibe render image.ARW --model etc/camera.vibe --out tmp/ --base
+# Process RAW with darktable defaults
+/home/z/base/code/pqtr/dark/lib/dark/bin/darktable-cli \
+  image.ARW output_dir/ \
+  --out-ext png --verbose \
+  --core --configdir /home/z/base/code/pqtr/dark/tmp/config
 ```
 
-### Camera Base Dials
+### Validation Plan
 
-Mean across 537 training samples:
-- **VIEW:** exposure=0.574, contrast=0.535, highlights=0.465, shadows=0.491
-- **POPS:** vibrance=0.461, saturation=0.463, colourDensity=0.468
-
-The sub-0.5 color dials reveal: our pipeline's neutral is more saturated than camera JPGs.
-
-### Architecture
-
-```
-Features (23) → MLP → Raw Dials (45)
-                         ↓
-              Delta = Raw - 0.5
-                         ↓
-              Final = CameraBase + Delta
-```
-
-### Next Steps
-
-1. Evaluate --base mode on more images
-2. Consider per-vibe-class base dials (portrait_off, vivid_on, etc.)
-3. Warm-start optimizer integration
-
-See `doc/vibe.md` for full details.
+1. **Compare darktable vs LABS output** - same RAW, both with neutral settings
+2. **Identify gaps** - where does our decode differ?
+3. **Map darktable modules → LABS dials** - create translation table
+4. **Manual validation in DESK** - can you match darktable output with the 45 sliders?
 
 ---
 
-## Previous Direction: Grid Search VIEW
+## Parked: VIBE Neural Prediction
 
-Tested but didn't improve DSC00144 beyond 12.8%. The problem isn't VIEW search - it's that dial optimization has limits. Neural prediction may generalize better.
+MLP trained on 537 samples, 0.23% validation loss. Predictions are conservative (dials cluster near 0.5). Parked because:
+
+- Per-image prediction may be wrong target
+- Per-camera vibe (simple averaging) may be sufficient
+- Can resurrect for scene classification later
 
 ---
 
-## Completed: Stage-Aware Optimization
+## Key Architecture Points (validated)
 
-### Implementation
+| Aspect | Status |
+|--------|--------|
+| Pipeline order (RAWS→FLAT→VIEW→POPS) | ✓ Matches darktable |
+| 45 dials coverage | ✓ Complete for Lightroom parity |
+| DESK UI | ✓ Ready for manual adjustment |
+| Scene-referred workflow | ✓ Implemented |
 
-| Component | File | Status |
-|-----------|------|--------|
-| `viewLoss()` | `diff.cpp` | Done |
-| `popsLoss()` | `diff.cpp` | Done |
-| `Mode::STAGED` | `geos.hpp` | Done |
-| `optimizeStaged()` | `staged.cpp` | Done |
-| `bin/gold` | `gold.cpp` | Done |
+---
+
+## Immediate Next Steps
+
+1. Compare darktable default output vs LABS output
+2. Create darktable module → LABS dial mapping
+3. Test DESK with manual dial adjustment
+4. Create per-camera `.vibe` from darktable style settings
 
 ---
 
@@ -85,30 +80,25 @@ Tested but didn't improve DSC00144 beyond 12.8%. The problem isn't VIEW search -
 
 | File | Purpose |
 |------|---------|
-| `src/main/vibe.cpp` | VIBE training/inference binary |
-| `src/main/part/vibe/mlp.hpp` | MLP forward/backward |
-| `etc/camera.vibe` | Trained Stage 1 model |
-| `tmp/var/vibe/train_full.json` | 537 training samples |
+| `doc/recommendations.md` | Pipeline strategy synthesis |
+| `note.md` | Reset mode thinking |
+| `dark/lib/dark/bin/darktable-cli` | Reference renderer |
+| `DESK/bin/desk` | Manual dial adjustment UI |
 
 ## Test Commands
 
 ```bash
 cd LABS
 
-# VIBE render with camera base
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/vibe render \
-  /home/z/base/pics/DSC00144.ARW \
-  --model etc/camera.vibe \
-  --out tmp/var/vibe/base \
-  --base
-```
+# LABS render (current pipeline)
+LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/labs \
+  image.ARW --output tmp/labs_output.png
 
-## Test Outputs
+# Darktable render (reference)
+../dark/lib/dark/bin/darktable-cli \
+  image.ARW tmp/ --out-ext png --verbose \
+  --core --configdir ../dark/tmp/config
 
-```
-tmp/var/vibe/base/DSC00144/
-  _preview.png  - camera preview (reference)
-  _vibe.png     - pipeline with predicted dials
-  _camera.png   - camera JPG resized
-  _diff.png     - difference x5
+# Compare outputs
+compare tmp/labs_output.png tmp/image.png -compose src tmp/diff.png
 ```
