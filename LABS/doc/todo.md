@@ -1,7 +1,31 @@
 # LABS TODO
 
+## Status: Baseline Architecture Complete (2025-12-07)
+
+Generic camera baseline implemented in HEAD. Clean separation of concerns:
+
+| Layer | Responsibility | Camera-specific? |
+|-------|---------------|------------------|
+| **RAWS** | Bayer decode, WB, color matrix | Yes |
+| **HEAD baseline** | +0.7 EV exposure, highlight recovery | No (generic) |
+| **BODY** | 45 style dials, optimization | No (generic) |
+
+**Key files:**
+- `src/main/part/pipe/mods/baseline.cpp` - highlight recovery + exposure boost
+- `src/main/part/pipe/pipe.cpp` - HeadImpl applies baseline_default()
+
+**Result:** Flat-ish but neutral starting point. Optimizer has room to work without fighting baked-in processing.
+
+---
+
 ## Completed
 
+- [x] **Generic camera baseline** (2025-12-07)
+  - `baseline.cpp`: highlight_recovery() + baseline() functions
+  - HeadImpl applies baseline_default() to RAWS scene-linear output
+  - +0.7 EV exposure boost (darktable default)
+  - Highlight recovery @ 0.95 clip threshold
+  - Camera-agnostic: works for any camera's scene-linear output
 - [x] 23D feature vector (sigma, LCH, percentiles, shadow chroma, split tone colors)
 - [x] Weighted L2 loss with trained weights
 - [x] Training infrastructure (train-greedy, train-prms, train-exhaustive)
@@ -58,6 +82,14 @@ Debug outputs:
 
 ### Recent Completions
 
+- [x] **DESK pipe panel refactor** (2025-12-06)
+  - Tree structure: HEAD (base/view) + BODY (Links)
+  - Split layout: tree left, image preview right
+  - Click `base` → scene-linear (gamma-corrected), `view` → embedded JPEG, Link → BODY output
+  - `state.hpp`: Added `PipeView` enum, `base_texture`
+  - `projects.cpp`: HEAD/BODY nodes, inline preview
+  - `files.cpp`: `load_embedded_preview()` loads both base + view textures
+
 - [x] **STAGED optimizer** (2025-12-05)
   - Phase 1: VIEW (6 tone dials) with viewLoss() - luminance features weighted high
   - Phase 2: POPS (31 color dials) with popsLoss() - chroma features weighted high
@@ -82,14 +114,32 @@ Debug outputs:
   - Added `--debug` to labs for pipeline artifact inspection
   - tune outputs three-phase results with clear metrics
 
-### Pending
+### Pending (if validation fails)
 
-- [ ] **VIEW phase improvements** - Hard images (DSC00144) oscillate due to non-convex loss landscape. Options: lower learning rate, multi-start, coordinate descent.
-- [ ] **Jacobian retraining** - Current jacob.json was trained with flat baseline; consider retraining with poly-first architecture for optimal convergence
+- [ ] **VIEW phase improvements** - Only if non-DRO images fail to hit <3%. Options: lower learning rate, multi-start, coordinate descent.
+- [ ] **Jacobian retraining** - Only if optimizer convergence is the bottleneck, not data.
 
-### Deferred
+### Next: LocalTone Grid (after validation)
 
-- **True spatial local tone mapping** - would require full Iridix algorithm; out of scope
+Spatial dials to capture DRO-like effects without reverse-engineering Sony's algorithm.
+
+```
+Level 0:  1×1  →  45 global dials (current)
+Level 1:  2×2  →  4 cells × 3 tone dials = 12 params
+Level 2:  4×4  →  16 cells × 3 tone dials = 48 params
+```
+
+Per-cell dials (deltas from global):
+- exposure, shadows, highlights (3 dials per cell)
+- Bilinear interpolation between cells
+
+Optimization flow:
+1. Optimize global 45 dials (done)
+2. Compute spatial error map
+3. Optimize per-cell tone dials where error is high
+4. Subdivide if needed
+
+**Implementation:** New `LocalTone` link in pipe with grid of tone deltas.
 
 ---
 

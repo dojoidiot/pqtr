@@ -185,9 +185,21 @@ class HeadImpl : public Head
 
 public:
     HeadImpl(Info dataInfo, View dataView, Info viewInfo, View viewImage)
-        : m_data(std::move(dataInfo), std::move(dataView))
-        , m_view(std::move(viewInfo), std::move(viewImage))
+        : m_view(std::move(viewInfo), std::move(viewImage))
     {
+        // Apply generic camera baseline (works for any camera's scene-linear output)
+        // Includes: highlight recovery + exposure boost (+0.7 EV)
+        // This bridges the gap from flat scene-linear to "looks good" starting point
+        View baselined;
+        if (mods::baseline_default(dataView, baselined))
+        {
+            m_data = DataImpl(std::move(dataInfo), std::move(baselined));
+        }
+        else
+        {
+            // Fallback: use original data if baseline fails
+            m_data = DataImpl(std::move(dataInfo), std::move(dataView));
+        }
     }
 
     Data& data() override { return m_data; }

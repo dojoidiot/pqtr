@@ -69,7 +69,8 @@ PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o \
             $(OBJ_DIR)/pipe/view.o \
             $(OBJ_DIR)/pipe/link.o
 
-MODS_OBJS = $(OBJ_DIR)/mods/color_matrix.o \
+MODS_OBJS = $(OBJ_DIR)/mods/baseline.o \
+            $(OBJ_DIR)/mods/color_matrix.o \
             $(OBJ_DIR)/mods/exposure.o \
             $(OBJ_DIR)/mods/white_balance.o \
             $(OBJ_DIR)/mods/base_curve.o \

@@ -1,5 +1,60 @@
 # LABS TLDR
 
+## Core Model
+
+```
+RAW sensor data
+     │
+     ▼
+   [RAWS] ─── camera decode ──► Scene-linear RGB (flat)
+     │                          ├── Bayer decode
+     │                          ├── White balance
+     │                          └── Color matrix
+     ▼
+   [HEAD] ─── generic baseline ──► "Looks decent" starting point
+     │                             ├── +0.7 EV exposure
+     │                             ├── Highlight recovery
+     │                             └── Works for any camera
+     ▼
+   [BODY] ─── 45 dials ──► Any look you want
+     │
+     ├── Camera Vibe: find dials that → camera JPEG
+     ├── Darktable: human moves sliders → their edit
+     └── User Vibe: find dials that → photographer's edit
+```
+
+**The insight:** RAWS handles camera-specific decoding. HEAD applies generic baseline (darktable-equivalent defaults). BODY optimizes style. The camera JPEG is ONE dial setting. A Lightroom edit is ANOTHER dial setting. Same 45 dials, different targets.
+
+**In DESK:** The Pipe panel shows this structure - click HEAD/base to see the baselined image, HEAD/view to see the camera preview, or any BODY link to see processed output.
+
+**The only limit:** Transforms outside our dial space (see DRO below).
+
+---
+
+## Success Criteria
+
+| Metric | Target | Current |
+|--------|--------|---------|
+| Non-DRO images | <3% error | 2-4% ✅ |
+| DRO-light images | <5% error | 3-5% ✅ |
+| DRO-heavy images | <5% + DRO penalty | 12-16% (expected) |
+
+### DRO Error Budget
+
+Sony's DRO (Dynamic Range Optimizer) applies **spatially-varying** shadow lift - different regions get different adjustments based on local content. This is outside our dial space.
+
+| Image Type | Example | Our Error | DRO Contribution |
+|------------|---------|-----------|------------------|
+| No DRO / simple | DSC00202 | 2-4% | ~0% |
+| Moderate DRO | DSC00144 | 5-8% | ~3-5% |
+| Heavy DRO (foliage) | DSC01531 | 12-16% | ~10-12% |
+
+**Parked:** DRO is a spatial problem requiring local tone mapping (Iridix-style). Out of scope. If non-DRO images achieve <3%, the system works.
+
+**Done = non-DRO images at <3% error.** DRO penalty is known and accepted.
+
+---
+
 ## Workflow
 
 ```bash

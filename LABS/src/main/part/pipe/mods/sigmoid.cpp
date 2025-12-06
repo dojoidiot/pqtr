@@ -232,13 +232,14 @@ bool sigmoid(
 }
 
 // Convenience: apply with darktable defaults
+// Parameters decoded from darktable XMP (scene-referred workflow)
 bool sigmoid_default(const cv::UMat& input, cv::UMat& output)
 {
     return sigmoid(input, output,
                    1.5f,      // contrast (darktable default)
                    0.0f,      // skewness (neutral)
                    1.0f,      // white_target (100%)
-                   0.000152f  // black_target (0.0152%)
+                   0.0152f    // black_target (1.52% - decoded from darktable XMP)
     );
 }
 

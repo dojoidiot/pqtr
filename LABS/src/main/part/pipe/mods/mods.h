@@ -14,6 +14,30 @@ namespace pipe
 namespace mods
 {
     //--------------------------------------------------------------------------
+    // Generic Camera Baseline (HEAD processing, no dials)
+    //--------------------------------------------------------------------------
+
+    // Highlight recovery - reconstructs clipped channels using unclipped ratios
+    // Based on darktable's "inpaint opposed" algorithm
+    // clip_threshold: value above which pixels are considered clipped (0-1, default 0.95)
+    bool highlight_recovery(
+        const cv::UMat& input,
+        cv::UMat& output,
+        float clip_threshold = 0.95f);
+
+    // Full baseline processing for any camera's scene-linear output
+    // Applies: highlight recovery → exposure boost
+    // This produces a "looks good" starting point for the optimizer
+    bool baseline(
+        const cv::UMat& input,
+        cv::UMat& output,
+        float exposure_ev = 0.7f,       // Exposure boost in EV (darktable default)
+        float highlight_clip = 0.95f);  // Highlight clip threshold
+
+    // Convenience: apply with darktable scene-referred defaults
+    bool baseline_default(const cv::UMat& input, cv::UMat& output);
+
+    //--------------------------------------------------------------------------
     // Geometric (6 dials)
     //--------------------------------------------------------------------------
 
@@ -43,6 +67,14 @@ namespace mods
         const cv::UMat &input,
         cv::UMat &output,
         float dial);
+
+    // Exposure (direct EV) - for baseline processing
+    // ev: exposure value in stops (e.g., +0.7, -1.0)
+    // Used by HEAD to apply darktable-equivalent baseline
+    bool exposure_ev(
+        const cv::UMat &input,
+        cv::UMat &output,
+        float ev);
 
     // White Balance - color temperature and tint
     // temperature: 0.0-1.0, default 0.5 (maps to 2000K-10000K)
