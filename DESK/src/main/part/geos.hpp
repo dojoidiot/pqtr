@@ -22,4 +22,18 @@ void randomize_geos_dials();
 float get_geos_dial(int index);
 void set_geos_dial(int index, float value);
 
+// ============================================================
+// Tuning State (for optimizer visualization)
+// ============================================================
+
+// Set tuning mode (disables random drift, shows optimizer position)
+void set_geos_tuning(bool active);
+bool is_geos_tuning();
+
+// Update optimizer progress (r=0-1 distance from target, theta=direction)
+void set_geos_progress(float r, float theta, float loss);
+
+// Get current loss for display
+float get_geos_loss();
+
 } // namespace desk

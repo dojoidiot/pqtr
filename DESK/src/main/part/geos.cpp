@@ -36,6 +36,12 @@ static double g_last_time = 0.0;
 static bool g_initialized = false;
 static std::mt19937 g_rng;
 
+// Tuning state
+static bool g_tuning = false;
+static float g_tune_r = 0.0f;      // Distance from target (0=converged, 1=far)
+static float g_tune_theta = 0.0f;  // Direction of error
+static float g_tune_loss = 0.0f;   // Current loss value
+
 // ============================================================
 // 3D Math
 // ============================================================
@@ -277,6 +283,28 @@ void set_geos_dial(int index, float value) {
     g_dials[index] = value;
 }
 
+void set_geos_tuning(bool active) {
+    g_tuning = active;
+    if (!active) {
+        g_tune_r = 0.0f;
+        g_tune_loss = 0.0f;
+    }
+}
+
+bool is_geos_tuning() {
+    return g_tuning;
+}
+
+void set_geos_progress(float r, float theta, float loss) {
+    g_tune_r = r;
+    g_tune_theta = theta;
+    g_tune_loss = loss;
+}
+
+float get_geos_loss() {
+    return g_tune_loss;
+}
+
 // ============================================================
 // Triangle for depth sorting
 // ============================================================
@@ -298,26 +326,29 @@ void render_geos_panel() {
     float delta = static_cast<float>(current_time - g_last_time);
     g_last_time = current_time;
 
-    // Update rotation
-    g_rotation_angle += delta * ROTATION_SPEED;
+    // Update rotation (slower when tuning)
+    float rot_speed = g_tuning ? ROTATION_SPEED * 0.3f : ROTATION_SPEED;
+    g_rotation_angle += delta * rot_speed;
 
-    // Drift dial values randomly
-    std::uniform_real_distribution<float> drift_dist(-DRIFT_RANGE, DRIFT_RANGE);
-    for (int i = 0; i < NUM_DIALS; i++) {
-        // Randomly change velocity
-        g_dial_velocity[i] += drift_dist(g_rng) * delta;
-        g_dial_velocity[i] = std::clamp(g_dial_velocity[i], -DRIFT_SPEED, DRIFT_SPEED);
+    // Only drift dial values when NOT tuning
+    if (!g_tuning) {
+        std::uniform_real_distribution<float> drift_dist(-DRIFT_RANGE, DRIFT_RANGE);
+        for (int i = 0; i < NUM_DIALS; i++) {
+            // Randomly change velocity
+            g_dial_velocity[i] += drift_dist(g_rng) * delta;
+            g_dial_velocity[i] = std::clamp(g_dial_velocity[i], -DRIFT_SPEED, DRIFT_SPEED);
 
-        // Apply velocity
-        g_dials[i] += g_dial_velocity[i] * delta;
+            // Apply velocity
+            g_dials[i] += g_dial_velocity[i] * delta;
 
-        // Bounce off bounds
-        if (g_dials[i] <= 0.0f) {
-            g_dials[i] = 0.0f;
-            g_dial_velocity[i] = std::abs(g_dial_velocity[i]);
-        } else if (g_dials[i] >= 1.0f) {
-            g_dials[i] = 1.0f;
-            g_dial_velocity[i] = -std::abs(g_dial_velocity[i]);
+            // Bounce off bounds
+            if (g_dials[i] <= 0.0f) {
+                g_dials[i] = 0.0f;
+                g_dial_velocity[i] = std::abs(g_dial_velocity[i]);
+            } else if (g_dials[i] >= 1.0f) {
+                g_dials[i] = 1.0f;
+                g_dial_velocity[i] = -std::abs(g_dial_velocity[i]);
+            }
         }
     }
 
@@ -397,13 +428,44 @@ void render_geos_panel() {
         draw_list->AddTriangle(tri.p[0], tri.p[1], tri.p[2], IM_COL32(0, 0, 0, 30), 0.5f);
     }
 
-    // Randomize button
-    ImGui::SetCursorPosX((avail.x - 100) * 0.5f);
-    if (ImGui::Button("Randomize", ImVec2(100, 0))) {
-        randomize_geos_dials();
-        std::uniform_real_distribution<float> vel_dist(-DRIFT_SPEED, DRIFT_SPEED);
-        for (int i = 0; i < NUM_DIALS; i++) {
-            g_dial_velocity[i] = vel_dist(g_rng);
+    // Draw optimizer position when tuning
+    if (g_tuning) {
+        // Target at center (north pole projected)
+        draw_list->AddCircleFilled(center, 6, IM_COL32(0, 255, 0, 200), 16);
+
+        // Current position based on r and theta
+        float px = center.x + g_tune_r * radius * 0.8f * std::cos(g_tune_theta);
+        float py = center.y - g_tune_r * radius * 0.8f * std::sin(g_tune_theta);
+
+        // Trail line from center to position
+        draw_list->AddLine(center, ImVec2(px, py), IM_COL32(255, 100, 100, 150), 2.0f);
+
+        // Current position dot
+        ImU32 dot_color = IM_COL32(255, 50, 50, 255);
+        if (g_tune_r < 0.1f) dot_color = IM_COL32(50, 255, 50, 255);  // Green when close
+        else if (g_tune_r < 0.3f) dot_color = IM_COL32(255, 255, 50, 255);  // Yellow
+        draw_list->AddCircleFilled(ImVec2(px, py), 8, dot_color, 16);
+        draw_list->AddCircle(ImVec2(px, py), 8, IM_COL32(255, 255, 255, 200), 16, 1.5f);
+
+        // Loss percentage text
+        char loss_text[32];
+        snprintf(loss_text, sizeof(loss_text), "%.1f%%", g_tune_loss * 100.0f);
+        ImVec2 text_size = ImGui::CalcTextSize(loss_text);
+        draw_list->AddText(
+            ImVec2(center.x - text_size.x * 0.5f, center.y + radius + 15),
+            IM_COL32(255, 255, 255, 255), loss_text
+        );
+    }
+
+    // Randomize button (hidden when tuning)
+    if (!g_tuning) {
+        ImGui::SetCursorPosX((avail.x - 100) * 0.5f);
+        if (ImGui::Button("Randomize", ImVec2(100, 0))) {
+            randomize_geos_dials();
+            std::uniform_real_distribution<float> vel_dist(-DRIFT_SPEED, DRIFT_SPEED);
+            for (int i = 0; i < NUM_DIALS; i++) {
+                g_dial_velocity[i] = vel_dist(g_rng);
+            }
         }
     }
 }

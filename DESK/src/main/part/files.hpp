@@ -45,6 +45,15 @@ bool render_to_texture(State& state, const Project& project, int size = 0);
 // Export project to PNG file (full resolution)
 bool export_project(State& state, const Project& project);
 
+// Run TUNE optimizer to match camera preview, creates/updates "Base" link
+bool run_tune(State& state, Project& project);
+
+// Start TUNE in background thread (non-blocking)
+void start_tune_async(State& state, Project& project);
+
+// Check if tuning is complete and handle results (call each frame)
+void poll_tune_complete(State& state);
+
 // ============================================================
 // Texture Operations
 // ============================================================
@@ -55,7 +64,10 @@ bool load_texture(State& state, const std::filesystem::path& png_path);
 // Unload current texture
 void unload_texture(State& state);
 
-// Load embedded preview from RAW (if available)
+// Unload base texture (scene-linear)
+void unload_base_texture(State& state);
+
+// Load embedded preview and base texture from RAW (if available)
 bool load_embedded_preview(State& state, const Project& project);
 
 // Unload embedded texture

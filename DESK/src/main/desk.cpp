@@ -152,9 +152,27 @@ void render_menu_bar(desk::State& state, int display_w) {
         ImGui::EndCombo();
     }
 
+    // Tune button (run optimizer to match camera preview)
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!state.has_project() || state.is_working || state.is_tuning || !state.has_embedded);
+    if (ImGui::Button("Tune")) {
+        desk::start_tune_async(state, state.current_project());
+        state.panels.geos = true;  // Show geos panel for visualization
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered()) {
+        if (!state.has_embedded) {
+            ImGui::SetTooltip("No embedded preview available");
+        } else if (state.is_tuning) {
+            ImGui::SetTooltip("Tuning in progress...");
+        } else {
+            ImGui::SetTooltip("Match camera preview (create Base link)");
+        }
+    }
+
     // Export button (full resolution render)
     ImGui::SameLine();
-    ImGui::BeginDisabled(!state.has_project() || state.is_working);
+    ImGui::BeginDisabled(!state.has_project() || state.is_working || state.is_tuning);
     if (ImGui::Button("Export")) {
         state.needs_export = true;
     }
@@ -631,6 +649,9 @@ int main(int argc, char** argv) {
         process_file_dialogs(state);
         handle_selection_change(state, prev_project, selection_changed);
 
+        // Poll for async tune completion
+        desk::poll_tune_complete(state);
+
         // Handle Ctrl+Z for undo
         if (ImGui::IsKeyDown(ImGuiMod_Ctrl) && ImGui::IsKeyPressed(ImGuiKey_Z, false)) {
             if (state.can_undo()) {
@@ -651,6 +672,7 @@ int main(int argc, char** argv) {
 
     // Cleanup
     desk::unload_texture(state);
+    desk::unload_base_texture(state);
     desk::unload_embedded_texture(state);
     desk::cleanup_geos();
 

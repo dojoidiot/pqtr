@@ -43,6 +43,10 @@ struct Link {
     Module selective_color;  // 24 dials: 8 colors x 3 HSL
     Module detail;           // 4 dials: sharpen (2), denoise (2)
 
+    // 3D LUT from geos optimizer (17³ × 3 = 14,739 floats)
+    // Empty = identity (no LUT applied)
+    std::vector<float> lut3d;
+
     explicit Link(const std::string& n = "New Link");
 };
 
@@ -110,6 +114,16 @@ enum ModuleId {
 };
 
 // ============================================================
+// Pipe View - What's being displayed in the pipe preview
+// ============================================================
+
+enum class PipeView {
+    BODY,   // Current pipeline output (default)
+    BASE,   // HEAD base: scene-linear from RAWS
+    VIEW    // HEAD view: embedded camera preview
+};
+
+// ============================================================
 // Selection - Current UI selection state
 // ============================================================
 
@@ -119,6 +133,7 @@ struct Selection {
     int module = 0;         // Selected module for breadcrumb navigation (0-4)
     int dial = 0;           // Selected dial for breadcrumb navigation
     int detail = 0;         // Detail index for selective color (0-2: H/S/L)
+    PipeView pipe_view = PipeView::BODY;  // Which image to show in pipe preview
 
     // Hot state - a dial is "hot" (blue) only when explicitly selected
     bool hot = false;       // True if a specific dial is hot
@@ -200,8 +215,9 @@ struct State {
     } panel_sizes;
 
     // Image textures
-    Texture texture;           // Main rendered image
-    Texture embedded_texture;  // Embedded camera preview
+    Texture texture;           // Main rendered image (BODY output)
+    Texture base_texture;      // HEAD base: scene-linear from RAWS
+    Texture embedded_texture;  // HEAD view: embedded camera preview
     bool has_embedded = false; // True if RAW has embedded preview
 
     // RAW metadata
@@ -219,6 +235,11 @@ struct State {
     bool is_working = false;       // True while rendering
     std::string status_message;
     std::string error_message;
+
+    // Tuning state (for background thread)
+    bool is_tuning = false;        // True while tune thread is running
+    bool tune_complete = false;    // Set by thread when done
+    int tune_project = -1;         // Project being tuned
 
     // Undo stack (max 5 entries)
     std::deque<UndoEntry> undo_stack;

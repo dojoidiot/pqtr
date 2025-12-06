@@ -1,16 +1,23 @@
 // files.cpp - File operations for DESK
 
 #include "files.hpp"
+#include "geos.hpp"  // desk::geos for dome animation
 #include "ImGuiFileDialog.h"
 
 #include <fstream>
 #include <sstream>
 #include <regex>
+#include <thread>
+#include <atomic>
+#include <mutex>
+#include <algorithm>
 
 // LABS pipe
 #include <pipe.hpp>
 #include <tool.hpp>
+#include <geos.hpp>  // geos:: optimizer
 #include <opencv2/imgproc.hpp>
+#include <opencv2/imgcodecs.hpp>
 
 // stb_image for PNG loading
 #define STB_IMAGE_IMPLEMENTATION
@@ -71,6 +78,17 @@ float extract_float(const std::string& json, const std::string& key, float def =
 }
 
 } // namespace json
+
+// ============================================================
+// Tuning Thread State
+// ============================================================
+
+static std::thread g_tune_thread;
+static std::atomic<bool> g_tune_running{false};
+static std::atomic<bool> g_tune_finished{false};
+static std::mutex g_tune_mutex;
+static Link g_tune_result;
+static float g_tune_final_loss = 0.0f;
 
 // ============================================================
 // Project Discovery
@@ -580,12 +598,23 @@ static void apply_link_dials(const Link& src, pipe::Body::Link& dst) {
     dst.geometric().crop().crop_left(get_dial(src.geometric, "crop_left", 0.0f));
     dst.geometric().zoom().scale(get_dial(src.geometric, "scale", 0.0f));
     dst.geometric().rotation().tiltAngle(get_dial(src.geometric, "tilt_angle", 0.5f));
+
+    // LUT Curve (if present)
+    if (!src.lut3d.empty()) {
+        constexpr int LUT_SIZE = pipe::Body::Link::LutCurve::LUT_SIZE;
+        if (static_cast<int>(src.lut3d.size()) == LUT_SIZE) {
+            dst.lutCurve().setLut(src.lut3d.data());
+            fprintf(stderr, "[apply_link_dials] Applied LUT (%d floats) to link '%s'\n",
+                    LUT_SIZE, src.name.c_str());
+        }
+    } else {
+        dst.lutCurve().reset();
+        fprintf(stderr, "[apply_link_dials] No LUT for link '%s'\n", src.name.c_str());
+    }
 }
 
-// Helper to create and upload OpenGL texture from cv::Mat
-static bool upload_texture(State& state, const cv::Mat& bgr) {
-    unload_texture(state);
-
+// Generic helper to upload cv::Mat to an OpenGL texture
+static bool upload_to_texture(Texture& tex, const cv::Mat& bgr) {
     if (bgr.empty()) {
         return false;
     }
@@ -612,12 +641,18 @@ static bool upload_texture(State& state, const cv::Mat& bgr) {
     glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, rgba.cols, rgba.rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data);
     glPixelStorei(GL_UNPACK_ALIGNMENT, 4);  // Restore default
 
-    state.texture.id = texture;
-    state.texture.width = rgba.cols;
-    state.texture.height = rgba.rows;
-    state.texture.loaded = true;
+    tex.id = texture;
+    tex.width = rgba.cols;
+    tex.height = rgba.rows;
+    tex.loaded = true;
 
     return true;
+}
+
+// Helper to create and upload OpenGL texture from cv::Mat (main texture)
+static bool upload_texture(State& state, const cv::Mat& bgr) {
+    unload_texture(state);
+    return upload_to_texture(state.texture, bgr);
 }
 
 bool render_to_texture(State& state, const Project& project, int size) {
@@ -647,6 +682,58 @@ bool render_to_texture(State& state, const Project& project, int size) {
     for (const auto& link : project.links) {
         pipe::Body::Link& pipe_link = body.add(link.name);
         apply_link_dials(link, pipe_link);
+
+        // Debug: print what we applied (all 45 dials)
+        fprintf(stderr, "RENDER APPLY [%s]:\n", link.name.c_str());
+        auto get_d = [&](const Module& m, const char* k, float def) {
+            auto it = m.dials.find(k);
+            return (it != m.dials.end()) ? it->second : def;
+        };
+        fprintf(stderr, "  CC: exp=%.3f temp=%.3f tint=%.3f\n",
+            get_d(link.color_correction, "exposure", 0.5f),
+            get_d(link.color_correction, "temperature", 0.5f),
+            get_d(link.color_correction, "tint", 0.5f));
+        fprintf(stderr, "  TM: con=%.3f hi=%.3f sh=%.3f blk=%.3f wht=%.3f\n",
+            get_d(link.tone_mapping, "contrast", 0.5f),
+            get_d(link.tone_mapping, "highlights", 0.5f),
+            get_d(link.tone_mapping, "shadows", 0.5f),
+            get_d(link.tone_mapping, "black", 0.15f),
+            get_d(link.tone_mapping, "white", 0.85f));
+        fprintf(stderr, "  GC: vib=%.3f sat=%.3f den=%.3f\n",
+            get_d(link.global_color, "vibrance", 0.5f),
+            get_d(link.global_color, "saturation", 0.5f),
+            get_d(link.global_color, "color_density", 0.5f));
+        fprintf(stderr, "  SC: R(%.2f,%.2f,%.2f) O(%.2f,%.2f,%.2f) Y(%.2f,%.2f,%.2f) G(%.2f,%.2f,%.2f)\n",
+            get_d(link.selective_color, "red_hue", 0.5f),
+            get_d(link.selective_color, "red_saturation", 0.5f),
+            get_d(link.selective_color, "red_luminance", 0.5f),
+            get_d(link.selective_color, "orange_hue", 0.5f),
+            get_d(link.selective_color, "orange_saturation", 0.5f),
+            get_d(link.selective_color, "orange_luminance", 0.5f),
+            get_d(link.selective_color, "yellow_hue", 0.5f),
+            get_d(link.selective_color, "yellow_saturation", 0.5f),
+            get_d(link.selective_color, "yellow_luminance", 0.5f),
+            get_d(link.selective_color, "green_hue", 0.5f),
+            get_d(link.selective_color, "green_saturation", 0.5f),
+            get_d(link.selective_color, "green_luminance", 0.5f));
+        fprintf(stderr, "      C(%.2f,%.2f,%.2f) B(%.2f,%.2f,%.2f) P(%.2f,%.2f,%.2f) M(%.2f,%.2f,%.2f)\n",
+            get_d(link.selective_color, "cyan_hue", 0.5f),
+            get_d(link.selective_color, "cyan_saturation", 0.5f),
+            get_d(link.selective_color, "cyan_luminance", 0.5f),
+            get_d(link.selective_color, "blue_hue", 0.5f),
+            get_d(link.selective_color, "blue_saturation", 0.5f),
+            get_d(link.selective_color, "blue_luminance", 0.5f),
+            get_d(link.selective_color, "purple_hue", 0.5f),
+            get_d(link.selective_color, "purple_saturation", 0.5f),
+            get_d(link.selective_color, "purple_luminance", 0.5f),
+            get_d(link.selective_color, "magenta_hue", 0.5f),
+            get_d(link.selective_color, "magenta_saturation", 0.5f),
+            get_d(link.selective_color, "magenta_luminance", 0.5f));
+        fprintf(stderr, "  DT: shAmt=%.3f shRad=%.3f dnL=%.3f dnC=%.3f\n",
+            get_d(link.detail, "sharpen_amount", 0.5f),
+            get_d(link.detail, "sharpen_radius", 0.5f),
+            get_d(link.detail, "denoise_luminance", 0.5f),
+            get_d(link.detail, "denoise_chroma", 0.5f));
     }
 
     // Get display-ready view from body (runs pipe at working size, gamma encodes)
@@ -709,6 +796,193 @@ bool export_project(State& state, const Project& project) {
 }
 
 // ============================================================
+// Tune - Optimize dials to match camera preview
+// ============================================================
+
+// Helper to extract dial values from pipe::Body::Link into desk::Link
+static void extract_link_dials(pipe::Body::Link& src, Link& dst) {
+    // Color Correction (3 dials)
+    dst.color_correction.dials["exposure"] = src.colorCorrection().exposure().get();
+    dst.color_correction.dials["temperature"] = src.colorCorrection().whiteBalance().temperature();
+    dst.color_correction.dials["tint"] = src.colorCorrection().whiteBalance().tint();
+
+    // Tone Mapping (5 dials)
+    dst.tone_mapping.dials["contrast"] = src.toneMapping().contrast().get();
+    dst.tone_mapping.dials["highlights"] = src.toneMapping().curveAdjustment().highlights().get();
+    dst.tone_mapping.dials["shadows"] = src.toneMapping().curveAdjustment().shadows().get();
+    dst.tone_mapping.dials["black"] = src.toneMapping().clippingPoint().black().get();
+    dst.tone_mapping.dials["white"] = src.toneMapping().clippingPoint().white().get();
+
+    // Global Color (3 dials)
+    dst.global_color.dials["vibrance"] = src.globalColor().vibrance().get();
+    dst.global_color.dials["saturation"] = src.globalColor().saturation().get();
+    dst.global_color.dials["color_density"] = src.globalColor().colourDensity().get();
+
+    // Selective Color (24 dials: 8 colors × 3 HSL)
+    auto& sel = src.selectiveColour();
+    dst.selective_color.dials["red_hue"] = sel.red().hue();
+    dst.selective_color.dials["red_saturation"] = sel.red().saturation();
+    dst.selective_color.dials["red_luminance"] = sel.red().luminance();
+    dst.selective_color.dials["orange_hue"] = sel.orange().hue();
+    dst.selective_color.dials["orange_saturation"] = sel.orange().saturation();
+    dst.selective_color.dials["orange_luminance"] = sel.orange().luminance();
+    dst.selective_color.dials["yellow_hue"] = sel.yellow().hue();
+    dst.selective_color.dials["yellow_saturation"] = sel.yellow().saturation();
+    dst.selective_color.dials["yellow_luminance"] = sel.yellow().luminance();
+    dst.selective_color.dials["green_hue"] = sel.green().hue();
+    dst.selective_color.dials["green_saturation"] = sel.green().saturation();
+    dst.selective_color.dials["green_luminance"] = sel.green().luminance();
+    dst.selective_color.dials["cyan_hue"] = sel.cyan().hue();
+    dst.selective_color.dials["cyan_saturation"] = sel.cyan().saturation();
+    dst.selective_color.dials["cyan_luminance"] = sel.cyan().luminance();
+    dst.selective_color.dials["blue_hue"] = sel.blue().hue();
+    dst.selective_color.dials["blue_saturation"] = sel.blue().saturation();
+    dst.selective_color.dials["blue_luminance"] = sel.blue().luminance();
+    dst.selective_color.dials["purple_hue"] = sel.purple().hue();
+    dst.selective_color.dials["purple_saturation"] = sel.purple().saturation();
+    dst.selective_color.dials["purple_luminance"] = sel.purple().luminance();
+    dst.selective_color.dials["magenta_hue"] = sel.magenta().hue();
+    dst.selective_color.dials["magenta_saturation"] = sel.magenta().saturation();
+    dst.selective_color.dials["magenta_luminance"] = sel.magenta().luminance();
+
+    // Detail (4 dials)
+    dst.detail.dials["sharpen_amount"] = src.detail().sharpen().amount();
+    dst.detail.dials["sharpen_radius"] = src.detail().sharpen().radius();
+    dst.detail.dials["denoise_luminance"] = src.detail().denoise().luminance().get();
+    dst.detail.dials["denoise_chroma"] = src.detail().denoise().chroma().get();
+
+    // LUT Curve (if estimated by geos)
+    if (src.lutCurve().isEstimated()) {
+        constexpr int LUT_SIZE = pipe::Body::Link::LutCurve::LUT_SIZE;
+        dst.lut3d.resize(LUT_SIZE);
+        const float* lut = src.lutCurve().lut();
+        std::copy(lut, lut + LUT_SIZE, dst.lut3d.begin());
+    } else {
+        dst.lut3d.clear();
+    }
+}
+
+bool run_tune(State& state, Project& project) {
+    state.status_message = "Tuning: " + project.name;
+    state.is_working = true;
+
+    // Enable geos tuning mode (shows optimizer position, stops random drift)
+    desk::set_geos_tuning(true);
+
+    // Open RAW
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
+    if (!sink) {
+        state.error_message = "Failed to read: " + project.name;
+        state.is_working = false;
+        desk::set_geos_tuning(false);
+        return false;
+    }
+
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
+        state.error_message = "Failed to decode: " + project.name;
+        state.is_working = false;
+        desk::set_geos_tuning(false);
+        return false;
+    }
+
+    // Get target: embedded camera preview
+    pipe::View preview = head->view().view();
+    if (preview.empty()) {
+        state.error_message = "No embedded preview: " + project.name;
+        state.is_working = false;
+        desk::set_geos_tuning(false);
+        return false;
+    }
+
+    // Get body at preview size for speed
+    int preview_size = std::max(preview.cols, preview.rows);
+    pipe::Body& body = head->body(preview_size);
+
+    // Create "Base" link
+    pipe::Body::Link& tuneLink = body.add("Base");
+
+    // Initialize dials to neutral
+    tuneLink.colorCorrection().exposure().set(0.5f);
+    tuneLink.colorCorrection().whiteBalance().temperature(0.5f);
+    tuneLink.colorCorrection().whiteBalance().tint(0.5f);
+    tuneLink.toneMapping().contrast().set(0.5f);
+    tuneLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+    tuneLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+    tuneLink.toneMapping().clippingPoint().black().set(0.5f);
+    tuneLink.toneMapping().clippingPoint().white().set(0.5f);
+    tuneLink.globalColor().vibrance().set(0.5f);
+    tuneLink.globalColor().saturation().set(0.5f);
+    tuneLink.globalColor().colourDensity().set(0.5f);
+
+    // Create geos task with preview as target
+    pqtr::Hold<geos::Task> task = geos::make(preview);
+
+    // Configure optimizer
+    geos::Config config;
+    config.skip_edge = false;
+    config.skip_lut = false;  // Enable LUT estimation
+    config.skip_regional = true;
+    config.geos_max_iter = 300;
+    config.geos_threshold = 0.01f;  // 1% target
+    config.geos_mode = geos::Mode::FULL_35D;
+    config.optimizer = geos::Optimizer::HYBRID;
+
+    // Progress callback - update status and geos dome (every 10 iterations)
+    auto progress = [&state](const geos::Progress& p) -> bool {
+        if (p.stage == geos::Progress::Stage::GEOS && (p.iteration % 10 == 0)) {
+            // Update status message
+            char buf[64];
+            snprintf(buf, sizeof(buf), "Tuning: %.1f%% (iter %d)",
+                     p.loss.spectral * 100.0f, p.iteration);
+            state.status_message = buf;
+
+            // Update geos dome visualization
+            float r = std::min(1.0f, p.loss.spectral * 10.0f);
+            float theta = p.iteration * 0.15f;
+            desk::set_geos_progress(r, theta, p.loss.spectral);
+        }
+        return true;  // Continue
+    };
+
+    // Run optimization
+    geos::Result result = task->run(body, tuneLink, config, progress);
+
+    // Extract optimized dials into a new desk::Link
+    Link baseLink("Base");
+    extract_link_dials(tuneLink, baseLink);
+
+    // Add or replace "Base" link in project
+    bool found = false;
+    for (auto& link : project.links) {
+        if (link.name == "Base") {
+            link = baseLink;
+            found = true;
+            break;
+        }
+    }
+    if (!found) {
+        project.links.insert(project.links.begin(), baseLink);
+    }
+
+    // Save pipe.json
+    save_pipe_json(project);
+
+    // Update status
+    char buf[128];
+    snprintf(buf, sizeof(buf), "Tuned: %.1f%% error", result.loss.spectral * 100.0f);
+    state.status_message = buf;
+    state.is_working = false;
+    state.needs_reprocess = true;
+
+    // Disable geos tuning mode
+    desk::set_geos_tuning(false);
+
+    return true;
+}
+
+// ============================================================
 // Texture Operations
 // ============================================================
 
@@ -753,6 +1027,14 @@ void unload_texture(State& state) {
     state.texture.reset();
 }
 
+void unload_base_texture(State& state) {
+    if (state.base_texture.loaded && state.base_texture.id != 0) {
+        GLuint tex = state.base_texture.id;
+        glDeleteTextures(1, &tex);
+    }
+    state.base_texture.reset();
+}
+
 void unload_embedded_texture(State& state) {
     if (state.embedded_texture.loaded && state.embedded_texture.id != 0) {
         GLuint tex = state.embedded_texture.id;
@@ -762,8 +1044,37 @@ void unload_embedded_texture(State& state) {
     state.has_embedded = false;
 }
 
+// Helper to convert pipe::View to cv::Mat suitable for OpenGL texture upload
+static cv::Mat view_to_mat(pipe::View view) {
+    if (view.empty()) return cv::Mat();
+
+    cv::Mat cpu;
+    view.copyTo(cpu);
+    if (cpu.empty()) return cv::Mat();
+
+    // Convert to RGBA for OpenGL
+    cv::Mat rgba;
+    if (cpu.channels() == 3) {
+        cv::cvtColor(cpu, rgba, cv::COLOR_BGR2RGBA);
+    } else if (cpu.channels() == 4) {
+        rgba = cpu;
+    } else {
+        return cv::Mat();
+    }
+
+    // Convert to 8-bit if needed
+    if (rgba.depth() != CV_8U) {
+        cv::Mat temp;
+        rgba.convertTo(temp, CV_8UC4, 255.0);
+        rgba = temp;
+    }
+
+    return rgba;
+}
+
 bool load_embedded_preview(State& state, const Project& project) {
     unload_embedded_texture(state);
+    unload_base_texture(state);
     state.has_embedded = false;
 
     if (!fs::exists(project.raw_path)) {
@@ -781,35 +1092,28 @@ bool load_embedded_preview(State& state, const Project& project) {
         return false;
     }
 
-    // Get embedded preview view
+    // Load base texture (scene-linear from RAWS)
+    // Apply simple gamma for visualization (scene-linear is too dark otherwise)
+    pipe::View base_view = head->data().view();
+    if (!base_view.empty()) {
+        cv::Mat base_cpu;
+        base_view.copyTo(base_cpu);
+        if (!base_cpu.empty() && base_cpu.channels() == 3) {
+            // Apply simple gamma 2.2 for visualization
+            cv::Mat base_float;
+            base_cpu.convertTo(base_float, CV_32F, 1.0/255.0);
+            cv::pow(base_float, 1.0/2.2, base_float);
+            cv::Mat base_8u;
+            base_float.convertTo(base_8u, CV_8U, 255.0);
+            upload_to_texture(state.base_texture, base_8u);
+        }
+    }
+
+    // Load embedded preview texture (camera JPEG)
     pipe::View view = head->view().view();
-    if (view.empty()) {
+    cv::Mat rgba = view_to_mat(view);
+    if (rgba.empty()) {
         return false;
-    }
-
-    // Convert UMat to Mat for OpenGL upload
-    cv::Mat cpu;
-    view.copyTo(cpu);
-
-    if (cpu.empty()) {
-        return false;
-    }
-
-    // Convert to RGBA for OpenGL
-    cv::Mat rgba;
-    if (cpu.channels() == 3) {
-        cv::cvtColor(cpu, rgba, cv::COLOR_BGR2RGBA);
-    } else if (cpu.channels() == 4) {
-        rgba = cpu;
-    } else {
-        return false;
-    }
-
-    // Convert to 8-bit if needed
-    if (rgba.depth() != CV_8U) {
-        cv::Mat temp;
-        rgba.convertTo(temp, CV_8UC4, 255.0);
-        rgba = temp;
     }
 
     GLuint texture;
@@ -913,6 +1217,283 @@ void open_link_load_dialog(const State& state) {
         ".link.json,.json",
         config
     );
+}
+
+// ============================================================
+// Async Tuning (Background Thread)
+// ============================================================
+
+// Thread function that runs the optimizer
+static void tune_thread_func(const fs::path raw_path, const std::string project_name) {
+    // Enable geos tuning mode
+    desk::set_geos_tuning(true);
+
+    Link result_link("Base");
+    float final_loss = 1.0f;
+
+    // Change to project directory so geos finds etc/aceo_full.json etc.
+    fs::path project_dir = raw_path.parent_path();
+    fs::current_path(project_dir);
+
+    // Open RAW
+    pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(raw_path.string()));
+    if (!sink) {
+        g_tune_finished = true;
+        g_tune_running = false;
+        desk::set_geos_tuning(false);
+        return;
+    }
+
+    pqtr::Hold<pipe::Pipe> pipeline = pipe::make();
+    pqtr::Hold<pipe::Head> head = pipeline->open(std::move(sink));
+    if (!head) {
+        g_tune_finished = true;
+        g_tune_running = false;
+        desk::set_geos_tuning(false);
+        return;
+    }
+
+    // Get target: embedded camera preview
+    pipe::View preview = head->view().view();
+    if (preview.empty()) {
+        g_tune_finished = true;
+        g_tune_running = false;
+        desk::set_geos_tuning(false);
+        return;
+    }
+
+    // Get body at preview size for speed
+    int preview_size = std::max(preview.cols, preview.rows);
+    pipe::Body& body = head->body(preview_size);
+
+    // Create "Base" link
+    pipe::Body::Link& tuneLink = body.add("Base");
+
+    // Initialize dials to neutral
+    tuneLink.colorCorrection().exposure().set(0.5f);
+    tuneLink.colorCorrection().whiteBalance().temperature(0.5f);
+    tuneLink.colorCorrection().whiteBalance().tint(0.5f);
+    tuneLink.toneMapping().contrast().set(0.5f);
+    tuneLink.toneMapping().curveAdjustment().highlights().set(0.5f);
+    tuneLink.toneMapping().curveAdjustment().shadows().set(0.5f);
+    tuneLink.toneMapping().clippingPoint().black().set(0.5f);
+    tuneLink.toneMapping().clippingPoint().white().set(0.5f);
+    tuneLink.globalColor().vibrance().set(0.5f);
+    tuneLink.globalColor().saturation().set(0.5f);
+    tuneLink.globalColor().colourDensity().set(0.5f);
+
+    // Save base.png - what image looks like before optimization (neutral dials + sigmoid + gamma)
+    std::string stem = raw_path.stem().string();
+    fs::path base_path = project_dir / (stem + ".base.png");
+    {
+        pipe::View baseView = body.view();
+        cv::Mat base_cpu;
+        baseView.copyTo(base_cpu);
+        if (!base_cpu.empty()) {
+            cv::imwrite(base_path.string(), base_cpu);
+        }
+    }
+
+    // Create geos task with preview as target
+    pqtr::Hold<geos::Task> task = geos::make(preview);
+
+    // Configure optimizer
+    geos::Config config;
+    config.skip_edge = false;
+    config.skip_lut = false;
+    config.skip_regional = true;
+    config.geos_max_iter = 300;
+    config.geos_threshold = 0.01f;
+    config.geos_mode = geos::Mode::FULL_35D;
+    config.optimizer = geos::Optimizer::HYBRID;
+
+    // Progress callback - update geos dome (every 10 iterations to reduce overhead)
+    auto progress = [](const geos::Progress& p) -> bool {
+        if (p.stage == geos::Progress::Stage::GEOS && (p.iteration % 10 == 0)) {
+            float r = std::min(1.0f, p.loss.spectral * 10.0f);
+            float theta = p.iteration * 0.15f;
+            desk::set_geos_progress(r, theta, p.loss.spectral);
+        }
+        return g_tune_running;  // Allow cancellation
+    };
+
+    // Run optimization
+    geos::Result result = task->run(body, tuneLink, config, progress);
+
+    // Extract results
+    extract_link_dials(tuneLink, result_link);
+    final_loss = result.loss.spectral;
+
+    // Debug: print ALL dial values
+    fprintf(stderr, "TUNE RESULT (45 dials):\n");
+    fprintf(stderr, "  CC: exp=%.3f temp=%.3f tint=%.3f\n",
+        result_link.color_correction.dials["exposure"],
+        result_link.color_correction.dials["temperature"],
+        result_link.color_correction.dials["tint"]);
+    fprintf(stderr, "  TM: con=%.3f hi=%.3f sh=%.3f blk=%.3f wht=%.3f\n",
+        result_link.tone_mapping.dials["contrast"],
+        result_link.tone_mapping.dials["highlights"],
+        result_link.tone_mapping.dials["shadows"],
+        result_link.tone_mapping.dials["black"],
+        result_link.tone_mapping.dials["white"]);
+    fprintf(stderr, "  GC: vib=%.3f sat=%.3f den=%.3f\n",
+        result_link.global_color.dials["vibrance"],
+        result_link.global_color.dials["saturation"],
+        result_link.global_color.dials["color_density"]);
+    fprintf(stderr, "  SC: R(%.2f,%.2f,%.2f) O(%.2f,%.2f,%.2f) Y(%.2f,%.2f,%.2f) G(%.2f,%.2f,%.2f)\n",
+        result_link.selective_color.dials["red_hue"],
+        result_link.selective_color.dials["red_saturation"],
+        result_link.selective_color.dials["red_luminance"],
+        result_link.selective_color.dials["orange_hue"],
+        result_link.selective_color.dials["orange_saturation"],
+        result_link.selective_color.dials["orange_luminance"],
+        result_link.selective_color.dials["yellow_hue"],
+        result_link.selective_color.dials["yellow_saturation"],
+        result_link.selective_color.dials["yellow_luminance"],
+        result_link.selective_color.dials["green_hue"],
+        result_link.selective_color.dials["green_saturation"],
+        result_link.selective_color.dials["green_luminance"]);
+    fprintf(stderr, "      C(%.2f,%.2f,%.2f) B(%.2f,%.2f,%.2f) P(%.2f,%.2f,%.2f) M(%.2f,%.2f,%.2f)\n",
+        result_link.selective_color.dials["cyan_hue"],
+        result_link.selective_color.dials["cyan_saturation"],
+        result_link.selective_color.dials["cyan_luminance"],
+        result_link.selective_color.dials["blue_hue"],
+        result_link.selective_color.dials["blue_saturation"],
+        result_link.selective_color.dials["blue_luminance"],
+        result_link.selective_color.dials["purple_hue"],
+        result_link.selective_color.dials["purple_saturation"],
+        result_link.selective_color.dials["purple_luminance"],
+        result_link.selective_color.dials["magenta_hue"],
+        result_link.selective_color.dials["magenta_saturation"],
+        result_link.selective_color.dials["magenta_luminance"]);
+    fprintf(stderr, "  DT: shAmt=%.3f shRad=%.3f dnL=%.3f dnC=%.3f\n",
+        result_link.detail.dials["sharpen_amount"],
+        result_link.detail.dials["sharpen_radius"],
+        result_link.detail.dials["denoise_luminance"],
+        result_link.detail.dials["denoise_chroma"]);
+
+    // Save diagnostic images to project folder (reuse project_dir and stem from above)
+
+    // Save tail.png - the tuned output
+    fs::path tail_path = project_dir / (stem + ".tail.png");
+    body.tail().save(tail_path.string(), 0);
+
+    // Save view.png - the target (camera preview)
+    fs::path view_path = project_dir / (stem + ".view.png");
+    cv::Mat tgt_cpu;
+    preview.copyTo(tgt_cpu);
+    if (!tgt_cpu.empty()) {
+        cv::imwrite(view_path.string(), tgt_cpu);
+    }
+
+    // Save diff.png - difference between target and result
+    fs::path diff_path = project_dir / (stem + ".diff.png");
+    pipe::View output = body.view();
+    if (!output.empty() && !tgt_cpu.empty()) {
+        cv::Mat out_cpu;
+        output.copyTo(out_cpu);
+
+        // Resize to match if needed
+        if (out_cpu.size() != tgt_cpu.size()) {
+            cv::resize(out_cpu, out_cpu, tgt_cpu.size());
+        }
+
+        // Compute absolute difference, amplified for visibility
+        cv::Mat diff;
+        cv::absdiff(out_cpu, tgt_cpu, diff);
+        diff *= 4;  // Amplify difference for visibility
+
+        cv::imwrite(diff_path.string(), diff);
+    }
+
+    // Store result in thread-safe globals
+    {
+        std::lock_guard<std::mutex> lock(g_tune_mutex);
+        g_tune_result = result_link;
+        g_tune_final_loss = final_loss;
+    }
+
+    desk::set_geos_tuning(false);
+    g_tune_finished = true;
+    g_tune_running = false;
+}
+
+void start_tune_async(State& state, Project& project) {
+    // Don't start if already running
+    if (g_tune_running) return;
+
+    // Join previous thread if any
+    if (g_tune_thread.joinable()) {
+        g_tune_thread.join();
+    }
+
+    // Clear existing links - DESK owns the pipe, start fresh
+    project.links.clear();
+    save_pipe_json(project);
+
+    // Set state
+    state.is_tuning = true;
+    state.tune_complete = false;
+    state.tune_project = state.selection.project;
+    state.status_message = "Tuning: " + project.name;
+
+    // Reset flags
+    g_tune_running = true;
+    g_tune_finished = false;
+
+    // Start thread (copy path and name to avoid dangling refs)
+    g_tune_thread = std::thread(tune_thread_func, project.raw_path, project.name);
+}
+
+void poll_tune_complete(State& state) {
+    if (!state.is_tuning) return;
+    if (!g_tune_finished) return;
+
+    // Thread is done
+    if (g_tune_thread.joinable()) {
+        g_tune_thread.join();
+    }
+
+    // Apply result to project
+    if (state.tune_project >= 0 && state.tune_project < static_cast<int>(state.projects.size())) {
+        Project& proj = state.projects[state.tune_project];
+
+        Link result;
+        float loss;
+        {
+            std::lock_guard<std::mutex> lock(g_tune_mutex);
+            result = g_tune_result;
+            loss = g_tune_final_loss;
+        }
+
+        // Add or replace "Base" link
+        bool found = false;
+        for (auto& link : proj.links) {
+            if (link.name == "Base") {
+                link = result;
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            proj.links.insert(proj.links.begin(), result);
+        }
+
+        // Save pipe.json
+        save_pipe_json(proj);
+
+        // Update status
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Tuned: %.1f%% error", loss * 100.0f);
+        state.status_message = buf;
+    }
+
+    // Reset state
+    state.is_tuning = false;
+    state.tune_complete = true;
+    state.tune_project = -1;
+    state.needs_reprocess = true;
+    g_tune_finished = false;
 }
 
 } // namespace desk

@@ -5,6 +5,7 @@
 #include "link.hpp"
 #include "mods/mods.h"
 #include <stdexcept>
+#include <iostream>
 
 namespace pipe::internal
 {
@@ -275,12 +276,17 @@ public:
 
     bool apply(View& view)
     {
-        if (!m_estimated)
+        if (!m_estimated) {
+            std::cerr << "[LUT3D] Not estimated, skipping apply\n";
             return true;  // No-op if not estimated
+        }
 
+        std::cerr << "[LUT3D] Applying 3D LUT to " << view.cols << "x" << view.rows << " image\n";
         View output;
-        if (!mods::lut3d_apply(view, output, m_lut, GRID))
+        if (!mods::lut3d_apply(view, output, m_lut, GRID)) {
+            std::cerr << "[LUT3D] Apply FAILED\n";
             return false;
+        }
         view = output;
         return true;
     }

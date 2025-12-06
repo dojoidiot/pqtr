@@ -299,6 +299,55 @@ static bool module_has_settings(const Module& mod) {
     return false;
 }
 
+// Helper: render image preview in pipe panel
+static void render_pipe_preview(State& state) {
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (avail.x < 50 || avail.y < 50) return;
+
+    // Select which texture to show based on pipe_view
+    Texture* tex = nullptr;
+    const char* label = "";
+    switch (state.selection.pipe_view) {
+        case PipeView::BASE:
+            tex = &state.base_texture;
+            label = "base (scene-linear)";
+            break;
+        case PipeView::VIEW:
+            tex = &state.embedded_texture;
+            label = "view (camera preview)";
+            break;
+        case PipeView::BODY:
+        default:
+            tex = &state.texture;
+            label = "body (output)";
+            break;
+    }
+
+    if (!tex || !tex->loaded) {
+        ImGui::TextDisabled("No image");
+        return;
+    }
+
+    // Calculate size maintaining aspect ratio
+    float img_w = static_cast<float>(tex->width);
+    float img_h = static_cast<float>(tex->height);
+    float scale_x = avail.x / img_w;
+    float scale_y = (avail.y - 20) / img_h;  // Leave room for label
+    float scale = (scale_x < scale_y) ? scale_x : scale_y;
+
+    float disp_w = img_w * scale;
+    float disp_h = img_h * scale;
+
+    // Center horizontally
+    float offset_x = (avail.x - disp_w) * 0.5f;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
+
+    ImGui::Image((ImTextureID)(intptr_t)tex->id, ImVec2(disp_w, disp_h));
+
+    // Label below
+    ImGui::TextDisabled("%s", label);
+}
+
 bool render_pipe_panel(State& state) {
     bool selection_changed = false;
 
@@ -339,13 +388,63 @@ bool render_pipe_panel(State& state) {
 
     ImGui::Separator();
 
-    if (proj.links.empty()) {
-        ImGui::TextWrapped("No links.\n\nClick + to add a processing link.");
-        return false;
+    // === HEAD node ===
+    ImGuiTreeNodeFlags head_flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
+    bool head_open = ImGui::TreeNodeEx("HEAD", head_flags);
+    if (head_open) {
+        // base: scene-linear from RAWS
+        ImGuiTreeNodeFlags base_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        if (state.selection.pipe_view == PipeView::BASE) {
+            base_flags |= ImGuiTreeNodeFlags_Selected;
+        }
+        ImGui::TreeNodeEx("base", base_flags);
+        if (ImGui::IsItemClicked()) {
+            state.selection.pipe_view = PipeView::BASE;
+            state.selection.link = -1;  // Deselect link
+            selection_changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Scene-linear RGB from RAWS decoder");
+        }
+
+        // view: embedded camera preview
+        ImGuiTreeNodeFlags view_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
+        if (state.selection.pipe_view == PipeView::VIEW) {
+            view_flags |= ImGuiTreeNodeFlags_Selected;
+        }
+        ImGui::TreeNodeEx("view", view_flags);
+        if (ImGui::IsItemClicked()) {
+            state.selection.pipe_view = PipeView::VIEW;
+            state.selection.link = -1;  // Deselect link
+            selection_changed = true;
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("Embedded camera JPEG preview");
+        }
+
+        ImGui::TreePop();
     }
 
-    // Tree of links
-    for (int l = 0; l < static_cast<int>(proj.links.size()); l++) {
+    // === BODY node ===
+    ImGuiTreeNodeFlags body_flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
+    if (state.selection.pipe_view == PipeView::BODY && state.selection.link < 0) {
+        body_flags |= ImGuiTreeNodeFlags_Selected;
+    }
+    bool body_open = ImGui::TreeNodeEx("BODY", body_flags);
+
+    // Clicking BODY shows body output
+    if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen()) {
+        state.selection.pipe_view = PipeView::BODY;
+        selection_changed = true;
+    }
+
+    if (body_open) {
+        if (proj.links.empty()) {
+            ImGui::TextDisabled("No links - click + to add");
+        }
+
+        // Tree of links
+        for (int l = 0; l < static_cast<int>(proj.links.size()); l++) {
         Link& link = proj.links[l];
 
         ImGui::PushID(l);
@@ -365,6 +464,7 @@ bool render_pipe_panel(State& state) {
                 state.selection.clear_hot();  // Hot clears on link switch
                 selection_changed = true;
             }
+            state.selection.pipe_view = PipeView::BODY;  // Show body output
             state.panels.link_editor = true;
         }
 
@@ -572,6 +672,9 @@ bool render_pipe_panel(State& state) {
         }
 
         ImGui::PopID();
+        }  // end links loop
+
+        ImGui::TreePop();  // close BODY
     }
 
     return selection_changed;

@@ -31,6 +31,25 @@ void render_work_area(State& state) {
         return;
     }
 
+    // During tuning, show the target (embedded preview) we're matching
+    if (state.is_tuning && state.embedded_texture.loaded) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float img_w = static_cast<float>(state.embedded_texture.width);
+        float img_h = static_cast<float>(state.embedded_texture.height);
+        float scale = std::min(avail.x / img_w, avail.y / img_h);
+        float display_w = img_w * scale;
+        float display_h = img_h * scale;
+        float offset_x = (avail.x - display_w) * 0.5f;
+        float offset_y = (avail.y - display_h) * 0.5f;
+        ImVec2 cursor = ImGui::GetCursorPos();
+        ImGui::SetCursorPos(ImVec2(cursor.x + offset_x, cursor.y + offset_y));
+        ImGui::Image((ImTextureID)(intptr_t)state.embedded_texture.id, ImVec2(display_w, display_h));
+        // Overlay text
+        ImGui::SetCursorPos(ImVec2(cursor.x + 10, cursor.y + 10));
+        ImGui::TextColored(ImVec4(1, 1, 0, 1), "Tuning: matching this target...");
+        return;
+    }
+
     if (!state.texture.loaded) {
         if (!state.error_message.empty()) {
             ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", state.error_message.c_str());
