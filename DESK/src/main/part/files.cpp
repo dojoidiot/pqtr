@@ -1374,10 +1374,6 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
 
     // Save diagnostic images to project folder (reuse project_dir and stem from above)
 
-    // Save tail.png - the tuned output
-    fs::path tail_path = project_dir / (stem + ".tail.png");
-    body.tail().save(tail_path.string(), 0);
-
     // Save view.png - the target (camera preview)
     fs::path view_path = project_dir / (stem + ".view.png");
     cv::Mat tgt_cpu;
@@ -1386,7 +1382,23 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
         cv::imwrite(view_path.string(), tgt_cpu);
     }
 
-    // Save diff.png - difference between target and result
+    // Save 0.pipe.png - the first (Base) link output from tune
+    // Future links will be 1.pipe.png, 2.pipe.png, etc.
+    fs::path step0_path = project_dir / (stem + ".0.pipe.png");
+    {
+        pipe::View step_view = body.view();
+        if (!step_view.empty()) {
+            cv::Mat step_cpu;
+            step_view.copyTo(step_cpu);
+            cv::imwrite(step0_path.string(), step_cpu);
+        }
+    }
+
+    // Save tail.png - the final output (same as last step)
+    fs::path tail_path = project_dir / (stem + ".tail.png");
+    body.tail().save(tail_path.string(), 0);
+
+    // Save diff.png - difference between view (target) and tail (result)
     fs::path diff_path = project_dir / (stem + ".diff.png");
     pipe::View output = body.view();
     if (!output.empty() && !tgt_cpu.empty()) {
@@ -1493,6 +1505,9 @@ void poll_tune_complete(State& state) {
     state.tune_complete = true;
     state.tune_project = -1;
     state.needs_reprocess = true;
+
+    // Show tail (pipeline output) in work area
+    state.selection.pipe_view = PipeView::BODY;
     g_tune_finished = false;
 }
 

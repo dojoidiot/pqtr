@@ -77,10 +77,9 @@ public:
 
         View display = toDisplayView(tonemapped);
 
-        // Convert RGB to BGR for OpenCV imwrite
+        // Pipeline is BGR (OpenCV native) - save directly
         cv::Mat cpu;
         display.copyTo(cpu);
-        cv::cvtColor(cpu, cpu, cv::COLOR_RGB2BGR);
 
         return cv::imwrite(path, cpu);
     }

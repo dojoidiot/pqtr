@@ -22,11 +22,50 @@ DESK is for professionals and enthusiasts who want full control over RAW process
 ## Features
 
 - **Project Management**: Organize RAW files with sidecar-based structure
-- **Pipe Editor**: Visual editor for HEAD → BODY → TAIL pipeline
+- **Pipe Editor**: Visual tree with HEAD/BODY structure and inline preview
 - **Link Editor**: 6 modules with 45 dials per Link
 - **Live Preview**: In-memory rendering at selectable preview sizes (512–4096px or full)
 - **Export**: Full-resolution PNG output on demand
 - **Style Export**: Save styles as `.pipe.json` for use in PLAY
+
+## Pipe Panel
+
+The Pipe panel shows the processing tree with an inline image preview:
+
+```
+┌─────────────────────────────────────┐
+│ Tree (left)      │ Preview (right)  │
+├──────────────────┼──────────────────┤
+│ HEAD             │                  │
+│ ├── base         │   [selected      │
+│ └── view         │    image]        │
+│ BODY             │                  │
+│ └── Link 1       │                  │
+│     ├── CC       │                  │
+│     └── Tone     │                  │
+└──────────────────┴──────────────────┘
+```
+
+| Node | Shows |
+|------|-------|
+| `HEAD > base` | Scene-linear RGB from RAWS (gamma-corrected for display) |
+| `HEAD > view` | Embedded camera JPEG preview |
+| `BODY` | Processed output after all Links |
+
+## Output Files
+
+When processing a RAW file, DESK produces these outputs:
+
+```
+<name>.base.png      # HEAD base: scene-linear from RAWS (gamma for display)
+<name>.view.png      # HEAD view: embedded camera JPEG preview
+<name>.0.pipe.png    # BODY step 0: first link output
+<name>.1.pipe.png    # BODY step 1: second link output (if exists)
+...
+<name>.tail.png      # Final output (same as last step)
+<name>.diff.png      # Difference: view vs tail (4x amplified)
+<name>.pipe.json     # Pipe configuration (dials, LUT, etc.)
+```
 
 ## Architecture
 

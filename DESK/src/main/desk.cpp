@@ -515,7 +515,8 @@ void handle_selection_change(desk::State& state, int& prev_project, bool /*selec
     }
 
     // Handle reprocess request (e.g., slider released) - render to texture
-    if (state.needs_reprocess && state.has_project()) {
+    // Don't reprocess during tune - wait until tune is complete
+    if (state.needs_reprocess && state.has_project() && !state.is_tuning) {
         const auto& proj = state.current_project();
         desk::render_to_texture(state, proj, state.working_size);
         state.needs_reprocess = false;
