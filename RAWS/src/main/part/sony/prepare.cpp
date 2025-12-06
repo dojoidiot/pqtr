@@ -601,12 +601,14 @@ namespace sony
             metadata.bayer_pattern = 46; // Default to RGGB
         }
 
-        // Set default black/white levels for Sony sensors.
-        // Black level 512 is standard for Sony 14-bit sensors.
-        // White level 15360 is the practical clipping point (not theoretical 16383).
-        // Using 15360 preserves highlight headroom per Sony metadata.
-        metadata.black_level = 512;
-        metadata.white_level = 15360;
+        // Set black/white levels for Sony ARW2 sensors.
+        // After linearization with <<1 indexing:
+        //   - Optical black ~190 raw → curve[380] → 380 output
+        //   - White clip ~4095 raw → curve[8190] → 17220 output
+        // Using 380 as black level (matches observed sensor floor after curve)
+        // Using 17220 as white level (curve maximum)
+        metadata.black_level = 380;
+        metadata.white_level = 17220;
 
         if (found_sony_wb && wb_rggb[1] > 0)
         {
@@ -712,16 +714,49 @@ namespace sony
 
         cv::Mat bayer_cpu(metadata.height, metadata.width, CV_16UC1);
 
-        // This is the Sony piecewise linearization curve for highlight recovery.
-        // The tag 0x7010 merely signals its presence; the curve itself is fixed.
-        // Values up to 2000 are linear. Values above are expanded 4x.
-        for (int i = 0; i < 4000; i++)
+        // Sony ARW2 linearization curve (clean-room implementation)
+        // Maps 11-bit decoded values to expanded 14-bit linear values.
+        //
+        // LibRaw uses <<1 indexing: output = curve[raw_value << 1]
+        // The curve has 8192 entries:
+        //   indices 0-1999: identity (curve[i] = i)
+        //   indices 2000-4095: expansion (2000→2000, 4095→17220)
+        //   indices 4096+: identity (overflow)
+        //
+        // With <<1 indexing, raw_value maps to curve index as:
+        //   raw_value 0-999 → indices 0-1998 → identity
+        //   raw_value 1000-2047 → indices 2000-4094 → expansion
+        //   raw_value 2048+ → indices 4096+ → overflow
+        //
+        // Key points from LibRaw CSV:
+        //   (2000,2000), (2500,3000), (3000,4800), (3500,7900),
+        //   (4000,15700), (4050,16500), (4090,17140), (4095,17220)
+
+        // Region 0-1999: identity
+        for (int i = 0; i < 2000; i++)
         {
             linearization_curve[i] = i;
         }
-        for (int i = 4000; i < 16384; i++)
+
+        // Region 2000-4095: piecewise linear expansion
+        constexpr int knee_count = 8;
+        const int knee_x[knee_count] = {2000, 2500, 3000, 3500, 4000, 4050, 4090, 4095};
+        const int knee_y[knee_count] = {2000, 3000, 4800, 7900, 15700, 16500, 17140, 17220};
+
+        int seg = 0;
+        for (int i = 2000; i <= 4095; i++)
         {
-            linearization_curve[i] = i * 4 - 12000;
+            while (seg < knee_count - 2 && i >= knee_x[seg + 1])
+                seg++;
+
+            float t = (float)(i - knee_x[seg]) / (knee_x[seg + 1] - knee_x[seg]);
+            linearization_curve[i] = (uint16_t)(knee_y[seg] + t * (knee_y[seg + 1] - knee_y[seg]));
+        }
+
+        // Region 4096+: identity (overflow protection)
+        for (int i = 4096; i < 16384; i++)
+        {
+            linearization_curve[i] = i;
         }
 
         // 32767 is the proprietary compression code for Sony ARW2
@@ -738,15 +773,19 @@ namespace sony
                 return false;
             }
 
-            // If the Sony curve is specified, apply it.
-            if (found_sony_curve) {
+            // Apply linearization curve to all ARW2 decoded pixels
+            // NOTE: This curve is integral to ARW2 decoding, not optional.
+            // The ARW2 decompressor outputs 11-bit values (0-~2047 typical).
+            // The linearization curve maps these to 14-bit linear values.
+            // LibRaw uses <<1 indexing: output = curve[raw_value << 1]
+            {
                 uint16_t *pixel_data = reinterpret_cast<uint16_t *>(bayer_cpu.data);
                 size_t total_pixels = metadata.width * metadata.height;
 
                 for (size_t i = 0; i < total_pixels; i++)
                 {
                     uint16_t raw_value = pixel_data[i];
-                    // The `<< 1` indexing is a quirk for compatibility with LibRaw's curve format.
+                    // <<1 indexing matches LibRaw's curve format
                     uint32_t curve_index = raw_value << 1;
                     if (curve_index < 16384)
                     {

@@ -23,7 +23,7 @@ The decoder processes Bayer data through six stages in canonical scene-referred 
 
 ### Stage Details
 
-**BLC (Black Level Correction):** Subtracts black level (512) and normalizes using white level (15360). Output range [0,1+].
+**BLC (Black Level Correction):** Subtracts black level (380) and normalizes using white level (17220). Output range [0,1+]. Note: these are post-linearization values.
 
 **WB (White Balance):** Applies per-channel gains directly to Bayer pattern before color interpolation. Uses RGGB multipliers from camera metadata.
 
@@ -94,8 +94,8 @@ Values extracted from Sony ARW file metadata:
 
 | Parameter | Tag | Typical Value | Notes |
 |-----------|-----|---------------|-------|
-| Black Level | SubIFD | 512 | Per-channel, uniform |
-| White Level | SR2SubIFD | 15360 | Practical clipping point |
+| Black Level | (computed) | 380 | Post-linearization curve |
+| White Level | (computed) | 17220 | Linearization curve max |
 | WB RGGB | 0x7313 | 2572 1024 1024 1492 | Normalized: R=2.51, G=1.0, B=1.46 |
 | Color Matrix | 0x7310 | See below | Fixed-point /1024 |
 | CFA Pattern | SubIFD | RGGB | Standard Sony pattern |
@@ -196,14 +196,55 @@ Style metadata describes what camera settings produced the preview. Useful for c
 
 ## ARW2 Decompression
 
-Sony ARW2 uses proprietary lossy compression:
+Sony ARW2 uses proprietary lossy compression (TIFF compression code 32767).
 
-- 7-bit delta encoding per 32-pixel chunks
-- 11-bit non-linear output after decompression
-- Linearization curve expands to ~17204 max (>14 bits)
-- Row interleaving: odd rows R/G, even rows G/B
+### Block Structure
 
-The linearization curve provides highlight recovery. Values above ~2000 expand 4x for dynamic range preservation.
+ARW2 encodes 16-pixel blocks with:
+- 11-bit min/max values (packed in first 4 bytes)
+- 4-bit indices for min/max pixel positions
+- 7-bit delta values for remaining 14 pixels
+- Variable shift factor for delta scaling
+
+```
+Block structure (16 bytes → 16 pixels):
+  Bytes 0-3: header (min, max, imax, imin packed)
+  Bytes 4-15: 7-bit deltas (14 values × 7 bits = 98 bits)
+```
+
+Decompressed output range: 0-2047 typical, up to ~4095 with delta expansion.
+
+### Linearization Curve
+
+The decompressed 11-bit values require expansion to 14-bit linear values. LibRaw uses **<<1 indexing**: `output = curve[raw_value << 1]`.
+
+**Curve structure (8192 entries):**
+| Index Range | Mapping | Description |
+|-------------|---------|-------------|
+| 0-1999 | identity | curve[i] = i |
+| 2000-4095 | expansion | 2000→2000, 4095→17220 |
+| 4096+ | identity | overflow protection |
+
+**Key kneepoints (index, output):**
+```
+(2000, 2000), (2500, 3000), (3000, 4800), (3500, 7900),
+(4000, 15700), (4050, 16500), (4090, 17140), (4095, 17220)
+```
+
+**Example with <<1 indexing:**
+```
+raw_value  190 → curve[380]  →   380  (identity region)
+raw_value 1000 → curve[2000] →  2000  (start of expansion)
+raw_value 2029 → curve[4058] → 16628  (full expansion)
+```
+
+### Black/White Levels (Post-Linearization)
+
+After linearization curve application:
+- **Black level**: 380 (sensor floor after curve)
+- **White level**: 17220 (curve maximum)
+
+These differ from the sensor's native 14-bit levels (512/16383) because the linearization curve transforms the value space.
 
 ### Heuristics
 
