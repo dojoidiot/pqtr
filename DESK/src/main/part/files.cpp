@@ -1395,8 +1395,9 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     }
 
     // Save tail.png - the final output (same as last step)
+    // Use social media size (2048px) for fast iteration; full res via Export
     fs::path tail_path = project_dir / (stem + ".tail.png");
-    body.tail().save(tail_path.string(), 0);
+    body.tail().save(tail_path.string(), 2048);
 
     // Save diff.png - difference between view (target) and tail (result)
     fs::path diff_path = project_dir / (stem + ".diff.png");

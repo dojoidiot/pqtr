@@ -4,30 +4,69 @@
 
 Read this file after `README.md` to understand current LABS development state.
 
-**BASE** = bc8304e (2025-12-05)
+**BASE** = 2a0b3b8 (2025-12-06)
 
 ---
 
-## Current: Pink Color Cast
+## Current: High ISO Images (Flat & Grainy)
 
-LABS output shows pink/magenta tint on neutral subjects.
+DSC01559 (ISO 2000) looks flat and grainy compared to DSC00202 (ISO 100).
 
-### Known Facts
-- Camera preview (embedded JPEG): gray metal ✓
-- Darktable output: gray metal ✓
-- LABS output: pink metal ✗
+| Image | ISO | Result |
+|-------|-----|--------|
+| DSC00202 | 100 | Good - proper tone and color |
+| DSC01559 | 2000 | Flat and grainy |
 
 ### Root Cause
-RGB/BGR channel mismatch somewhere in pipeline. Not yet located.
 
-### Next Action
-Methodically trace channel order through pipeline:
-1. Verify RAWS demosaic output channel order
-2. Verify color matrix preserves order
-3. Verify sigmoid preserves order
-4. Verify imwrite receives correct order
+Sony's embedded JPEG has noise reduction applied. Our pipeline matches *color/tone* but can't replicate *noise reduction*:
 
-Do NOT attempt fixes until exact swap location is found.
+```
+Camera JPEG (ISO 2000):
+  RAW → NR → tone/color → clean preview
+
+Our pipeline:
+  RAW → tone/color → noisy output
+           ↑
+     matched to clean target
+```
+
+The optimizer reduces contrast to hide noise → "flat" appearance.
+
+### Options
+
+1. **Apply denoise before optimization** - fixed NR before matching
+2. **Include denoise dials in optimization** - learn NR per image
+3. **ISO-aware processing** - baseline denoise scaled by ISO
+4. **Different loss function** - tolerate noise in features
+
+### Recommended
+
+**ISO-aware + denoise dials:**
+1. Read ISO from EXIF
+2. Apply baseline denoise: `strength = log2(ISO / 100) * 0.1`
+3. Include denoise dials in optimization for fine-tuning
+
+---
+
+## Completed This Session
+
+- [x] Output file structure: base.png, view.png, 0.pipe.png, tail.png, diff.png
+- [x] Fixed RGB/BGR issue in tail.save() (pipeline is BGR native)
+- [x] Work area stays unchanged during tune
+- [x] Tail saves at 2048px (social size) for fast iteration
+- [x] Full res available via Export
+
+---
+
+## Backlog
+
+| Priority | Issue | Notes |
+|----------|-------|-------|
+| **P1** | High ISO flat/grainy | See above |
+| P2 | DRO spatial effects | 12-16% error on foliage |
+| P3 | Canon CR2/CR3 support | RAWS expansion |
+| P3 | Nikon NEF support | RAWS expansion |
 
 ---
 
@@ -38,23 +77,6 @@ RAWS (decode) → Pipe HEAD → BODY (links) → TAIL (sigmoid/gamma)
 ```
 
 - **RAWS:** Pure decode → scene-linear RGB + embedded preview
-- **Pipe HEAD:** Holds decoded data
+- **Pipe HEAD:** Holds decoded data (base + view)
 - **Pipe BODY:** Links process scene-linear (45 dials)
-- **Pipe TAIL:** Sigmoid → Gamma → Display
-
----
-
-## Completed
-
-1. ✓ Remove sigmoid from view.cpp - moved to pipe module
-2. ✓ Design clean separation - RAWS = decode only
-3. ✓ Create dark.json neutral vibe
-4. ✓ Remove curve/poly estimation from RAWS (belongs in LABS/TUNE)
-
----
-
-## Parked
-
-- Darktable baseline validation (blocked by color cast)
-- VIBE neural prediction
-- Per-image optimization
+- **Pipe TAIL:** Sigmoid → Gamma → Save at 2048px
