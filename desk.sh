@@ -7,7 +7,7 @@ HERE="$(cd "$(dirname "$0")" && pwd -P)"
 cd "$HERE"
 
 echo "=== Clean Build ==="
-make -C DESK -f Makefile.desk clean
+make clean
 make || exit 1
 
 echo ""

@@ -1,6 +1,70 @@
 # LABS TODO
 
-## Status: Baseline Architecture Complete (2025-12-07)
+## Status: Dial Optimization Breakthrough (2025-12-07)
+
+### Key Discovery: LUT Does the Work, Dials Fight Each Other
+
+**Experiment results on DSC00202:**
+
+| Mode | Loss | Visual Quality |
+|------|------|----------------|
+| LUT-only (all dials neutral) | ~7-8% | Good ✓ |
+| Independent dial maxes (41 dials) | ~7-8% | **Disaster** - yellow/purple mess |
+| Greedy sequential (temp=0.7, tint=0.9, vib=0.7) | ~7% | **Disaster** - purple foliage |
+
+**The problem:** Our loss function finds settings that reduce computed loss but are perceptually terrible. Dials have high covariance - optimizing independently causes them to fight each other.
+
+**Root cause discovered:** Cameras don't use linear "dials" at all. They use **HueSatDelta tables** (2.5D LUTs in HSV space) that can make targeted, per-hue corrections.
+
+### What Cameras Actually Do (Research Summary)
+
+**DCP (DNG Camera Profile) structure:**
+1. **ColorMatrix** - linear RGB → XYZ (we have this)
+2. **HueSatDelta tables** - 90 hue × 25 sat grid with (Δhue, Δsat, Δval) per cell
+3. **LookTable** - another HSV LUT applied after exposure
+4. **Tone curve** - final gamma/contrast
+5. **Dual illuminant** - two tables interpolated by color temp
+
+**The key insight:** When Sony wants "greener greens" they don't turn up a "green saturation" dial. They have a LUT entry that says *"if hue=120° and sat>0.5, shift hue by -5° and boost sat by 10%"*.
+
+Our 45 linear dials can't express this kind of targeted, non-linear transform.
+
+### Tomorrow's Options
+
+1. **HSV LUT approach** (most promising)
+   - Replace dial-based color with a learned HSV LUT
+   - For each H,S cell: learn optimal (Δhue, Δsat, Δval) from target
+   - Similar to HueSatDelta in DCP profiles
+
+2. **Extract Sony DCP profiles**
+   - Adobe ships camera profiles in Lightroom
+   - Could study their HueSatDelta tables to understand Sony's transforms
+
+3. **Trust LUT, skip dials**
+   - LUT-only gives good results
+   - Maybe dial optimization is the wrong approach entirely
+   - Focus on better LUT estimation instead
+
+### Test Code State
+
+The `aceo.cpp` currently has experimental test code that:
+- Tests LUT-only baseline
+- Tries greedy sequential dial optimization with constrained range (0.35-0.65)
+- Returns early to show results without full optimization
+
+**To restore normal operation:** Remove the test block at line ~576 in `aceo.cpp`.
+
+### Sources
+
+- [DCPTool - DCP Files](https://dcptool.sourceforge.net/DCP%20FIles.html)
+- [DCamProf Camera Profiling](http://rawtherapee.com/mirror/dcamprof/camera-profiling.html)
+- [DCPTool - Hue Twists](https://dcptool.sourceforge.net/Hue%20Twists.html)
+- [Sony Picture Profile Help](https://helpguide.sony.net/di/pp/v1/en/contents/TP0000909106.html)
+- [RawTherapee Color Management](https://rawpedia.rawtherapee.com/Color_Management)
+
+---
+
+## Previous Status: Baseline Architecture Complete (2025-12-07)
 
 Generic camera baseline implemented in HEAD. Clean separation of concerns:
 

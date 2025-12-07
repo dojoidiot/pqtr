@@ -349,7 +349,9 @@ namespace geos::internal
     }
 
     // Unproject eigenspace vector to dial-space: x = mean + P z
-    void unprojectFromEigen(const EigenSpace& es, const VectorK& z, VectorN& x)
+    // Uses per-dial bounds if provided, otherwise [0, 1]
+    void unprojectFromEigen(const EigenSpace& es, const VectorK& z, VectorN& x,
+                            const VectorN* lower = nullptr, const VectorN* upper = nullptr)
     {
         for (int i = 0; i < ACEO_DIAL_COUNT; i++)
         {
@@ -358,7 +360,9 @@ namespace geos::internal
             {
                 sum += es.projection[i * EIGEN_DIM + k] * z[k];
             }
-            x[i] = std::clamp(sum, 0.0f, 1.0f);
+            float lo = lower ? (*lower)[i] : 0.0f;
+            float hi = upper ? (*upper)[i] : 1.0f;
+            x[i] = std::clamp(sum, lo, hi);
         }
     }
 
@@ -450,6 +454,108 @@ namespace geos::internal
     }
 
     // ============================================================
+    // PROBE: Find dial limits before optimization
+    // ============================================================
+    // Tests each dial at push (0.7) and pull (0.3) to find which
+    // direction improves loss. Returns biased starting point.
+
+    void probeDialLimits(
+        pipe::Body& body,
+        pipe::Body::Link& link,
+        const TargetFeatures& targetFeatures,
+        float targetLaplacianVar,
+        bool useHolistic,
+        Theta& biasedStart)
+    {
+        // Start from neutral
+        Theta neutral;
+        initNeutral(neutral);
+
+        // Probe settings
+        constexpr float PUSH = 0.70f;  // Test high
+        constexpr float PULL = 0.30f;  // Test low
+        constexpr float BIAS_STRONG = 0.60f;  // Clear winner
+        constexpr float BIAS_WEAK = 0.55f;    // Slight preference
+
+        // Evaluate loss helper
+        auto evalLoss = [&]() -> float {
+            View candidate = body.view();
+            float spectral = computeProgressiveLoss(candidate, targetFeatures, LossMode::SAMPLED, 0.5f);
+            if (useHolistic) {
+                cv::UMat candProxy = resizeProxy(candidate);
+                float candLapVar = laplacianVariance(candProxy);
+                float freq = (targetLaplacianVar < 1e-6f) ? 0.0f
+                    : std::abs(candLapVar - targetLaplacianVar) / targetLaplacianVar;
+                return 0.85f * spectral + 0.15f * freq;
+            }
+            return spectral;
+        };
+
+        // Get baseline loss at neutral
+        writeDials(link, neutral);
+        float baseLoss = evalLoss();
+
+        std::cerr << "[PROBE] Baseline loss: " << (baseLoss * 100.0f) << "%" << std::endl;
+
+        // Initialize biased start to neutral
+        biasedStart = neutral;
+
+        // GREEDY PROBE: test each dial incrementally, keeping improvements
+        // This accounts for dial interactions by testing in context
+        int improvedCount = 0;
+        float currentLoss = baseLoss;
+
+        for (int d = 0; d < 41; d++)
+        {
+            Theta test = biasedStart;  // Start from current best
+
+            // Test PUSH
+            test[d] = PUSH;
+            writeDials(link, test);
+            float pushLoss = evalLoss();
+
+            // Test PULL
+            test[d] = PULL;
+            writeDials(link, test);
+            float pullLoss = evalLoss();
+
+            // Keep whichever improves (greedy)
+            // Use moderate bias - PROBE tells us DIRECTION, not destination
+            float bestLoss = std::min(pushLoss, pullLoss);
+            if (bestLoss < currentLoss - 0.001f)  // Must improve by 0.1%
+            {
+                // Bias toward winning direction, but don't overshoot
+                // Strong improvement (>1%) → bias 0.60/0.40
+                // Weak improvement → bias 0.55/0.45
+                float improvement = currentLoss - bestLoss;
+                if (pushLoss < pullLoss) {
+                    biasedStart[d] = (improvement > 0.01f) ? 0.60f : 0.55f;
+                } else {
+                    biasedStart[d] = (improvement > 0.01f) ? 0.40f : 0.45f;
+                }
+                currentLoss = bestLoss;
+                improvedCount++;
+            }
+            // else: keep at neutral (biasedStart[d] already 0.5)
+        }
+
+        // Apply final biased start
+        writeDials(link, biasedStart);
+        float finalLoss = evalLoss();
+
+        std::cerr << "[PROBE] Greedy: " << improvedCount << " dials improved" << std::endl;
+        std::cerr << "[PROBE] " << (baseLoss * 100.0f) << "% -> " << (finalLoss * 100.0f) << "%" << std::endl;
+
+        // Safety: if somehow worse, revert
+        if (finalLoss > baseLoss + 0.01f)
+        {
+            std::cerr << "[PROBE] Unexpected regression, reverting" << std::endl;
+            biasedStart = neutral;
+            writeDials(link, neutral);
+        }
+    }
+
+    // ============================================================
     // Eigenspace CMA-ES Optimizer
     // ============================================================
 
@@ -466,6 +572,190 @@ namespace geos::internal
         std::random_device rd;
         std::mt19937 rng(rd());
         std::normal_distribution<float> normal(0.0f, 1.0f);
+
+        // TEST 2: Find best value for each key dial, one at a time
+        // Only keep dials that improve on LUT baseline
+        {
+            Theta neutral;
+            initNeutral(neutral);
+            writeDials(link, neutral);
+
+            float lutOnlyLoss = evaluateLoss(body, targetStyle);
+            std::cerr << "[TEST] LUT-only baseline: " << (lutOnlyLoss * 100.0f) << "%" << std::endl;
+
+            // Key dials to test (index, name)
+            struct DialTest { int idx; const char* name; };
+            DialTest keyDials[] = {
+                {0, "exposure"},
+                {1, "temperature"},
+                {2, "tint"},
+                {3, "contrast"},
+                {5, "shadows"},
+                {6, "highlights"},
+                {8, "black"},
+                {9, "white"},
+                {10, "vibrance"},
+                {11, "saturation"},
+            };
+
+            Theta best = neutral;
+            float bestLoss = lutOnlyLoss;
+
+            for (const auto& dial : keyDials) {
+                Theta test = best;  // Start from current best
+                float dialBest = 0.5f;
+                float dialBestLoss = bestLoss;
+
+                // Test values in SMALL range around neutral (0.4 to 0.6)
+                for (float v = 0.35f; v <= 0.65f; v += 0.05f) {
+                    test[dial.idx] = v;
+                    writeDials(link, test);
+                    float loss = evaluateLoss(body, targetStyle);
+                    if (loss < dialBestLoss - 0.001f) {
+                        dialBest = v;
+                        dialBestLoss = loss;
+                    }
+                }
+
+                // Keep if improved
+                if (dialBestLoss < bestLoss - 0.001f) {
+                    best[dial.idx] = dialBest;
+                    bestLoss = dialBestLoss;
+                    std::cerr << "[TEST] " << dial.name << " = " << dialBest
+                              << " -> " << (bestLoss * 100.0f) << "%" << std::endl;
+                }
+            }
+
+            writeDials(link, best);
+            std::cerr << "[TEST] Final (LUT + key dials): " << (bestLoss * 100.0f) << "%" << std::endl;
+            return 0;
+        }
+
+        // BOUND discovery: find each dial's independent max via hill climb
+        // Base = neutral (0.5), Max = where improvement stops
+        // Truth (optimal) is somewhere in [base, max], found by joint optimization
+        VectorN lower, upper;
+        {
+            constexpr float STEP = 0.1f;  // Hill climb step size
+
+            auto evalLoss = [&]() -> float {
+                if (targetFeatures) {
+                    View candidate = body.view();
+                    float spectral = computeProgressiveLoss(candidate, *targetFeatures, LossMode::SAMPLED, 0.5f);
+                    if (config.geos_mode == Mode::FULL_35D) {
+                        cv::UMat candProxy = resizeProxy(candidate);
+                        float candLapVar = laplacianVariance(candProxy);
+                        float freq = (targetLaplacianVar < 1e-6f) ? 0.0f
+                            : std::abs(candLapVar - targetLaplacianVar) / targetLaplacianVar;
+                        return 0.85f * spectral + 0.15f * freq;
+                    }
+                    return spectral;
+                }
+                return evaluateLoss(body, targetStyle);
+            };
+
+            // Start from neutral
+            Theta neutral;
+            initNeutral(neutral);
+            writeDials(link, neutral);
+            float baseLoss = evalLoss();
+
+            std::cerr << "[BOUND] Baseline loss: " << (baseLoss * 100.0f) << "%" << std::endl;
+
+            // Track best value and loss for each dial
+            VectorN bestVal;
+            VectorN bestLoss;
+            for (int d = 0; d < ACEO_DIAL_COUNT; d++) {
+                bestVal[d] = 0.5f;
+                bestLoss[d] = baseLoss;
+            }
+
+            for (int d = 0; d < ACEO_DIAL_COUNT; d++)
+            {
+                Theta test = neutral;
+
+                // Hill climb UP to find upper bound
+                float bestUp = 0.5f;
+                float bestUpLoss = baseLoss;
+                for (float v = 0.5f + STEP; v <= 1.0f; v += STEP)
+                {
+                    test[d] = v;
+                    writeDials(link, test);
+                    float loss = evalLoss();
+                    if (loss < bestUpLoss - 0.001f) {
+                        bestUp = v;
+                        bestUpLoss = loss;
+                    } else {
+                        break;  // Stop when improvement stops
+                    }
+                }
+                upper[d] = std::max(bestUp, 0.5f);  // At least neutral
+
+                // Hill climb DOWN to find lower bound
+                float bestDown = 0.5f;
+                float bestDownLoss = baseLoss;
+                for (float v = 0.5f - STEP; v >= 0.0f; v -= STEP)
+                {
+                    test[d] = v;
+                    writeDials(link, test);
+                    float loss = evalLoss();
+                    if (loss < bestDownLoss - 0.001f) {
+                        bestDown = v;
+                        bestDownLoss = loss;
+                    } else {
+                        break;  // Stop when improvement stops
+                    }
+                }
+                lower[d] = std::min(bestDown, 0.5f);  // At most neutral
+
+                // Pick whichever direction gave better loss
+                if (bestDownLoss < bestUpLoss) {
+                    bestVal[d] = bestDown;
+                    bestLoss[d] = bestDownLoss;
+                } else if (bestUpLoss < baseLoss) {
+                    bestVal[d] = bestUp;
+                    bestLoss[d] = bestUpLoss;
+                }
+                // else: stays at neutral (0.5)
+
+                // Reset dial for next iteration
+                test[d] = 0.5f;
+            }
+
+            // Reset to neutral
+            writeDials(link, neutral);
+
+            // Count improved dials and log
+            int improved = 0;
+            for (int d = 0; d < ACEO_DIAL_COUNT; d++) {
+                if (bestVal[d] != 0.5f) improved++;
+            }
+            std::cerr << "[BOUND] Found improvement for " << improved << "/41 dials" << std::endl;
+
+            // Log key dials for diagnostics
+            auto logBest = [&](int d, const char* name) {
+                if (bestVal[d] != 0.5f) {
+                    std::cerr << "[BOUND]   " << name << " = " << bestVal[d]
+                              << " (loss: " << (bestLoss[d] * 100.0f) << "%)" << std::endl;
+                }
+            };
+            logBest(1, "temperature");
+            logBest(5, "shadows");
+            logBest(8, "black");
+            logBest(13, "shadow_temp");
+
+            // TEST: Set all dials to their independent best and stop
+            Theta indepBest;
+            for (int d = 0; d < ACEO_DIAL_COUNT; d++) {
+                indepBest[d] = bestVal[d];
+            }
+            writeDials(link, indepBest);
+            float indepLoss = evalLoss();
+            std::cerr << "[TEST] All dials at independent best: " << (indepLoss * 100.0f) << "%" << std::endl;
+        }
+
+        // Return early - dials already set to independent best values
+        return 0;  // Skip further optimization, show independent hill climb result
 
         // Load prior covariance
         // Priority: --with-cov flag > etc/aceo_full.json > identity (bootstrapping)
@@ -537,11 +827,33 @@ namespace geos::internal
         // Evaluate initial loss (combined: spectral + frequency for holistic optimization)
         // In --full mode, we optimize all 45 dials including edge, so use combined loss
         bool useHolisticLoss = (config.geos_mode == Mode::FULL_35D);
-        float initialLoss = useHolisticLoss
-            ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
-            : evaluateLoss(body, targetStyle);
+        bool useRegionalLoss = (targetFeatures != nullptr);
+
+        // Loss evaluation lambda - uses regional loss when available for better local matching
+        // Regional loss takes priority as it captures local differences that global misses
+        auto evalLoss = [&]() -> float {
+            if (useRegionalLoss) {
+                View candidate = body.view();
+                float spectral = computeProgressiveLoss(candidate, *targetFeatures, LossMode::SAMPLED, 0.5f);
+                if (useHolisticLoss) {
+                    // Add frequency component for holistic mode
+                    cv::UMat candProxy = resizeProxy(candidate);
+                    float candLapVar = laplacianVariance(candProxy);
+                    float freq = (targetLaplacianVar < 1e-6f) ? 0.0f
+                        : std::abs(candLapVar - targetLaplacianVar) / targetLaplacianVar;
+                    return 0.85f * spectral + 0.15f * freq;
+                }
+                return spectral;
+            } else if (useHolisticLoss) {
+                return evaluateCombinedLoss(body, targetStyle, targetLaplacianVar);
+            } else {
+                return evaluateLoss(body, targetStyle);
+            }
+        };
+
+        float initialLoss = evalLoss();
         std::cerr << "[ACEO-EIGEN] Initial loss: " << initialLoss
-                  << (useHolisticLoss ? " (holistic: spectral+freq)" : " (spectral only)") << std::endl;
+                  << (useRegionalLoss ? " (regional: global+local)" : (useHolisticLoss ? " (holistic: spectral+freq)" : " (spectral only)")) << std::endl;
         std::cerr << "[ACEO-EIGEN] Population: λ=" << lambda << " μ=" << mu << std::endl;
         std::cerr << "[ACEO-EIGEN] Eigenspace dim: " << EIGEN_DIM << std::endl;
 
@@ -574,16 +886,14 @@ namespace geos::internal
                     population[i][k] = mean[k] + sigma * eigenSteps[k] * z;
                 }
 
-                // Unproject to dial space
-                unprojectFromEigen(es, population[i], populationAceo[i]);
+                // Unproject to dial space (with bounds)
+                unprojectFromEigen(es, population[i], populationAceo[i], &lower, &upper);
 
-                // Evaluate (use combined loss in holistic mode)
+                // Evaluate (use regional loss when available)
                 Theta theta;
                 aceoToTheta(populationAceo[i], theta);
                 writeDials(link, theta);
-                fitness[i] = useHolisticLoss
-                    ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
-                    : evaluateLoss(body, targetStyle);
+                fitness[i] = evalLoss();
                 evalCount++;
 
                 if (fitness[i] < bestLoss)
@@ -680,18 +990,16 @@ namespace geos::internal
             }
         }
 
-        // Restore best solution
+        // Restore best solution (with bounds)
         VectorN bestAceo;
-        unprojectFromEigen(es, bestMean, bestAceo);
+        unprojectFromEigen(es, bestMean, bestAceo, &lower, &upper);
         Theta bestTheta;
         aceoToTheta(bestAceo, bestTheta);
         writeDials(link, bestTheta);
 
-        float finalLoss = useHolisticLoss
-            ? evaluateCombinedLoss(body, targetStyle, targetLaplacianVar)
-            : evaluateLoss(body, targetStyle);
+        float finalLoss = evalLoss();
         std::cerr << "[ACEO-EIGEN] Final loss: " << finalLoss << " (evals=" << evalCount << ")"
-                  << (useHolisticLoss ? " [holistic]" : "") << std::endl;
+                  << (useRegionalLoss ? " [regional]" : (useHolisticLoss ? " [holistic]" : "")) << std::endl;
 
         // Log covariance accumulator stats
         std::cerr << "[ACEO-COV] Accumulated " << covAccum.n << " samples" << std::endl;

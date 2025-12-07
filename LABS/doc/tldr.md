@@ -176,28 +176,41 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 **Key file:** `etc/jacob.json` (45×23 matrix with dial/feature names)
 
-## Current Results (2025-12-05)
+## Current Results (2025-12-07)
+
+### Critical Finding: LUT Works, Dials Don't
+
+**Experiment on DSC00202:**
+- LUT-only (neutral dials): ~7-8% loss, **looks good**
+- Independent dial optimization: ~7% loss, **looks terrible** (yellow/purple)
+- Greedy dial tuning: ~7% loss, **still terrible** (purple foliage)
+
+**The problem:** Our loss function is misleading. It finds mathematically optimal but perceptually awful settings. Dials have high covariance - they fight each other.
+
+**Root cause:** Cameras use **HueSatDelta tables** (2.5D LUTs in HSV space), not linear dials. They can make targeted per-hue corrections like *"if green, shift hue -5° and boost sat 10%"*.
+
+Our 45 linear dials can't express these non-linear, per-hue transforms.
 
 ### Current Optimizer Stack (GEOS)
-
-**GEOS** - 35D Geodesic-Spectral style optimization:
 
 ```
 1. LUT    Per-channel tone curve estimation (deterministic)
           Analyzes base→target luminance mapping
+          ** This does most of the work **
 
 2. ACEO   Covariance-based evolutionary optimizer (explore)
-          Uses prior covariance for efficient search
+          Currently experimental - dial optimization may be wrong approach
 
 3. SPSA   Stochastic perturbation optimizer (polish)
-          Gradient-free fine-tuning to convergence
+          Gradient-free fine-tuning
 ```
 
-The **HYBRID** mode runs ACEO for exploration, then SPSA for polish. This is the default in DESK and tune.
+### Next Direction: HSV LUT
 
-### Key Finding
-
-The LUT curve estimation provides significant improvement before dial optimization begins. ACEO efficiently explores the 35D dial space using learned covariance, then SPSA polishes to minimize spectral loss.
+Replace dial-based color correction with learned HSV LUT:
+- For each (hue, saturation) cell: learn (Δhue, Δsat, Δval)
+- Similar to DCP HueSatDelta tables used by camera manufacturers
+- See `doc/todo.md` for full research notes
 
 ## Why DRO-Heavy Scenes Hit 15% Floor
 

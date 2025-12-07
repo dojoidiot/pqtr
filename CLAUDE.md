@@ -1,5 +1,10 @@
 # PQTR Project Rules
 
+## Session Restart
+When starting a new session, read these files to get up to speed:
+1. `README.md` - Project overview and architecture
+2. `next.md` - Current state and next steps
+
 ## Hard Shut
 When the user says **"hard shut"**, immediately:
 1. Read `LABS/doc/docs.md` for documentation standards

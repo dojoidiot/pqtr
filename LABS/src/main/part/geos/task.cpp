@@ -170,6 +170,15 @@ namespace geos
                     int aceoIters = optimizeAceo(
                         body, link, m_targetStyle, m_targetLaplacianVar, aceoConfig, progress, lutEstimated, features);
 
+                    // BOUND test mode: aceoIters==0 means stop after bounds discovery
+                    if (aceoIters == 0)
+                    {
+                        result.geos_iterations = 0;
+                        result.loss = diff(body.view());
+                        std::cout << "[geos] BOUND test: stopped after dial bounds" << std::endl;
+                        return result;
+                    }
+
                     // Phase 2: SPSA - polish from ACEO's position (remaining iterations)
                     Config spsaConfig = config;
                     spsaConfig.geos_max_iter = config.geos_max_iter - aceoIters;  // Remaining budget
