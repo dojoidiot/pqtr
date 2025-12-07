@@ -17,7 +17,7 @@
 #include "part/projects.hpp"
 #include "part/workarea.hpp"
 #include "part/linkeditor.hpp"
-#include "part/geos.hpp"
+#include "part/chat.hpp"
 
 namespace {
 
@@ -112,13 +112,13 @@ void render_menu_bar(desk::State& state, int display_w) {
 
     ImGui::EndDisabled();  // End folder_set disable
 
-    // GeoS dome button (always available)
+    // Chat panel button (always available)
     ImGui::SameLine();
-    if (ImGui::Button(state.panels.geos ? "GeoS [x]" : "GeoS [ ]")) {
+    if (ImGui::Button(state.panels.geos ? "Chat [x]" : "Chat [ ]")) {
         state.panels.geos = !state.panels.geos;
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Geodesic Spectrum visualization");
+        ImGui::SetTooltip("Tune progress log");
     }
 
     // Separator
@@ -157,7 +157,7 @@ void render_menu_bar(desk::State& state, int display_w) {
     ImGui::BeginDisabled(!state.has_project() || state.is_working || state.is_tuning || !state.has_embedded);
     if (ImGui::Button("Tune")) {
         desk::start_tune_async(state, state.current_project());
-        state.panels.geos = true;  // Show geos panel for visualization
+        state.panels.geos = true;  // Show chat panel for progress
     }
     ImGui::EndDisabled();
     if (ImGui::IsItemHovered()) {
@@ -368,11 +368,15 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
         ImGui::End();
     }
 
-    // GeoS Dome Panel - CENTER RIGHT (between embedded and editor)
+    // Chat Panel - CENTER RIGHT (tune progress log)
+    // Auto-show during tuning
+    if (state.is_tuning && !state.panels.geos) {
+        state.panels.geos = true;
+    }
     if (state.panels.geos) {
         ImVec2 size(display_w * state.panel_sizes.geos_w, content_h * state.panel_sizes.geos_h);
         if (size.x < 200) size.x = 200;
-        if (size.y < 250) size.y = 250;
+        if (size.y < 150) size.y = 150;
 
         // Position: right side, centered vertically
         ImVec2 pos(display_w - size.x - PANEL_MARGIN,
@@ -381,10 +385,10 @@ bool render_floating_panels(desk::State& state, int display_w, int display_h) {
         ImGui::SetNextWindowPos(pos, ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowSize(size, ImGuiCond_Always);
 
-        ImGui::Begin("GeoS", &state.panels.geos,
+        ImGui::Begin("Chat", &state.panels.geos,
                      ImGuiWindowFlags_NoCollapse);
 
-        desk::render_geos_panel();
+        desk::render_chat_panel();
 
         // Update fractions if user resized
         ImVec2 win_size = ImGui::GetWindowSize();
@@ -675,7 +679,6 @@ int main(int argc, char** argv) {
     desk::unload_texture(state);
     desk::unload_base_texture(state);
     desk::unload_embedded_texture(state);
-    desk::cleanup_geos();
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

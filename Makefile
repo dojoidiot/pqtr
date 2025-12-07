@@ -4,15 +4,19 @@
 # Run from repository root.
 #
 # Usage:
-#   make           # Build everything (wire + raws + labs + desk)
+#   make           # Build everything (wire + raws + labs + tune + desk)
 #   make raws      # Build RAWS library
-#   make labs      # Build LABS library (builds RAWS first)
+#   make labs      # Build LABS library + tune/labs binaries
+#   make tune      # Build LABS tune binary only
 #   make desk      # Build DESK app (builds LABS first)
 #   make test      # Run all tests
 #   make clean     # Clean all projects
 #   make rewire    # Remove and recreate all symlinks
 
-.PHONY: all help wire rewire raws labs desk test test-raws test-labs clean
+.PHONY: all help wire rewire raws labs tune desk test test-raws test-labs clean
+
+# Default: build everything
+all: desk
 
 help:
 	@echo "PQTR Build System"
@@ -20,8 +24,14 @@ help:
 	@echo "Build targets:"
 	@echo "  all       Build everything (default)"
 	@echo "  raws      Build RAWS library"
-	@echo "  labs      Build LABS library"
+	@echo "  labs      Build LABS library + tune/labs binaries"
+	@echo "  tune      Build LABS tune binary only"
 	@echo "  desk      Build DESK application"
+	@echo ""
+	@echo "Run targets:"
+	@echo "  ./desk.sh       Launch DESK GUI"
+	@echo "  ./tune.sh ...   Run tune optimizer"
+	@echo "  ./labs.sh ...   Run labs processor"
 	@echo ""
 	@echo "Test targets:"
 	@echo "  test      Run all tests (RAWS + LABS)"
@@ -32,9 +42,6 @@ help:
 	@echo "  wire      Create symlinks between projects"
 	@echo "  rewire    Remove and recreate symlinks"
 	@echo "  clean     Clean all build artifacts"
-
-# Default: build everything
-all: desk
 
 # Wiring (creates symlinks between projects)
 wire:
@@ -54,11 +61,18 @@ raws: wire
 	@echo "=== Building RAWS ==="
 	$(MAKE) -C RAWS lib
 
-# LABS: core library (depends on RAWS)
+# LABS: core library + binaries (depends on RAWS)
 labs: raws
 	@echo ""
 	@echo "=== Building LABS ==="
 	$(MAKE) -C LABS lib
+	$(MAKE) -C LABS -f Makefile.tune tune labs
+
+# TUNE: just the tune binary
+tune: labs
+	@echo ""
+	@echo "=== Building TUNE ==="
+	$(MAKE) -C LABS -f Makefile.tune tune
 
 # DESK: GUI application (depends on LABS)
 desk: labs

@@ -66,7 +66,7 @@ PART_SRCS = $(PART_DIR)/state.cpp \
             $(PART_DIR)/projects.cpp \
             $(PART_DIR)/workarea.cpp \
             $(PART_DIR)/linkeditor.cpp \
-            $(PART_DIR)/geos.cpp
+            $(PART_DIR)/chat.cpp
 
 # Object files
 IMGUI_OBJS = $(OBJ_DIR)/imgui.o \
@@ -85,7 +85,7 @@ PART_OBJS = $(OBJ_DIR)/part/state.o \
             $(OBJ_DIR)/part/projects.o \
             $(OBJ_DIR)/part/workarea.o \
             $(OBJ_DIR)/part/linkeditor.o \
-            $(OBJ_DIR)/part/geos.o
+            $(OBJ_DIR)/part/chat.o
 
 # Target
 DESK_BIN = $(BIN_DIR)/desk
@@ -148,7 +148,7 @@ $(OBJ_DIR)/part/workarea.o: $(PART_DIR)/workarea.cpp $(PART_DIR)/workarea.hpp $(
 $(OBJ_DIR)/part/linkeditor.o: $(PART_DIR)/linkeditor.cpp $(PART_DIR)/linkeditor.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(OBJ_DIR)/part/geos.o: $(PART_DIR)/geos.cpp $(PART_DIR)/geos.hpp | $(OBJ_DIR)/part
+$(OBJ_DIR)/part/chat.o: $(PART_DIR)/chat.cpp $(PART_DIR)/chat.hpp | $(OBJ_DIR)/part
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Main application

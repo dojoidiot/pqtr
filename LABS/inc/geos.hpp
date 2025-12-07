@@ -1,17 +1,17 @@
 // geos.hpp
-// Public API for automatic style matching optimization
+// GEOS: Geodesic-Spectral Style Optimization
 //
-// Unified module providing:
-// - Loss measurement (spectral + frequency metrics)
-// - GEOS optimizer (45 style dials via SPSA or ACEO)
-// - Edge optimizer (4 detail dials via golden section)
+// Automatic style matching in geodesic-spectral feature space.
+// Just run `tune` - it learns and improves over time.
 //
-// SPSA explores full dial space and builds covariance.
-// ACEO uses prior covariance for efficient eigenspace search.
-// Together they form a complementary optimization pair.
+// Internal optimizers (you don't need to configure these):
+// - ACEO: Adaptive Covariance Eigenspace - finds direction using learned priors
+// - SPSA: Simultaneous Perturbation - polishes and builds new samples
+// - JITO: Jacobian Inference Transfer - experimental warm-start
 //
-// PIMPL design caches target image features for efficient
-// repeated comparisons during optimization.
+// Learning:
+// - Covariance priors accumulate in ~/.pqtr/var/tune.json
+// - Each tune improves future runs
 //
 // User apps include only this header and link against labs.a.
 // For serialization, see data.hpp.
@@ -68,12 +68,13 @@ namespace geos
         STAGED         // Stage-aware: VIEW (6 tone dials) then POPS (39 color dials)
     };
 
-    // Optimizer algorithm selection
+    // Internal optimizer selection - users don't configure this
+    // HYBRID is always used: ACEO finds direction, SPSA polishes
     enum class Optimizer
     {
-        SPSA,   // Simultaneous Perturbation Stochastic Approximation (default)
-        ACEO,   // Adaptive Covariance Evolver Optimiser (CMA-ES with prior)
-        HYBRID  // ACEO for direction (pop), then SPSA for polish (photographic quality)
+        SPSA,   // Simultaneous Perturbation (internal)
+        ACEO,   // Adaptive Covariance Eigenspace (internal)
+        HYBRID  // ACEO → SPSA (default, always use this)
     };
 
     // SPSA phase parameters (learnable)
@@ -97,7 +98,12 @@ namespace geos
         float geos_threshold = 0.005f; // Stop when spectral loss below this (0.5%)
         float edge_tolerance = 0.01f;  // Golden section convergence tolerance
         Mode geos_mode = Mode::BLOCKWISE;  // Optimization strategy
-        Optimizer optimizer = Optimizer::SPSA;  // Algorithm selection (SPSA or ACEO)
+        Optimizer optimizer = Optimizer::HYBRID;  // Internal: ACEO→SPSA (don't change)
+
+        // JITO: Jacobian Inference Transfer Optimiser
+        // Uses pre-computed Jacobian for fast warm-start (experimental)
+        bool use_jito = false;         // Enable JITO pre-pass
+        std::string jito_jacobian;     // Path to Jacobian file (default: etc/jacob.json)
 
         // Covariance options (SPSA builds, ACEO uses)
         std::string aceo_with_cov;     // Path to prior covariance (blend with accumulated)

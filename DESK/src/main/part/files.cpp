@@ -1,7 +1,7 @@
 // files.cpp - File operations for DESK
 
 #include "files.hpp"
-#include "geos.hpp"  // desk::geos for dome animation
+#include "chat.hpp"  // desk::chat for progress log
 #include "ImGuiFileDialog.h"
 
 #include <fstream>
@@ -866,15 +866,16 @@ bool run_tune(State& state, Project& project) {
     state.status_message = "Tuning: " + project.name;
     state.is_working = true;
 
-    // Enable geos tuning mode (shows optimizer position, stops random drift)
-    desk::set_geos_tuning(true);
+    // Enable chat and clear log
+    desk::set_chat_active(true);
+    desk::chat("Starting tune: " + project.name);
 
     // Open RAW
     pqtr::Hold<pqtr::Sink> sink(pqtr::Tool::read(project.raw_path.string()));
     if (!sink) {
         state.error_message = "Failed to read: " + project.name;
         state.is_working = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return false;
     }
 
@@ -883,7 +884,7 @@ bool run_tune(State& state, Project& project) {
     if (!head) {
         state.error_message = "Failed to decode: " + project.name;
         state.is_working = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return false;
     }
 
@@ -892,7 +893,7 @@ bool run_tune(State& state, Project& project) {
     if (preview.empty()) {
         state.error_message = "No embedded preview: " + project.name;
         state.is_working = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return false;
     }
 
@@ -917,9 +918,11 @@ bool run_tune(State& state, Project& project) {
     tuneLink.globalColor().colourDensity().set(0.5f);
 
     // Create geos task with preview as target
+    desk::chat("Analyzing target preview...");
     pqtr::Hold<geos::Task> task = geos::make(preview);
 
     // Configure optimizer
+    desk::chat("Configuring HYBRID optimizer (ACEO + SPSA)...");
     geos::Config config;
     config.skip_edge = false;
     config.skip_lut = false;  // Enable LUT estimation
@@ -929,25 +932,55 @@ bool run_tune(State& state, Project& project) {
     config.geos_mode = geos::Mode::FULL_35D;
     config.optimizer = geos::Optimizer::HYBRID;
 
-    // Progress callback - update status and geos dome (every 10 iterations)
-    auto progress = [&state](const geos::Progress& p) -> bool {
-        if (p.stage == geos::Progress::Stage::GEOS && (p.iteration % 10 == 0)) {
-            // Update status message
-            char buf[64];
-            snprintf(buf, sizeof(buf), "Tuning: %.1f%% (iter %d)",
-                     p.loss.spectral * 100.0f, p.iteration);
-            state.status_message = buf;
+    desk::chat("Estimating tone curve (LUT)...");
 
-            // Update geos dome visualization
-            float r = std::min(1.0f, p.loss.spectral * 10.0f);
-            float theta = p.iteration * 0.15f;
-            desk::set_geos_progress(r, theta, p.loss.spectral);
+    // Progress callback - show phases, not iterations
+    static bool geos_started = false;
+    static bool edge_started = false;
+    static int geos_calls = 0;
+    static float last_reported_loss = 1.0f;
+    geos_started = false;  // Reset for each tune
+    edge_started = false;
+    geos_calls = 0;
+    last_reported_loss = 1.0f;
+
+    auto progress = [&state](const geos::Progress& p) -> bool {
+        if (p.stage == geos::Progress::Stage::GEOS) {
+            if (!geos_started) {
+                desk::chat("Color matching...");
+                state.status_message = "Color matching...";
+                geos_started = true;
+            }
+            geos_calls++;
+            // Report every 3 callbacks
+            if (geos_calls % 3 == 0) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "  %.1f%% loss", p.loss.spectral * 100.0f);
+                desk::chat(buf);
+                state.status_message = buf;
+                last_reported_loss = p.loss.spectral;
+            }
+        } else if (p.stage == geos::Progress::Stage::EDGE) {
+            if (!edge_started) {
+                // Log color phase result
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Color: %.1f%% loss", p.loss.spectral * 100.0f);
+                desk::chat(buf);
+                desk::chat("Sharpness matching...");
+                state.status_message = "Sharpness matching...";
+                edge_started = true;
+            }
         }
         return true;  // Continue
     };
 
     // Run optimization
     geos::Result result = task->run(body, tuneLink, config, progress);
+
+    // Log completion
+    char done_buf[64];
+    snprintf(done_buf, sizeof(done_buf), "Done! %.1f%% error", result.loss.spectral * 100.0f);
+    desk::chat(done_buf);
 
     // Extract optimized dials into a new desk::Link
     Link baseLink("Base");
@@ -977,7 +1010,7 @@ bool run_tune(State& state, Project& project) {
     state.needs_reprocess = true;
 
     // Disable geos tuning mode
-    desk::set_geos_tuning(false);
+    desk::set_chat_active(false);
 
     return true;
 }
@@ -1225,8 +1258,9 @@ void open_link_load_dialog(const State& state) {
 
 // Thread function that runs the optimizer
 static void tune_thread_func(const fs::path raw_path, const std::string project_name) {
-    // Enable geos tuning mode
-    desk::set_geos_tuning(true);
+    // Enable chat
+    desk::set_chat_active(true);
+    desk::chat("Starting tune: " + project_name);
 
     Link result_link("Base");
     float final_loss = 1.0f;
@@ -1240,7 +1274,7 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     if (!sink) {
         g_tune_finished = true;
         g_tune_running = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return;
     }
 
@@ -1249,7 +1283,7 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     if (!head) {
         g_tune_finished = true;
         g_tune_running = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return;
     }
 
@@ -1258,7 +1292,7 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     if (preview.empty()) {
         g_tune_finished = true;
         g_tune_running = false;
-        desk::set_geos_tuning(false);
+        desk::set_chat_active(false);
         return;
     }
 
@@ -1295,9 +1329,11 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     }
 
     // Create geos task with preview as target
+    desk::chat("Analyzing target preview...");
     pqtr::Hold<geos::Task> task = geos::make(preview);
 
     // Configure optimizer
+    desk::chat("Configuring HYBRID optimizer (ACEO + SPSA)...");
     geos::Config config;
     config.skip_edge = false;
     config.skip_lut = false;
@@ -1307,18 +1343,48 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     config.geos_mode = geos::Mode::FULL_35D;
     config.optimizer = geos::Optimizer::HYBRID;
 
-    // Progress callback - update geos dome (every 10 iterations to reduce overhead)
+    desk::chat("Estimating tone curve (LUT)...");
+
+    // Progress callback - show phases, not iterations
+    static bool geos_started_async = false;
+    static bool edge_started_async = false;
+    static int geos_calls_async = 0;
+    geos_started_async = false;  // Reset
+    edge_started_async = false;
+    geos_calls_async = 0;
+
     auto progress = [](const geos::Progress& p) -> bool {
-        if (p.stage == geos::Progress::Stage::GEOS && (p.iteration % 10 == 0)) {
-            float r = std::min(1.0f, p.loss.spectral * 10.0f);
-            float theta = p.iteration * 0.15f;
-            desk::set_geos_progress(r, theta, p.loss.spectral);
+        if (p.stage == geos::Progress::Stage::GEOS) {
+            if (!geos_started_async) {
+                desk::chat("Color matching...");
+                geos_started_async = true;
+            }
+            geos_calls_async++;
+            // Report every 3 callbacks
+            if (geos_calls_async % 3 == 0) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "  %.1f%% loss", p.loss.spectral * 100.0f);
+                desk::chat(buf);
+            }
+        } else if (p.stage == geos::Progress::Stage::EDGE) {
+            if (!edge_started_async) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Color: %.1f%% loss", p.loss.spectral * 100.0f);
+                desk::chat(buf);
+                desk::chat("Sharpness matching...");
+                edge_started_async = true;
+            }
         }
         return g_tune_running;  // Allow cancellation
     };
 
     // Run optimization
     geos::Result result = task->run(body, tuneLink, config, progress);
+
+    // Log completion
+    char done_buf[64];
+    snprintf(done_buf, sizeof(done_buf), "Done! %.1f%% error", result.loss.spectral * 100.0f);
+    desk::chat(done_buf);
 
     // Extract results
     extract_link_dials(tuneLink, result_link);
@@ -1426,7 +1492,7 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
         g_tune_final_loss = final_loss;
     }
 
-    desk::set_geos_tuning(false);
+    desk::set_chat_active(false);
     g_tune_finished = true;
     g_tune_running = false;
 }

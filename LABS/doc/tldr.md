@@ -178,44 +178,26 @@ The Jacobian matrix J[d][f] measures how much feature f changes when dial d move
 
 ## Current Results (2025-12-05)
 
-### Latest Metrics (633c1aa - STAGED optimizer)
+### Current Optimizer Stack (GEOS)
 
-| Image | After Poly | STAGED | HYBRID | Notes |
-|-------|-----------|--------|--------|-------|
-| DSC00202 | **2.6%** | **2.4%** | 3.7% | STAGED wins on easy images |
-| DSC00144 | **12.8%** | **12.8%** | 12.0% | Hard image - VIEW oscillates |
+**GEOS** - 35D Geodesic-Spectral style optimization:
 
-**STAGED optimizer**: VIEW (6 tone dials) → POPS (axis groups) → Joint (45 dials).
+```
+1. LUT    Per-channel tone curve estimation (deterministic)
+          Analyzes base→target luminance mapping
+
+2. ACEO   Covariance-based evolutionary optimizer (explore)
+          Uses prior covariance for efficient search
+
+3. SPSA   Stochastic perturbation optimizer (polish)
+          Gradient-free fine-tuning to convergence
+```
+
+The **HYBRID** mode runs ACEO for exploration, then SPSA for polish. This is the default in DESK and tune.
 
 ### Key Finding
 
-The polynomial transform (Camera Math) provides the heavy lifting:
-- DSC00202: 2.6% error from polynomial alone
-- Visual output shows proper greens, neutral wood (no more pink cast)
-
-Dials (Camera Vibe) provide refinements. STAGED optimizer improves on HYBRID for easy images by separating tone from color optimization.
-
-### STAGED Optimizer Architecture
-
-```
-VIEW Phase (6 dials):
-  exposure, contrast, highlights, shadows, black, white
-  → Optimize with viewLoss() (luminance features weighted high)
-
-POPS Phase (6 axis groups):
-  GLOBAL:  vibrance, saturation, colourDensity (3 dials)
-  SPLIT:   shadow_temp/tint, highlight_temp/tint (4 dials)
-  R-C:     Red + Cyan HSL (6 dials) - opponent axis
-  G-M:     Green + Magenta HSL (6 dials)
-  B-Y:     Blue + Yellow HSL (6 dials)
-  O-P:     Orange + Purple HSL (6 dials)
-  → Optimize each group with popsLoss() (chroma features weighted high)
-
-Joint Phase (45 dials):
-  → Polish with geodesicLoss()
-```
-
-**Key insight**: Opponent color pairs (R-C, G-M, B-Y) are optimized together, matching how human vision processes color and keeping compensating adjustments in the same group.
+The LUT curve estimation provides significant improvement before dial optimization begins. ACEO efficiently explores the 35D dial space using learned covariance, then SPSA polishes to minimize spectral loss.
 
 ## Why DRO-Heavy Scenes Hit 15% Floor
 
@@ -276,11 +258,20 @@ LABS Pipeline:
 
 | File | Purpose |
 |------|---------|
-| `src/main/part/geos/staged.cpp` | STAGED optimizer (VIEW → POPS → Joint) |
-| `src/main/part/geos/diff.cpp` | viewLoss(), popsLoss(), geodesicLoss() |
-| `src/main/gold.cpp` | Test binary for STAGED mode |
-| `src/main/part/pipe/mods/poly_color.cpp` | Polynomial color transform (Phase 1) |
-| `src/main/part/pipe/mods/local_tone.cpp` | Local tone mapping (Iridix-style, research) |
+| `src/main/part/geos/task.cpp` | GEOS orchestration (LUT → ACEO → SPSA) |
+| `src/main/part/geos/aceo.cpp` | ACEO evolutionary optimizer |
+| `src/main/part/geos/spsa.cpp` | SPSA gradient-free optimizer |
+| `src/main/part/geos/diff.cpp` | Loss functions (geodesicLoss, spectral features) |
+| `src/main/part/pipe/mods/lut_curve.cpp` | Per-channel LUT estimation |
 | `RAWS/src/main/raws.cpp` | RAW decoding + coefficient estimation |
 | `etc/jacob.json` | Jacobian matrix (45×23 dial→feature sensitivity) |
-| `doc/hack.md` | Reverse-engineering Sony ISP + foliage analysis |
+
+## Tools
+
+| Binary | Purpose |
+|--------|---------|
+| `LABS/bin/labs` | RAW processor CLI |
+| `LABS/bin/tune` | Style optimizer CLI |
+| `DESK/bin/desk` | GUI application |
+
+Launcher scripts in project root: `./desk.sh`, `./tune.sh`, `./labs.sh`

@@ -5,14 +5,17 @@
 //   Phase 2 (User Vibe): Optimize dials to match user's edit (on top of camera vibe)
 //
 // Usage:
-//   tune <source.ARW> <target.png> --save-area <dir>
+//   tune <source.ARW> <target.png|preview> [options]
 //
-// If target is "preview", only Phase 0+1 run (camera math + camera vibe).
-// If target is an image file, all three phases run.
+// Default paths (~/.pqtr or --pqtr override):
+//   etc/tune.json  Built-in priors (from code)
+//   var/tune.json  Learned priors (accumulated)
+//   var/tune/      Project outputs
 //
 // Debug with labs:
-//   labs photo.ARW --tune ./out/tune.json --output photo.png --debug
+//   labs photo.ARW --tune ~/.pqtr/var/tune/tune.json --output photo.png --debug
 
+#include <pqtr.hpp>
 #include <tool.hpp>
 #include <sink.hpp>
 #include <hold.hpp>
@@ -23,6 +26,7 @@
 #include <iomanip>
 #include <cstring>
 #include <sstream>
+#include <vector>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -42,11 +46,20 @@ static bool parsePolyCoeffs(const std::string& str, float* coeffs, int count)
 
 void printUsage(const char* prog)
 {
-    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> --save-area <dir>\n\n";
+    std::cerr << "Usage: " << prog << " <source.ARW> <target.png|preview> [options]\n\n";
     std::cerr << "Three-phase optimization:\n";
     std::cerr << "  Phase 0: Camera Math - apply polynomial transform (deterministic)\n";
     std::cerr << "  Phase 1: Camera Vibe - match embedded preview (45 dials)\n";
     std::cerr << "  Phase 2: User Vibe - match target (if not 'preview')\n\n";
+    std::cerr << "Options:\n";
+    std::cerr << "  --pqtr <dir>     Override ~/.pqtr root directory\n";
+    std::cerr << "  --output <dir>   Override output directory (default: ~/.pqtr/var/tune)\n";
+    std::cerr << "  --no-learn       Disable automatic prior learning\n";
+    std::cerr << "  --jito           JITO pre-pass warm-start (experimental)\n\n";
+    std::cerr << "Paths (relative to --pqtr or ~/.pqtr):\n";
+    std::cerr << "  etc/tune.json    Built-in priors (from code)\n";
+    std::cerr << "  var/tune.json    Learned priors (accumulated over time)\n";
+    std::cerr << "  var/tune/        Project outputs\n\n";
     std::cerr << "Use 'labs --debug' to inspect results.\n";
 }
 
@@ -68,22 +81,49 @@ int main(int argc, char** argv)
     // Parse arguments
     std::string sourcePath = argv[1];
     std::string targetPath = argv[2];
-    std::string saveArea;
+    std::string pqtrRoot;
+    std::string outputDir;
+    bool useJito = false;
+    bool noLearn = false;
 
     for (int i = 3; i < argc; i++)
     {
         std::string arg = argv[i];
-        if (arg == "--save-area" && i + 1 < argc) saveArea = argv[++i];
+        if (arg == "--pqtr" && i + 1 < argc) pqtrRoot = argv[++i];
+        else if (arg == "--output" && i + 1 < argc) outputDir = argv[++i];
+        else if (arg == "--save-area" && i + 1 < argc) outputDir = argv[++i];  // Legacy
+        else if (arg == "--jito") useJito = true;
+        else if (arg == "--no-learn") noLearn = true;
         else if (arg == "--help" || arg == "-h") { /* handled above */ }
         else { std::cerr << "Unknown option: " << arg << "\n"; printUsage(argv[0]); return 1; }
     }
 
-    if (saveArea.empty())
+    // Resolve pqtr root (default: ~/.pqtr)
+    std::string root = pqtr::root(pqtrRoot);
+
+    // Initialize directory structure
+    if (!pqtr::init(root))
     {
-        std::cerr << "Error: --save-area is required\n";
-        printUsage(argv[0]);
-        return 1;
+        std::cerr << "Warning: Could not create pqtr directories in " << root << std::endl;
     }
+
+    // Install built-in priors if etc/tune.json doesn't exist
+    // Look for built-in priors relative to executable or in common locations
+    std::vector<std::string> builtinPaths = {
+        "etc/tune.json",           // Current directory
+        "../etc/tune.json",        // One level up
+        "../../LABS/etc/tune.json" // From DESK
+    };
+    for (const auto& path : builtinPaths)
+    {
+        if (pqtr::installPriors(root, path))
+        {
+            break;
+        }
+    }
+
+    // Output directory (default: ~/.pqtr/var/tune)
+    std::string saveArea = outputDir.empty() ? pqtr::varTuneDir(root) : outputDir;
 
     try
     {
@@ -167,12 +207,39 @@ int main(int argc, char** argv)
         // Optimizer config
         geos::Config config;
         config.skip_edge = false;
-        config.skip_lut = true;
+        config.skip_lut = false;  // Enable LUT curve estimation (camera math)
         config.skip_regional = true;
         config.geos_max_iter = 500;
         config.geos_threshold = 0.005f;
         config.geos_mode = geos::Mode::FULL_35D;
         config.optimizer = geos::Optimizer::HYBRID;
+        config.use_jito = useJito;  // JITO pre-pass warm-start
+
+        // Automatic prior learning using pqtr paths:
+        //   Load: var/tune.json (if exists) or etc/tune.json (built-in)
+        //   Save: var/tune.json (accumulates over time)
+        if (!noLearn)
+        {
+            std::string loadPath = pqtr::priorsPath(root);  // var or etc
+            std::string savePath = pqtr::varTune(root);     // always var
+
+            if (pqtr::exists(loadPath))
+            {
+                config.aceo_with_cov = loadPath;
+                std::cout << "  Priors: " << loadPath << " (loaded)" << std::endl;
+            }
+            else
+            {
+                std::cout << "  Priors: " << savePath << " (will create)" << std::endl;
+            }
+
+            // Always save updated priors to var/tune.json
+            config.aceo_save_cov = savePath;
+        }
+        else
+        {
+            std::cout << "  Priors: disabled (--no-learn)" << std::endl;
+        }
 
         // ============================================================
         // PHASE 0: Camera Math - apply polynomial transform

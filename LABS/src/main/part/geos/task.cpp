@@ -11,6 +11,7 @@
 #include "spsa.hpp"
 #include "aceo.hpp"
 #include "edge.hpp"
+#include "jito.hpp"
 #include <opencv2/imgproc.hpp>
 #include <iostream>
 
@@ -113,6 +114,38 @@ namespace geos
             result.loss = diff(candidate);
             Data baselineLoss = result.loss;
 
+            // JITO Pre-pass: Jacobian-informed warm-start
+            // Note: JITO only helps if starting near neutral. The Jacobian is a linear
+            // approximation that breaks down far from 0.5. We check if JITO improves
+            // loss before keeping its result.
+            if (config.use_jito && !config.skip_geos)
+            {
+                std::string jacobPath = config.jito_jacobian.empty() ? "etc/jacob.json" : config.jito_jacobian;
+                if (jitoInit(jacobPath))
+                {
+                    std::cout << "[geos] JITO pre-pass: warm-start" << std::endl;
+                    Theta initial;
+                    readDials(link, initial);
+
+                    // Save baseline state
+                    float baselineLossVal = result.loss.spectral;
+
+                    auto jitoResult = jitoOptimize(body, link, m_targetProxy, initial, 10, 0.3f, 0.05f);
+
+                    // Only keep JITO result if it improves loss
+                    if (jitoResult.final_loss < baselineLossVal)
+                    {
+                        std::cout << "[geos] JITO pre-pass: improved " << (baselineLossVal * 100.0f) << "% -> "
+                                  << (jitoResult.final_loss * 100.0f) << "%" << std::endl;
+                    }
+                    else
+                    {
+                        std::cout << "[geos] JITO pre-pass: no improvement, restoring neutral" << std::endl;
+                        writeDials(link, initial);  // Restore initial dials
+                    }
+                }
+            }
+
             // Stage 2: GEOS (Color/Tone) - fine-tune after LUT
             if (!config.skip_geos)
             {
@@ -157,6 +190,10 @@ namespace geos
                     result.geos_iterations = optimizeGeos(
                         body, link, m_targetStyle, m_targetLaplacianVar, config, progress, lutEstimated, features);
                 }
+
+                // Note: JITO post-pass disabled. The Jacobian linear approximation
+                // only works near neutral (0.5). After optimization, dials are far
+                // from neutral, so JITO gradient steps damage the result.
             }
 
             // Stage 3: Edge (Sharpness)

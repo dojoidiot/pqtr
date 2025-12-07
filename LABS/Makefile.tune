@@ -24,9 +24,12 @@ OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 # Include paths
 INCLUDES = $(OPENCV_INCLUDE) -I./inc -I./src/main/part/geos -I./src/main/part/pipe
 
-# Library flags
-LDFLAGS = -L$(OPENCV_LIB) -L./lib
-LIBS = ./lib/labs.a -lopencv_core -lopencv_imgproc -lopencv_imgcodecs -Wl,-rpath,$(OPENCV_LIB)
+# Library flags - static OpenCV linking (no LD_LIBRARY_PATH needed at runtime)
+OPENCV_STATIC = $(OPENCV_LIB)/libopencv_imgcodecs.a \
+                $(OPENCV_LIB)/libopencv_imgproc.a \
+                $(OPENCV_LIB)/libopencv_core.a
+LDFLAGS = -L./lib
+LIBS = ./lib/labs.a $(OPENCV_STATIC) -lpng -ljpeg -lz -lGL -ldl -lpthread
 
 # Directories
 MAIN_SRC = src/main
@@ -135,13 +138,13 @@ clean:
 test-fast: $(FAST_BIN)
 	@mkdir -p $(VAR_DIR)
 	@echo "=== Tune Fast Test ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(FAST_BIN) $(TEST_RAW) $(VAR_DIR)
+	$(FAST_BIN) $(TEST_RAW) $(VAR_DIR)
 
 # Run full test (blockwise mode, ~60s)
 test-full: $(FULL_BIN)
 	@mkdir -p $(VAR_DIR)
 	@echo "=== Tune Full Test ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(FULL_BIN) $(TEST_RAW) $(VAR_DIR)
+	$(FULL_BIN) $(TEST_RAW) $(VAR_DIR)
 
 # Default test
 test: test-fast
@@ -150,13 +153,13 @@ test: test-fast
 test-rnd: $(TUNE_TEST_BIN)
 	@mkdir -p $(VAR_DIR)
 	@echo "=== Tune R&D Test Harness ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TUNE_TEST_BIN)
+	$(TUNE_TEST_BIN)
 
 # Run labs test (applies tune.json to source RAW)
 test-labs: $(LABS_BIN)
 	@mkdir -p $(LABS_VAR_DIR)
 	@echo "=== Labs Test ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(LABS_BIN) $(TEST_RAW) --tune $(VAR_DIR)/tune.json --output $(LABS_VAR_DIR)/tail.png --size 1080
+	$(LABS_BIN) $(TEST_RAW) --tune $(VAR_DIR)/tune.json --output $(LABS_VAR_DIR)/tail.png --size 1080
 
 # Batch binary
 $(BATCH_BIN): $(BATCH_OBJ) | $(TEST_BIN_DIR)
@@ -168,7 +171,7 @@ $(BATCH_OBJ): $(BATCH_SRC) | $(OBJ_DIR)
 # Batch test (tune each ARW to its JPEG, create comparison grid)
 test-batch: $(BATCH_BIN)
 	@echo "=== Batch Test (this will take a while) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BATCH_BIN)
+	$(BATCH_BIN)
 
 # Diagnostic binary
 $(DIAG_BIN): $(DIAG_OBJ) | $(TEST_BIN_DIR)
@@ -180,7 +183,7 @@ $(DIAG_OBJ): $(DIAG_SRC) | $(OBJ_DIR)
 # Run diagnostic (analyze per-feature errors across all images)
 diag: $(DIAG_BIN)
 	@echo "=== Feature Loss Diagnostic ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(DIAG_BIN)
+	$(DIAG_BIN)
 
 # Training binary
 $(TRAIN_BIN): $(TRAIN_OBJ) | $(TEST_BIN_DIR)
@@ -192,7 +195,7 @@ $(TRAIN_OBJ): $(TRAIN_SRC) | $(OBJ_DIR)
 # Run weight training (analyze errors and suggest optimal weights)
 train: $(TRAIN_BIN)
 	@echo "=== Weight Training ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TRAIN_BIN)
+	$(TRAIN_BIN)
 
 # Batch tune all images (run before train)
 batch-tune:
@@ -202,7 +205,7 @@ batch-tune:
 		name=$$(basename "$$img" .ARW); \
 		echo "Processing $$name..."; \
 		mkdir -p "tmp/var/pics/$$name"; \
-		LD_LIBRARY_PATH=$(OPENCV_LIB) timeout 600 $(TUNE_BIN) "$$img" preview \
+		timeout 600 $(TUNE_BIN) "$$img" preview \
 			--save-area "tmp/var/pics/$$name" \
 			--fine --fine-area "tmp/var/pics/$$name" \
 			--mode blockwise --optimizer spsa 2>&1 | tail -3; \
@@ -236,12 +239,12 @@ $(PRMS_OBJ): $(PRMS_SRC) | $(OBJ_DIR)
 # Greedy training: rank images, analyze worst, suggest weights
 train-greedy: $(GREEDY_BIN)
 	@echo "=== Greedy Training (worst-first optimization) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(GREEDY_BIN)
+	$(GREEDY_BIN)
 
 # Phase params training: grid search a0/c0 for optimal SPSA params
 train-prms: $(PRMS_BIN)
 	@echo "=== Phase Params Training (SPSA hyperparameters) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(PRMS_BIN)
+	$(PRMS_BIN)
 
 # Exhaustive training sources
 EXHAUSTIVE_SRC = $(TEST_SRC)/train_exhaustive.cpp
@@ -270,12 +273,12 @@ $(SWEEP_OBJ): $(SWEEP_SRC) | $(OBJ_DIR)
 # Exhaustive training: no time limit, find global optimum
 train-exhaustive: $(EXHAUSTIVE_BIN)
 	@echo "=== Exhaustive Training (unlimited time) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(EXHAUSTIVE_BIN)
+	$(EXHAUSTIVE_BIN)
 
 # Sweep diagnostic: understand loss landscape for individual dials
 sweep: $(SWEEP_BIN)
 	@echo "=== Dial Sweep Diagnostic ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(SWEEP_BIN)
+	$(SWEEP_BIN)
 
 # Bounds diagnostic sources
 BOUNDS_SRC = $(TEST_SRC)/bounds.cpp
@@ -291,7 +294,7 @@ $(BOUNDS_OBJ): $(BOUNDS_SRC) | $(OBJ_DIR)
 # Bounds diagnostic: find achievable feature min/max
 bounds: $(BOUNDS_BIN)
 	@echo "=== Feature Bounds Diagnostic ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(BOUNDS_BIN)
+	$(BOUNDS_BIN)
 
 # Jacobian estimation sources
 JACOB_SRC = $(TEST_SRC)/jacob.cpp
@@ -307,7 +310,7 @@ $(JACOB_OBJ): $(JACOB_SRC) | $(OBJ_DIR)
 # Jacobian: estimate dial→feature sensitivity matrix
 jacob: $(JACOB_BIN)
 	@echo "=== Jacobian Estimation ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(JACOB_BIN)
+	$(JACOB_BIN)
 
 # Axis balance test sources (Hypothesis 3)
 AXIS_SRC = $(TEST_SRC)/axis_balance.cpp
@@ -323,7 +326,7 @@ $(AXIS_OBJ): $(AXIS_SRC) | $(OBJ_DIR)
 # Axis balance: test opponent-axis contrast preservation
 axis-balance: $(AXIS_BIN)
 	@echo "=== Axis Balance Test (Hypothesis 3) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(AXIS_BIN)
+	$(AXIS_BIN)
 
 # Gold binary (stage-aware optimizer test)
 GOLD_SRC = $(MAIN_SRC)/gold.cpp
@@ -342,7 +345,7 @@ gold: $(GOLD_BIN)
 test-gold: $(GOLD_BIN)
 	@mkdir -p $(VAR_DIR)
 	@echo "=== Gold Test (Stage-Aware Optimizer) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(GOLD_BIN) var/pics/DSC00144.ARW preview --save-area $(VAR_DIR)
+	$(GOLD_BIN) var/pics/DSC00144.ARW preview --save-area $(VAR_DIR)
 
 # Vibe binary (neural dial predictor)
 VIBE_SRC = $(MAIN_SRC)/vibe.cpp
@@ -361,9 +364,9 @@ vibe: $(VIBE_BIN)
 vibe-extract: $(VIBE_BIN)
 	@mkdir -p tmp/var/vibe
 	@echo "=== Vibe Extract (features from 537 pairs) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(VIBE_BIN) extract /home/z/base/pics --out tmp/var/vibe/train.json
+	$(VIBE_BIN) extract /home/z/base/pics --out tmp/var/vibe/train.json
 
 # Train vibe model
 vibe-train: $(VIBE_BIN)
 	@echo "=== Vibe Train (MLP on extracted data) ==="
-	LD_LIBRARY_PATH=$(OPENCV_LIB) $(VIBE_BIN) train tmp/var/vibe/train.json --out etc/camera.vibe
+	$(VIBE_BIN) train tmp/var/vibe/train.json --out etc/camera.vibe
