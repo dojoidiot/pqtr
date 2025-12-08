@@ -1,0 +1,12 @@
+{
+    "host": "127.0.0.1",
+    "port": 8080,
+    "db_path": "var/jwta.db",
+    "smtp": {
+        "host": "smtp.example.com",
+        "port": 587,
+        "user": "",
+        "pass": "",
+        "from": "noreply@example.com"
+    }
+}

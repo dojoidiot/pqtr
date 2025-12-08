@@ -93,9 +93,15 @@ namespace crypto {
     // Initialize libsodium (call once at startup)
     bool init();
 
-    // Load master key from JWTA_MASTER_KEY env var (64 hex chars = 32 bytes)
-    // Returns false if not set or invalid
+    // Load master key - tries in order:
+    // 1. Linux kernel keyring (key name: "jwta_master")
+    // 2. JWTA_MASTER_KEY env var (64 hex chars = 32 bytes)
+    // Returns false if neither available
     bool loadMasterKey(std::vector<uint8_t>& master_key);
+
+    // Load secret from kernel keyring by name
+    // Returns empty string if not found
+    std::string loadFromKeyring(const std::string& key_name);
 
     // Generate ed25519 keypair
     // pubkey: 32 bytes, privkey: 64 bytes

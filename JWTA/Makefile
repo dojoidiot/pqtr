@@ -1,5 +1,5 @@
 # JWTA - JWT Web Auth Service
-# Static library build
+# Static library and server build
 
 CXX = g++
 CC = gcc
@@ -13,6 +13,7 @@ SRC_DIR = src/main
 INC_DIR = inc
 LIB_DIR = lib
 BIN_DIR = bin
+TMP_DIR = tmp
 
 # libsodium
 SODIUM_INC = $(LIB_DIR)/libsodium/src/libsodium/include
@@ -20,35 +21,48 @@ SODIUM_LIB = $(LIB_DIR)/libsodium/src/libsodium/.libs/libsodium.a
 
 # SQLite
 SQLITE_DIR = $(LIB_DIR)/sqlite
-SQLITE_OBJ = $(SQLITE_DIR)/sqlite3.o
+SQLITE_OBJ = $(TMP_DIR)/sqlite3.o
+
+# cpp-httplib
+HTTPLIB_INC = $(LIB_DIR)/cpp-httplib
 
 # Includes
-INCLUDES = -I$(INC_DIR) -I$(SODIUM_INC) -I$(SQLITE_DIR)
+INCLUDES = -I$(INC_DIR) -I$(SODIUM_INC) -I$(SQLITE_DIR) -I$(HTTPLIB_INC)
 
-# Sources
-SRCS = $(SRC_DIR)/jwta.cpp $(SRC_DIR)/sqlite_store.cpp
-OBJS = $(SRCS:.cpp=.o)
+# Library sources - objects go to tmp/
+LIB_SRCS = $(SRC_DIR)/jwta.cpp $(SRC_DIR)/sqlite_store.cpp
+LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite_store.o
 
 # Output
-TARGET = $(LIB_DIR)/jwta.a
+LIB_TARGET = $(TMP_DIR)/jwta.a
+SERVER_TARGET = $(BIN_DIR)/jwta
 
-.PHONY: all clean
+.PHONY: all clean server lib
 
-all: $(TARGET)
+all: lib server
 
-$(TARGET): $(OBJS) $(SQLITE_OBJ)
-	@mkdir -p $(LIB_DIR)
+lib: $(LIB_TARGET)
+
+server: $(SERVER_TARGET)
+
+$(TMP_DIR):
+	@mkdir -p $(TMP_DIR)
+
+$(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c
+$(SERVER_TARGET): $(SRC_DIR)/server.cpp $(LIB_TARGET) $(SODIUM_LIB)
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lkeyutils -o $@
+
+$(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-%.o: %.cpp
+$(TMP_DIR)/jwta.o: $(SRC_DIR)/jwta.cpp $(INC_DIR)/jwta.hpp | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(TMP_DIR)/sqlite_store.o: $(SRC_DIR)/sqlite_store.cpp $(INC_DIR)/sqlite_store.hpp $(INC_DIR)/jwta.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -f $(OBJS) $(SQLITE_OBJ) $(TARGET)
-
-# Dependencies
-$(SRC_DIR)/jwta.o: $(INC_DIR)/jwta.hpp
-$(SRC_DIR)/sqlite_store.o: $(INC_DIR)/sqlite_store.hpp $(INC_DIR)/jwta.hpp
+	rm -rf $(TMP_DIR) $(SERVER_TARGET)

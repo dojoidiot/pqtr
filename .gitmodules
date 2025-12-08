@@ -13,3 +13,6 @@
 [submodule "JWTA/lib/libsodium"]
 	path = JWTA/lib/libsodium
 	url = https://github.com/jedisct1/libsodium.git
+[submodule "JWTA/lib/cpp-httplib"]
+	path = JWTA/lib/cpp-httplib
+	url = https://github.com/yhirose/cpp-httplib.git

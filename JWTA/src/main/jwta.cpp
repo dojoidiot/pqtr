@@ -3,6 +3,7 @@
 
 #include "jwta.hpp"
 #include <sodium.h>
+#include <keyutils.h>
 #include <ctime>
 #include <cstdlib>
 #include <cstdio>
@@ -23,28 +24,70 @@ bool init() {
     return sodium_init() >= 0;
 }
 
-bool loadMasterKey(std::vector<uint8_t>& master_key) {
-    const char* env = std::getenv("JWTA_MASTER_KEY");
-    if (!env) {
-        return false;
+std::string loadFromKeyring(const std::string& key_name) {
+    // Search for key in session keyring, then user keyring
+    key_serial_t key = request_key("user", key_name.c_str(), nullptr, KEY_SPEC_SESSION_KEYRING);
+    if (key < 0) {
+        key = request_key("user", key_name.c_str(), nullptr, KEY_SPEC_USER_KEYRING);
+    }
+    if (key < 0) {
+        return "";
     }
 
-    std::string hex(env);
+    // Get key size
+    long len = keyctl_read(key, nullptr, 0);
+    if (len <= 0) {
+        return "";
+    }
+
+    // Read key data
+    std::string data(len, '\0');
+    if (keyctl_read(key, &data[0], len) != len) {
+        return "";
+    }
+
+    return data;
+}
+
+// Helper to parse hex string to bytes
+static bool parseHexKey(const std::string& hex, std::vector<uint8_t>& key) {
     if (hex.length() != 64) {
         return false;  // Must be 64 hex chars = 32 bytes
     }
 
-    master_key.resize(32);
+    key.resize(32);
     for (size_t i = 0; i < 32; i++) {
         unsigned int byte;
         if (sscanf(hex.c_str() + i * 2, "%02x", &byte) != 1) {
-            master_key.clear();
+            key.clear();
             return false;
         }
-        master_key[i] = static_cast<uint8_t>(byte);
+        key[i] = static_cast<uint8_t>(byte);
+    }
+    return true;
+}
+
+bool loadMasterKey(std::vector<uint8_t>& master_key) {
+    // Try kernel keyring first
+    std::string keyring_val = loadFromKeyring("jwta_master");
+    if (!keyring_val.empty()) {
+        if (parseHexKey(keyring_val, master_key)) {
+            return true;
+        }
+        // If keyring has raw bytes (32 bytes), use directly
+        if (keyring_val.size() == 32) {
+            master_key.assign(keyring_val.begin(), keyring_val.end());
+            return true;
+        }
     }
 
-    return true;
+    // Fall back to environment variable
+    const char* env = std::getenv("JWTA_MASTER_KEY");
+    if (env) {
+        return parseHexKey(env, master_key);
+    }
+
+    return false;
 }
 
 std::vector<uint8_t> generateSalt() {

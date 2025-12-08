@@ -1,3 +1,5 @@
 tmp/
+var/
 *.o
 *.a
+*.db
