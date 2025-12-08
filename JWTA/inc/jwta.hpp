@@ -21,9 +21,10 @@ struct User {
     std::string tier;         // "anonymous", "registered", "pro"
     int64_t created_at;       // Unix timestamp
 
-    // ed25519 keypair (32 bytes each)
-    std::vector<uint8_t> pubkey;
-    std::vector<uint8_t> privkey_encrypted;  // Encrypted at rest
+    // ed25519 keypair
+    std::vector<uint8_t> pubkey;              // 32 bytes, plaintext
+    std::vector<uint8_t> privkey_encrypted;   // 64 + 24 + 16 bytes (ciphertext + nonce + tag)
+    std::vector<uint8_t> privkey_salt;        // 16 bytes, random per user
 };
 
 // ============================================================
@@ -92,9 +93,30 @@ namespace crypto {
     // Initialize libsodium (call once at startup)
     bool init();
 
+    // Load master key from JWTA_MASTER_KEY env var (64 hex chars = 32 bytes)
+    // Returns false if not set or invalid
+    bool loadMasterKey(std::vector<uint8_t>& master_key);
+
     // Generate ed25519 keypair
     // pubkey: 32 bytes, privkey: 64 bytes
     bool generateKeypair(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey);
+
+    // Encrypt private key with master key + per-user salt
+    // Returns ciphertext (privkey + nonce + auth tag)
+    std::vector<uint8_t> encryptPrivkey(
+        const std::vector<uint8_t>& privkey,
+        const std::vector<uint8_t>& master_key,
+        const std::vector<uint8_t>& salt);
+
+    // Decrypt private key
+    // Returns empty vector on failure (wrong key or tampered)
+    std::vector<uint8_t> decryptPrivkey(
+        const std::vector<uint8_t>& encrypted,
+        const std::vector<uint8_t>& master_key,
+        const std::vector<uint8_t>& salt);
+
+    // Generate random salt (16 bytes)
+    std::vector<uint8_t> generateSalt();
 
     // Sign message with private key
     std::vector<uint8_t> sign(const std::vector<uint8_t>& message, const std::vector<uint8_t>& privkey);
@@ -191,7 +213,9 @@ public:
     Service(Store& store, Mailer& mailer);
     ~Service();
 
-    // Initialize service (generates JWTA signing keypair if needed)
+    // Initialize service
+    // Loads master key from JWTA_MASTER_KEY env var
+    // Generates JWTA signing keypair if needed
     bool init();
 
     // JRPC handlers
@@ -204,9 +228,15 @@ public:
     // Get JWTA's public key (for JWT verification)
     std::vector<uint8_t> getSigningPubkey() const;
 
+    // Check if master key is loaded (for testing without encryption)
+    bool hasMasterKey() const { return !m_master_key.empty(); }
+
 private:
     Store& m_store;
     Mailer& m_mailer;
+
+    // Master key for encrypting user private keys (from env var)
+    std::vector<uint8_t> m_master_key;
 
     // JWTA's own signing keypair
     std::vector<uint8_t> m_signing_pubkey;

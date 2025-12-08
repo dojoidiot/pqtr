@@ -4,6 +4,8 @@
 #include "jwta.hpp"
 #include <sodium.h>
 #include <ctime>
+#include <cstdlib>
+#include <cstdio>
 #include <sstream>
 #include <iomanip>
 #include <random>
@@ -19,6 +21,114 @@ namespace crypto {
 
 bool init() {
     return sodium_init() >= 0;
+}
+
+bool loadMasterKey(std::vector<uint8_t>& master_key) {
+    const char* env = std::getenv("JWTA_MASTER_KEY");
+    if (!env) {
+        return false;
+    }
+
+    std::string hex(env);
+    if (hex.length() != 64) {
+        return false;  // Must be 64 hex chars = 32 bytes
+    }
+
+    master_key.resize(32);
+    for (size_t i = 0; i < 32; i++) {
+        unsigned int byte;
+        if (sscanf(hex.c_str() + i * 2, "%02x", &byte) != 1) {
+            master_key.clear();
+            return false;
+        }
+        master_key[i] = static_cast<uint8_t>(byte);
+    }
+
+    return true;
+}
+
+std::vector<uint8_t> generateSalt() {
+    std::vector<uint8_t> salt(16);
+    randombytes_buf(salt.data(), salt.size());
+    return salt;
+}
+
+std::vector<uint8_t> encryptPrivkey(
+    const std::vector<uint8_t>& privkey,
+    const std::vector<uint8_t>& master_key,
+    const std::vector<uint8_t>& salt)
+{
+    if (master_key.size() != 32 || salt.size() != 16) {
+        return {};
+    }
+
+    // Derive per-user encryption key using BLAKE2b
+    std::vector<uint8_t> derived_key(crypto_secretbox_KEYBYTES);  // 32 bytes
+    crypto_generichash_state state;
+    crypto_generichash_init(&state, master_key.data(), master_key.size(), derived_key.size());
+    crypto_generichash_update(&state, salt.data(), salt.size());
+    crypto_generichash_final(&state, derived_key.data(), derived_key.size());
+
+    // Generate random nonce
+    std::vector<uint8_t> nonce(crypto_secretbox_NONCEBYTES);  // 24 bytes
+    randombytes_buf(nonce.data(), nonce.size());
+
+    // Encrypt: ciphertext = privkey + auth tag
+    std::vector<uint8_t> ciphertext(privkey.size() + crypto_secretbox_MACBYTES);  // 64 + 16 = 80 bytes
+    if (crypto_secretbox_easy(ciphertext.data(), privkey.data(), privkey.size(),
+                              nonce.data(), derived_key.data()) != 0) {
+        return {};
+    }
+
+    // Return: ciphertext || nonce (80 + 24 = 104 bytes)
+    std::vector<uint8_t> result;
+    result.reserve(ciphertext.size() + nonce.size());
+    result.insert(result.end(), ciphertext.begin(), ciphertext.end());
+    result.insert(result.end(), nonce.begin(), nonce.end());
+
+    // Zero out derived key
+    sodium_memzero(derived_key.data(), derived_key.size());
+
+    return result;
+}
+
+std::vector<uint8_t> decryptPrivkey(
+    const std::vector<uint8_t>& encrypted,
+    const std::vector<uint8_t>& master_key,
+    const std::vector<uint8_t>& salt)
+{
+    if (master_key.size() != 32 || salt.size() != 16) {
+        return {};
+    }
+
+    // Expected size: 64 (privkey) + 16 (tag) + 24 (nonce) = 104 bytes
+    const size_t expected_size = crypto_sign_SECRETKEYBYTES + crypto_secretbox_MACBYTES + crypto_secretbox_NONCEBYTES;
+    if (encrypted.size() != expected_size) {
+        return {};
+    }
+
+    // Split encrypted data
+    size_t ciphertext_size = encrypted.size() - crypto_secretbox_NONCEBYTES;
+    const uint8_t* ciphertext = encrypted.data();
+    const uint8_t* nonce = encrypted.data() + ciphertext_size;
+
+    // Derive per-user encryption key
+    std::vector<uint8_t> derived_key(crypto_secretbox_KEYBYTES);
+    crypto_generichash_state state;
+    crypto_generichash_init(&state, master_key.data(), master_key.size(), derived_key.size());
+    crypto_generichash_update(&state, salt.data(), salt.size());
+    crypto_generichash_final(&state, derived_key.data(), derived_key.size());
+
+    // Decrypt
+    std::vector<uint8_t> privkey(ciphertext_size - crypto_secretbox_MACBYTES);
+    if (crypto_secretbox_open_easy(privkey.data(), ciphertext, ciphertext_size,
+                                    nonce, derived_key.data()) != 0) {
+        sodium_memzero(derived_key.data(), derived_key.size());
+        return {};  // Decryption failed (wrong key or tampered)
+    }
+
+    sodium_memzero(derived_key.data(), derived_key.size());
+    return privkey;
 }
 
 bool generateKeypair(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) {
@@ -297,6 +407,9 @@ bool Service::init() {
         return false;
     }
 
+    // Load master key from environment (optional - allows testing without encryption)
+    crypto::loadMasterKey(m_master_key);
+
     // Generate JWTA's signing keypair
     if (!crypto::generateKeypair(m_signing_pubkey, m_signing_privkey)) {
         return false;
@@ -387,9 +500,19 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
             return resp;
         }
 
-        // Encrypt private key at rest (simplified - just store it for now)
-        // TODO: Proper encryption with master key
-        user.privkey_encrypted = privkey;
+        // Encrypt private key at rest
+        if (!m_master_key.empty()) {
+            user.privkey_salt = crypto::generateSalt();
+            user.privkey_encrypted = crypto::encryptPrivkey(privkey, m_master_key, user.privkey_salt);
+            if (user.privkey_encrypted.empty()) {
+                return resp;  // Encryption failed
+            }
+            // Zero out plaintext private key
+            sodium_memzero(privkey.data(), privkey.size());
+        } else {
+            // No master key - store unencrypted (for testing only)
+            user.privkey_encrypted = privkey;
+        }
 
         if (!m_store.createUser(user)) {
             return resp;

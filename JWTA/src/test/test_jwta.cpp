@@ -126,6 +126,42 @@ int main() {
     }
     std::cout << "[OK] Signature verified" << std::endl;
 
+    // Test encryption
+    std::cout << "\n--- Encryption Tests ---" << std::endl;
+
+    std::vector<uint8_t> master_key(32);
+    for (int i = 0; i < 32; i++) master_key[i] = static_cast<uint8_t>(i);
+
+    auto salt = jwta::crypto::generateSalt();
+    std::cout << "[OK] Generated salt: " << salt.size() << " bytes" << std::endl;
+
+    auto encrypted = jwta::crypto::encryptPrivkey(privkey, master_key, salt);
+    std::cout << "[OK] Encrypted privkey: " << encrypted.size() << " bytes (expected 104)" << std::endl;
+
+    auto decrypted = jwta::crypto::decryptPrivkey(encrypted, master_key, salt);
+    if (decrypted.empty()) {
+        std::cerr << "Decryption failed" << std::endl;
+        return 1;
+    }
+    if (decrypted != privkey) {
+        std::cerr << "Decrypted key doesn't match original" << std::endl;
+        return 1;
+    }
+    std::cout << "[OK] Decryption successful, keys match" << std::endl;
+
+    // Test with wrong master key
+    std::vector<uint8_t> wrong_key(32, 0xff);
+    auto bad_decrypt = jwta::crypto::decryptPrivkey(encrypted, wrong_key, salt);
+    if (!bad_decrypt.empty()) {
+        std::cerr << "Decryption should fail with wrong key" << std::endl;
+        return 1;
+    }
+    std::cout << "[OK] Decryption correctly fails with wrong key" << std::endl;
+
+    // Check if master key is loaded
+    std::cout << "\n--- Master Key Status ---" << std::endl;
+    std::cout << "Master key loaded: " << (service.hasMasterKey() ? "YES" : "NO (unencrypted mode)") << std::endl;
+
     // Test registration flow
     std::cout << "\n--- Registration Flow ---" << std::endl;
 
