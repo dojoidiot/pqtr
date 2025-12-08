@@ -3,7 +3,7 @@
   "decoder": "sony_arw2",
   "links": [
     {
-      "name": "Link 1",
+      "name": "Base",
       "modules": {
         "geometric": {
           "crop": {
@@ -17,8 +17,8 @@
         },
         "color_correction": {
           "white_balance": {
-            "temperature": 0.5,
-            "tint": 0.5
+            "temperature": 0.6,
+            "tint": 0.35
           },
           "exposure": { "value": 0.5 }
         },
@@ -29,8 +29,8 @@
             "shadows": 0.5
           },
           "clipping_point": {
-            "black": 0.15,
-            "white": 0.85
+            "black": 0.5,
+            "white": 0.35
           }
         },
         "global_color": {
@@ -82,12 +82,12 @@
         },
         "detail": {
           "sharpen": {
-            "amount": 0,
-            "radius": 0.4
+            "amount": 0.5,
+            "radius": 0.5
           },
           "denoise": {
-            "luminance": 0,
-            "chroma": 0
+            "luminance": 0.5,
+            "chroma": 0.5
           }
         }
       }

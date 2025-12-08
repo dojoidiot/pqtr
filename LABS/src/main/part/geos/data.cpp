@@ -151,6 +151,84 @@ std::vector<float> load(const std::string& path, int& gridSize)
 } // namespace data::lut
 
 // ============================================================
+// HSV LUT Serialization
+// ============================================================
+
+namespace data::hsvlut
+{
+
+std::string toJson(const float* lut, int hBins, int sBins)
+{
+    size_t numFloats = hBins * sBins * 3;
+
+    // HSV deltas can be negative (e.g., -30° hue shift)
+    // Store as signed int16 [-32768, 32767] mapped from [-1, 1]
+    std::vector<uint16_t> u16(numFloats);
+    for (size_t i = 0; i < numFloats; i++)
+    {
+        // Clamp to [-1, 1] and convert to uint16 (0 = -1, 32768 = 0, 65535 = +1)
+        float v = std::max(-1.0f, std::min(1.0f, lut[i]));
+        u16[i] = static_cast<uint16_t>((v + 1.0f) * 32767.5f);
+    }
+
+    std::string hexData = hex::encode(u16.data(), numFloats);
+
+    std::ostringstream ss;
+    ss << "{\n";
+    ss << "  \"h_bins\": " << hBins << ",\n";
+    ss << "  \"s_bins\": " << sBins << ",\n";
+    ss << "  \"data\": \"" << hexData << "\"\n";
+    ss << "}";
+    return ss.str();
+}
+
+std::vector<float> fromJson(const std::string& json, int& hBins, int& sBins)
+{
+    // Parse h_bins
+    size_t pos = json.find("\"h_bins\"");
+    if (pos == std::string::npos)
+        return {};
+    pos = json.find(':', pos);
+    if (pos == std::string::npos)
+        return {};
+    hBins = std::stoi(json.substr(pos + 1));
+
+    // Parse s_bins
+    pos = json.find("\"s_bins\"");
+    if (pos == std::string::npos)
+        return {};
+    pos = json.find(':', pos);
+    if (pos == std::string::npos)
+        return {};
+    sBins = std::stoi(json.substr(pos + 1));
+
+    // Parse hex data
+    pos = json.find("\"data\"");
+    if (pos == std::string::npos)
+        return {};
+    pos = json.find('"', pos + 6);
+    if (pos == std::string::npos)
+        return {};
+    size_t end = json.find('"', pos + 1);
+    if (end == std::string::npos)
+        return {};
+
+    std::string hexData = json.substr(pos + 1, end - pos - 1);
+    std::vector<uint16_t> u16 = hex::decode(hexData);
+
+    // Convert uint16 back to float [-1, 1]
+    std::vector<float> result(u16.size());
+    for (size_t i = 0; i < u16.size(); i++)
+    {
+        result[i] = (static_cast<float>(u16[i]) / 32767.5f) - 1.0f;
+    }
+
+    return result;
+}
+
+} // namespace data::hsvlut
+
+// ============================================================
 // Geos Data (Loss Metrics)
 // ============================================================
 
@@ -305,14 +383,17 @@ std::string toJson(pipe::Body::Link& link)
     if (link.lutCurve().isEstimated())
     {
         ss << ",\n";
-        ss << "    \"lut\": " << lut::toJson(link.lutCurve().lut(), link.lutCurve().GRID_SIZE) << "\n";
-    }
-    else
-    {
-        ss << "\n";
+        ss << "    \"lut\": " << lut::toJson(link.lutCurve().lut(), link.lutCurve().GRID_SIZE);
     }
 
-    ss << "  }\n";
+    // HSV LUT (only if estimated)
+    if (link.hsvLut().isEstimated())
+    {
+        ss << ",\n";
+        ss << "    \"hsv_lut\": " << hsvlut::toJson(link.hsvLut().lut(), link.hsvLut().H_BINS, link.hsvLut().S_BINS);
+    }
+
+    ss << "\n  }\n";
     ss << "}\n";
     return ss.str();
 }
@@ -462,6 +543,35 @@ bool fromJson(pipe::Body::Link& link, const std::string& json)
             if (!lutData.empty() && gridSize == link.lutCurve().GRID_SIZE)
             {
                 link.lutCurve().setLut(lutData.data());
+            }
+        }
+    }
+
+    // HSV LUT (if present)
+    size_t hsvLutPos = json.find("\"hsv_lut\"");
+    if (hsvLutPos != std::string::npos)
+    {
+        // Find the HSV LUT object - it starts at the next {
+        size_t hsvLutStart = json.find('{', hsvLutPos);
+        if (hsvLutStart != std::string::npos)
+        {
+            // Find matching closing brace
+            int braceCount = 1;
+            size_t hsvLutEnd = hsvLutStart + 1;
+            while (hsvLutEnd < json.size() && braceCount > 0)
+            {
+                if (json[hsvLutEnd] == '{') braceCount++;
+                else if (json[hsvLutEnd] == '}') braceCount--;
+                hsvLutEnd++;
+            }
+
+            std::string hsvLutJson = json.substr(hsvLutStart, hsvLutEnd - hsvLutStart);
+            int hBins = 0, sBins = 0;
+            std::vector<float> hsvLutData = hsvlut::fromJson(hsvLutJson, hBins, sBins);
+
+            if (!hsvLutData.empty() && hBins == link.hsvLut().H_BINS && sBins == link.hsvLut().S_BINS)
+            {
+                link.hsvLut().setLut(hsvLutData.data());
             }
         }
     }

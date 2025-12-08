@@ -243,6 +243,39 @@ namespace mods
         int lut_size);
 
     //--------------------------------------------------------------------------
+    // HSV LUT (per-hue/saturation color corrections)
+    //--------------------------------------------------------------------------
+
+    // HSV LUT dimensions (DCP-inspired, compact version)
+    static constexpr int HSV_H_BINS = 36;   // 10° per bin
+    static constexpr int HSV_S_BINS = 12;   // 12 saturation levels
+    static constexpr int HSV_LUT_SIZE = HSV_H_BINS * HSV_S_BINS * 3;  // 1296 floats
+
+    // Apply HSV LUT to image
+    // Input:  CV_32FC3 linear RGB (0-1)
+    // Output: CV_32FC3 with HSV deltas applied
+    // lut:    H_BINS × S_BINS × 3 array of (ΔH, ΔS, ΔV)
+    bool hsv_lut_apply(
+        const cv::UMat& input,
+        cv::UMat& output,
+        const float* lut);
+
+    // Estimate HSV LUT from base image to target image
+    // Samples pixels, bins by (H, S) of base, accumulates delta from target
+    bool hsv_lut_estimate(
+        const cv::UMat& base,
+        const cv::UMat& target,
+        float* lut);
+
+    // Initialize identity LUT (no change)
+    void hsv_lut_identity(float* lut);
+
+    // Get LUT dimensions
+    int hsv_lut_h_bins();
+    int hsv_lut_s_bins();
+    int hsv_lut_size();
+
+    //--------------------------------------------------------------------------
     // 3D LUT (for full color transform capture)
     //--------------------------------------------------------------------------
 

@@ -230,6 +230,35 @@ namespace pipe
                 virtual bool isEstimated() const = 0;
             };
 
+            // Module 2.8: HSV LUT (per-hue/saturation color corrections) - LINEAR_RGB
+            // This is NOT a dial-based module - it stores an HSV delta LUT
+            // Used by tune to capture per-hue color transforms (like DCP HueSatDelta)
+            // 36 hue × 12 sat grid = 432 cells × 3 deltas = 1,296 parameters
+            class HsvLut
+            {
+            public:
+                virtual ~HsvLut() = default;
+                static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
+                static constexpr int H_BINS = 36;   // 10° per bin
+                static constexpr int S_BINS = 12;   // 12 saturation levels
+                static constexpr int LUT_SIZE = H_BINS * S_BINS * 3;  // 1296
+
+                // Get/set the HSV LUT array (H_BINS × S_BINS × 3 floats)
+                // Layout: [h0s0_dh, h0s0_ds, h0s0_dv, h0s1_dh, ...]
+                virtual const float* lut() const = 0;
+                virtual void setLut(const float* values) = 0;
+
+                // Estimate HSV LUT from base image to target image
+                // Returns true if estimation succeeded
+                virtual bool estimate(View base, View target) = 0;
+
+                // Reset to identity (no-op transform)
+                virtual void reset() = 0;
+
+                // Check if LUT is non-identity (has been estimated)
+                virtual bool isEstimated() const = 0;
+            };
+
             // Module 3: Tone Mapping (7 dials) - LINEAR_RGB
             class ToneMapping
             {
@@ -427,6 +456,7 @@ namespace pipe
             virtual BaseCurve& baseCurve() = 0;
             virtual PolyColor& polyColor() = 0;
             virtual LutCurve& lutCurve() = 0;
+            virtual HsvLut& hsvLut() = 0;
             virtual ToneMapping& toneMapping() = 0;
             virtual GlobalColor& globalColor() = 0;
             virtual SplitTone& splitTone() = 0;

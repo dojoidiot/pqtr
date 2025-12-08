@@ -569,67 +569,13 @@ namespace geos::internal
         bool lutEstimated,
         const TargetFeatures* targetFeatures)
     {
+        // ACEO temporarily disabled - fall back to SPSA
+        std::cerr << "[ACEO] Bypassed, using SPSA directly" << std::endl;
+        return optimizeGeos(body, link, targetStyle, targetLaplacianVar, config, progress, lutEstimated, targetFeatures);
+
         std::random_device rd;
         std::mt19937 rng(rd());
         std::normal_distribution<float> normal(0.0f, 1.0f);
-
-        // TEST 2: Find best value for each key dial, one at a time
-        // Only keep dials that improve on LUT baseline
-        {
-            Theta neutral;
-            initNeutral(neutral);
-            writeDials(link, neutral);
-
-            float lutOnlyLoss = evaluateLoss(body, targetStyle);
-            std::cerr << "[TEST] LUT-only baseline: " << (lutOnlyLoss * 100.0f) << "%" << std::endl;
-
-            // Key dials to test (index, name)
-            struct DialTest { int idx; const char* name; };
-            DialTest keyDials[] = {
-                {0, "exposure"},
-                {1, "temperature"},
-                {2, "tint"},
-                {3, "contrast"},
-                {5, "shadows"},
-                {6, "highlights"},
-                {8, "black"},
-                {9, "white"},
-                {10, "vibrance"},
-                {11, "saturation"},
-            };
-
-            Theta best = neutral;
-            float bestLoss = lutOnlyLoss;
-
-            for (const auto& dial : keyDials) {
-                Theta test = best;  // Start from current best
-                float dialBest = 0.5f;
-                float dialBestLoss = bestLoss;
-
-                // Test values in SMALL range around neutral (0.4 to 0.6)
-                for (float v = 0.35f; v <= 0.65f; v += 0.05f) {
-                    test[dial.idx] = v;
-                    writeDials(link, test);
-                    float loss = evaluateLoss(body, targetStyle);
-                    if (loss < dialBestLoss - 0.001f) {
-                        dialBest = v;
-                        dialBestLoss = loss;
-                    }
-                }
-
-                // Keep if improved
-                if (dialBestLoss < bestLoss - 0.001f) {
-                    best[dial.idx] = dialBest;
-                    bestLoss = dialBestLoss;
-                    std::cerr << "[TEST] " << dial.name << " = " << dialBest
-                              << " -> " << (bestLoss * 100.0f) << "%" << std::endl;
-                }
-            }
-
-            writeDials(link, best);
-            std::cerr << "[TEST] Final (LUT + key dials): " << (bestLoss * 100.0f) << "%" << std::endl;
-            return 0;
-        }
 
         // BOUND discovery: find each dial's independent max via hill climb
         // Base = neutral (0.5), Max = where improvement stops

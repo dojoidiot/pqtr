@@ -690,24 +690,66 @@ void render_info_panel(State& state) {
         return;
     }
 
-    // Scrolling table of name-value pairs
-    if (ImGui::BeginTable("##info_table", 2,
-        ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY,
-        ImVec2(0, ImGui::GetContentRegionAvail().y))) {
+    // Build tree structure from dot-separated keys
+    // e.g., "camera.make" -> tree["camera"]["make"] = value
+    std::map<std::string, std::map<std::string, std::string>> tree;
+    std::map<std::string, std::string> ungrouped;
 
-        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthFixed, 90.0f);
-        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableHeadersRow();
-
-        for (const auto& [key, value] : state.raw_info) {
-            ImGui::TableNextRow();
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(key.c_str());
-            ImGui::TableNextColumn();
-            ImGui::TextUnformatted(value.c_str());
+    for (const auto& [key, value] : state.raw_info) {
+        size_t dot = key.find('.');
+        if (dot != std::string::npos) {
+            std::string group = key.substr(0, dot);
+            std::string field = key.substr(dot + 1);
+            tree[group][field] = value;
+        } else {
+            ungrouped[key] = value;
         }
+    }
 
-        ImGui::EndTable();
+    // Render tree with collapsible nodes
+    for (const auto& [group, fields] : tree) {
+        if (ImGui::TreeNodeEx(group.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::BeginTable(("##info_" + group).c_str(), 2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+
+                ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+
+                for (const auto& [field, value] : fields) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", field.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(value.c_str());
+                }
+
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
+    }
+
+    // Render ungrouped keys (if any)
+    if (!ungrouped.empty()) {
+        if (ImGui::TreeNodeEx("other", ImGuiTreeNodeFlags_DefaultOpen)) {
+            if (ImGui::BeginTable("##info_other", 2,
+                ImGuiTableFlags_RowBg | ImGuiTableFlags_SizingStretchProp)) {
+
+                ImGui::TableSetupColumn("Field", ImGuiTableColumnFlags_WidthFixed, 80.0f);
+                ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+
+                for (const auto& [key, value] : ungrouped) {
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn();
+                    ImGui::TextDisabled("%s", key.c_str());
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(value.c_str());
+                }
+
+                ImGui::EndTable();
+            }
+            ImGui::TreePop();
+        }
     }
 }
 

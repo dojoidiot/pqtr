@@ -208,7 +208,7 @@ int main(int argc, char** argv)
         geos::Config config;
         config.skip_edge = false;
         config.skip_lut = false;  // Enable LUT curve estimation (camera math)
-        config.skip_regional = true;
+        config.skip_regional = false;  // Use regional loss for better local matching
         config.geos_max_iter = 500;
         config.geos_threshold = 0.005f;
         config.geos_mode = geos::Mode::FULL_35D;
@@ -374,14 +374,14 @@ int main(int argc, char** argv)
             links.push_back(&userLink);
         }
 
-        // Save
-        std::cout << "\n[SAVE]" << std::endl;
-        std::string tunePath = saveArea + "/tune.json";
-        if (!data::links::save(links, tunePath))
-        {
-            throw std::runtime_error("Failed to save: " + tunePath);
-        }
-        std::cout << "  " << tunePath << " (" << links.size() << " link" << (links.size() > 1 ? "s" : "") << ")" << std::endl;
+        // Save (DISABLED - debugging memory corruption)
+        std::cout << "\n[SAVE] Skipped (debugging)" << std::endl;
+        // std::string tunePath = saveArea + "/tune.json";
+        // if (!data::links::save(links, tunePath))
+        // {
+        //     throw std::runtime_error("Failed to save: " + tunePath);
+        // }
+        // std::cout << "  " << tunePath << " (" << links.size() << " link" << (links.size() > 1 ? "s" : "") << ")" << std::endl;
 
         std::cout << "\n[OK]" << std::endl;
         return 0;

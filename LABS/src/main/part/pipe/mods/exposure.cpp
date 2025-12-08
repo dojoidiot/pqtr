@@ -64,5 +64,31 @@ namespace mods
         }
     }
 
+    // Apply exposure adjustment with direct EV value
+    // For baseline processing (HEAD) - not a dial
+    bool exposure_ev(
+        const cv::UMat &input,
+        cv::UMat &output,
+        float ev)
+    {
+        if (input.empty() || input.type() != CV_32FC3)
+        {
+            std::cerr << "[Exposure EV] Error: Invalid input\n";
+            return false;
+        }
+
+        try
+        {
+            float multiplier = std::pow(2.0f, ev);
+            cv::multiply(input, multiplier, output);
+            return true;
+        }
+        catch (const std::exception &e)
+        {
+            std::cerr << "[Exposure EV] Error: " << e.what() << "\n";
+            return false;
+        }
+    }
+
 } // namespace mods
 } // namespace pipe

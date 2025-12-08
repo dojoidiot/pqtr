@@ -926,13 +926,14 @@ bool run_tune(State& state, Project& project) {
     geos::Config config;
     config.skip_edge = false;
     config.skip_lut = false;  // Enable LUT estimation
-    config.skip_regional = true;
+    config.skip_regional = false;  // Use regional loss for better local matching
     config.geos_max_iter = 300;
     config.geos_threshold = 0.01f;  // 1% target
     config.geos_mode = geos::Mode::FULL_35D;
     config.optimizer = geos::Optimizer::HYBRID;
 
     desk::chat("Estimating tone curve (LUT)...");
+    desk::chat("Finding dial bounds...");
 
     // Progress callback - show phases, not iterations
     static bool geos_started = false;
@@ -1189,8 +1190,15 @@ bool load_raw_info(State& state, const Project& project) {
         return false;
     }
 
-    pipe::Info info = head->data().info();
-    for (const auto& [key, value] : info) {
+    // Data info (scene-linear metadata: camera.*, lens.*, exposure.*, etc.)
+    pipe::Info dataInfo = head->data().info();
+    for (const auto& [key, value] : dataInfo) {
+        state.raw_info[key] = value;
+    }
+
+    // Preview info (camera rendering settings: style.*, etc.)
+    pipe::Info viewInfo = head->view().info();
+    for (const auto& [key, value] : viewInfo) {
         state.raw_info[key] = value;
     }
 
@@ -1337,13 +1345,14 @@ static void tune_thread_func(const fs::path raw_path, const std::string project_
     geos::Config config;
     config.skip_edge = false;
     config.skip_lut = false;
-    config.skip_regional = true;
+    config.skip_regional = false;  // Use regional loss for better local matching
     config.geos_max_iter = 300;
     config.geos_threshold = 0.01f;
     config.geos_mode = geos::Mode::FULL_35D;
     config.optimizer = geos::Optimizer::HYBRID;
 
     desk::chat("Estimating tone curve (LUT)...");
+    desk::chat("Finding dial bounds...");
 
     // Progress callback - show phases, not iterations
     static bool geos_started_async = false;

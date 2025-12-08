@@ -97,7 +97,7 @@ namespace geos
             result.geos_iterations = 0;
             result.edge_evaluations = 0;
 
-            // Stage 1: LUT Curve Estimation (from raw base to target)
+            // Stage 1a: LUT Curve Estimation (3D RGB LUT from base to target)
             // Estimate per-channel curves before any dial adjustments
             // Skip if config.skip_lut is true (for true linear-only baseline)
             if (!config.skip_lut && !link.lutCurve().isEstimated())
@@ -105,11 +105,23 @@ namespace geos
                 View baseView = body.view();
                 if (link.lutCurve().estimate(baseView, m_targetImage))
                 {
-                    std::cout << "[geos] LUT curve estimated" << std::endl;
+                    std::cout << "[geos] 3D LUT curve estimated" << std::endl;
                 }
             }
 
-            // Initial loss measurement (with LUT applied)
+            // Stage 1b: HSV LUT Estimation (per-hue/saturation color corrections)
+            // DISABLED: HSV LUT estimation has large deltas (73°) and may contribute to memory corruption
+            // The 3D LUT should capture hue-dependent corrections already
+            // if (!config.skip_lut && !link.hsvLut().isEstimated())
+            // {
+            //     View baseView = body.view();  // This now has 3D LUT applied
+            //     if (link.hsvLut().estimate(baseView, m_targetImage))
+            //     {
+            //         std::cout << "[geos] HSV LUT estimated (36x12 grid)" << std::endl;
+            //     }
+            // }
+
+            // Initial loss measurement (with LUTs applied)
             View candidate = body.view();
             result.loss = diff(candidate);
             Data baselineLoss = result.loss;
