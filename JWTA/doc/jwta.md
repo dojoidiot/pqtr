@@ -18,9 +18,48 @@ src/main/
     mailgun.cpp  # Mailer implementation
 ```
 
+## CLI
+
+```bash
+./tmp/make/jwta --data-area <path> <config.json>
+```
+
+## Config
+
+`etc/jwta.json`:
+
+```json
+{
+    "host": "127.0.0.1",
+    "port": 8080,
+    "jrpc_path": "/jrpc",
+    "boot_path": "/boot",
+    "admin_email": "admin@example.com",
+    "boot_email": "boot@example.com",
+    "otp_from": "Auth <auth@example.com>",
+    "otp_text": "Your verification code is: %s\n\nThis code expires in 10 minutes.",
+    "sqlite": {
+        "file": "jwta.db"
+    },
+    "mailgun": {
+        "api_key": "mailgun.api_key",
+        "domain": "example.com",
+        "region": "eu"
+    }
+}
+```
+
+## Secrets
+
+Linux kernel keyring (key name from `mailgun.api_key` in config):
+
+```bash
+keyctl add user "mailgun.api_key" "YOUR_KEY" @u
+```
+
 ## JRPC Endpoints
 
-`POST /rpc` (JSON-RPC 2.0)
+`POST /jrpc` (JSON-RPC 2.0)
 
 | Method | Params | Returns |
 |--------|--------|---------|
@@ -71,51 +110,33 @@ src/main/
 }
 ```
 
-## Config
-
-`etc/jwta.json`:
-
-```json
-{
-  "host": "127.0.0.1",
-  "port": 8080,
-  "db_path": "var/jwta.db",
-  "admin_email": "admin@example.com",
-  "boot_email": "boot@example.com",
-  "mailgun": {
-    "domain": "example.com",
-    "from": "noreply@example.com",
-    "region": "eu"
-  }
-}
-```
-
-## Secrets
-
-Linux kernel keyring (required):
-
-```bash
-keyctl add user "jwta:mailgun_api_key" "YOUR_KEY" @u
-keyctl add user "jwta:mailgun_domain" "example.com" @u
-keyctl add user "jwta:mailgun_from" "noreply@example.com" @u
-keyctl add user "jwta:mailgun_region" "eu" @u
-```
-
-## CLI
-
-```bash
-./tmp/make/jwta --info-file etc/jwta.json --data-area /path/to/data/
-```
-
 ## Bootstrap
 
 1. Configure `admin_email` and `boot_email` in config
 2. Start server - sends bootstrap token to `boot_email`
-3. Reply to email (Mailgun routes to `/boot` endpoint)
+3. Reply to email (Mailgun routes to `boot_path` endpoint)
 4. `admin_email` gets PQTR role on next register/login
 
-## Endpoints
+## Nginx
 
-- `GET /health` - Health check
-- `POST /rpc` - JSON-RPC 2.0
-- `POST /boot` - Bootstrap webhook (Mailgun)
+```nginx
+upstream jwta { server 127.0.0.1:8080; }
+
+server {
+    listen 443 ssl;
+    server_name auth.example.com;
+
+    client_max_body_size 8k;
+    limit_req zone=auth burst=5 nodelay;
+
+    location /jrpc {
+        proxy_pass http://jwta;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    location /boot {
+        proxy_pass http://jwta;
+    }
+}
+
+limit_req_zone $binary_remote_addr zone=auth:10m rate=10r/m;
+```

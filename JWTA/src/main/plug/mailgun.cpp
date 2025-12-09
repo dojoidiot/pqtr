@@ -8,21 +8,38 @@
 
 namespace jwta {
 
+namespace {
+bool validEmail(const std::string& s) {
+    if (s.size() > 254) return false;
+    bool at = false;
+    for (char c : s) {
+        if (c == '@') { at = true; continue; }
+        if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+            (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_' || c == '+') continue;
+        return false;
+    }
+    return at;
+}
+}
+
 class MailgunMailer : public Mailer {
     std::string m_api_key;
     std::string m_domain;
     std::string m_from;
+    std::string m_otp_text;
     std::string m_base_url;
 
 public:
     MailgunMailer(const std::string& api_key, const std::string& domain,
-                  const std::string& from, const std::string& region)
-        : m_api_key(api_key), m_domain(domain), m_from(from) {
+                  const std::string& from, const std::string& otp_text, const std::string& region)
+        : m_api_key(api_key), m_domain(domain), m_from(from), m_otp_text(otp_text) {
         m_base_url = (region == "eu") ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
     }
 
     bool sendOtp(const std::string& email, const std::string& otp) override {
-        std::string text = "Your verification code is: " + otp + "\n\nThis code expires in 10 minutes.";
+        if (!validEmail(email)) return false;
+        char text[1024];
+        snprintf(text, sizeof(text), m_otp_text.c_str(), otp.c_str());
 
         std::ostringstream cmd;
         cmd << "curl -s --max-time 10 "
@@ -57,8 +74,9 @@ public:
 };
 
 std::unique_ptr<Mailer> createMailer(const std::string& api_key, const std::string& domain,
-                                      const std::string& from, const std::string& region) {
-    return std::make_unique<MailgunMailer>(api_key, domain, from, region);
+                                      const std::string& from, const std::string& otp_text,
+                                      const std::string& region) {
+    return std::make_unique<MailgunMailer>(api_key, domain, from, otp_text, region);
 }
 
 } // namespace jwta

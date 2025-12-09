@@ -18,7 +18,8 @@ std::unique_ptr<Mailer> createMailer(
     const std::string& api_key,
     const std::string& domain,
     const std::string& from,
-    const std::string& region = "us"
+    const std::string& otp_text,
+    const std::string& region
 );
 
 } // namespace jwta

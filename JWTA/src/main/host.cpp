@@ -13,20 +13,25 @@
 namespace {
 
 struct Config {
-    std::string host = "127.0.0.1";
-    int port = 8080;
-    std::string db_path = "var/jwta.db";
+    std::string host;
+    int port = 0;
+    std::string jrpc_path;
+    std::string boot_path;
     std::string admin_email;
     std::string boot_email;
-    std::string mailgun_api_key;
+    std::string otp_from;
+    std::string otp_text;
+    // sqlite
+    std::string sqlite_file;
+    // mailgun
+    std::string mailgun_api_key_name;  // keyring key name from config
+    std::string mailgun_api_key;       // actual value from keyring
     std::string mailgun_domain;
-    std::string mailgun_from;
-    std::string mailgun_region = "us";
+    std::string mailgun_region;
 };
 
 std::string loadFromKeyring(const std::string& name) {
-    std::string desc = "jwta:" + name;
-    key_serial_t key = request_key("user", desc.c_str(), nullptr, KEY_SPEC_USER_KEYRING);
+    key_serial_t key = request_key("user", name.c_str(), nullptr, KEY_SPEC_USER_KEYRING);
     if (key < 0) return "";
 
     long size = keyctl_read(key, nullptr, 0);
@@ -73,36 +78,43 @@ bool loadConfig(const std::string& path, Config& cfg) {
         return std::atoi(json.c_str() + pos);
     };
 
+    auto getNestedString = [&json](const std::string& obj, const std::string& key) -> std::string {
+        size_t obj_pos = json.find("\"" + obj + "\"");
+        if (obj_pos == std::string::npos) return "";
+        std::string sub = json.substr(obj_pos);
+        std::string search = "\"" + key + "\"";
+        size_t pos = sub.find(search);
+        if (pos == std::string::npos) return "";
+        pos = sub.find(':', pos);
+        if (pos == std::string::npos) return "";
+        pos = sub.find('"', pos);
+        if (pos == std::string::npos) return "";
+        pos++;
+        std::string result;
+        while (pos < sub.size() && sub[pos] != '"') result += sub[pos++];
+        return result;
+    };
+
     std::string s;
     int i;
 
     if (!(s = getString("host")).empty()) cfg.host = s;
     if ((i = getInt("port")) > 0) cfg.port = i;
-    if (!(s = getString("db_path")).empty()) cfg.db_path = s;
+    if (!(s = getString("jrpc_path")).empty()) cfg.jrpc_path = s;
+    if (!(s = getString("boot_path")).empty()) cfg.boot_path = s;
     if (!(s = getString("admin_email")).empty()) cfg.admin_email = s;
     if (!(s = getString("boot_email")).empty()) cfg.boot_email = s;
+    if (!(s = getString("otp_from")).empty()) cfg.otp_from = s;
+    if (!(s = getString("otp_text")).empty()) cfg.otp_text = s;
 
-    size_t mg_pos = json.find("\"mailgun\"");
-    if (mg_pos != std::string::npos) {
-        std::string mg = json.substr(mg_pos);
-        auto getMg = [&mg](const std::string& key) -> std::string {
-            std::string search = "\"" + key + "\"";
-            size_t pos = mg.find(search);
-            if (pos == std::string::npos) return "";
-            pos = mg.find(':', pos);
-            if (pos == std::string::npos) return "";
-            pos = mg.find('"', pos);
-            if (pos == std::string::npos) return "";
-            pos++;
-            std::string result;
-            while (pos < mg.size() && mg[pos] != '"') result += mg[pos++];
-            return result;
-        };
-        if (!(s = getMg("api_key")).empty()) cfg.mailgun_api_key = s;
-        if (!(s = getMg("domain")).empty()) cfg.mailgun_domain = s;
-        if (!(s = getMg("from")).empty()) cfg.mailgun_from = s;
-        if (!(s = getMg("region")).empty()) cfg.mailgun_region = s;
-    }
+    // sqlite.file
+    if (!(s = getNestedString("sqlite", "file")).empty()) cfg.sqlite_file = s;
+
+    // mailgun.domain, mailgun.region, mailgun.api_key (keyring key name)
+    if (!(s = getNestedString("mailgun", "domain")).empty()) cfg.mailgun_domain = s;
+    if (!(s = getNestedString("mailgun", "region")).empty()) cfg.mailgun_region = s;
+    if (!(s = getNestedString("mailgun", "api_key")).empty()) cfg.mailgun_api_key_name = s;
+
     return true;
 }
 
@@ -168,21 +180,18 @@ std::string jrpcError(const std::string& id, int code, const std::string& messag
 } // anonymous namespace
 
 int main(int argc, char* argv[]) {
-    std::string config_path = "etc/jwta.json";
+    std::string config_path;
     std::string data_area;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::cout << "JWTA Server - JWT Web Auth\n\n"
-                      << "Usage: jwta [options]\n\n"
+                      << "Usage: jwta [options] <config.json>\n\n"
                       << "Options:\n"
-                      << "  --info-file <path>   Config file (default: etc/jwta.json)\n"
-                      << "  --data-area <path>   Data directory\n"
+                      << "  --data-area <path>   Data directory (required)\n"
                       << "  -h, --help           Show this help\n";
             return 0;
-        } else if (arg == "--info-file" && i + 1 < argc) {
-            config_path = argv[++i];
         } else if (arg == "--data-area" && i + 1 < argc) {
             data_area = argv[++i];
             if (!data_area.empty() && data_area.back() != '/') data_area += '/';
@@ -191,58 +200,83 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    if (config_path.empty()) {
+        std::cerr << "[JWTA] Error: config file required\n";
+        std::cerr << "Usage: jwta [options] <config.json>\n";
+        return 1;
+    }
+    if (data_area.empty()) {
+        std::cerr << "[JWTA] Error: --data-area required\n";
+        return 1;
+    }
+
     Config cfg;
-    if (loadConfig(config_path, cfg)) {
-        std::cout << "[JWTA] Config: " << config_path << std::endl;
-    } else {
-        std::cout << "[JWTA] Config: " << config_path << " (not found, using defaults)" << std::endl;
+    if (!loadConfig(config_path, cfg)) {
+        std::cerr << "[JWTA] Error: Failed to load config: " << config_path << std::endl;
+        return 1;
     }
+    std::cout << "[JWTA] Config: " << config_path << std::endl;
 
-    if (const char* env = std::getenv("JWTA_HOST")) cfg.host = env;
-    if (const char* env = std::getenv("JWTA_PORT")) cfg.port = std::atoi(env);
-    if (const char* env = std::getenv("JWTA_DB_PATH")) cfg.db_path = env;
-
-    if (!data_area.empty()) {
-        std::string db_filename = cfg.db_path;
-        size_t slash = db_filename.rfind('/');
-        if (slash != std::string::npos) db_filename = db_filename.substr(slash + 1);
-        cfg.db_path = data_area + db_filename;
-        std::cout << "[JWTA] Data area: " << data_area << std::endl;
-    }
-
+    // Load mailgun api_key from keyring using name from config
     std::string s;
-    if (!(s = loadFromKeyring("mailgun_api_key")).empty()) {
-        cfg.mailgun_api_key = s;
-        std::cout << "[JWTA] Keyring: mailgun_api_key" << std::endl;
-    }
-    if (!(s = loadFromKeyring("mailgun_domain")).empty()) {
-        cfg.mailgun_domain = s;
-        std::cout << "[JWTA] Keyring: mailgun_domain" << std::endl;
-    }
-    if (!(s = loadFromKeyring("mailgun_from")).empty()) {
-        cfg.mailgun_from = s;
-        std::cout << "[JWTA] Keyring: mailgun_from" << std::endl;
-    }
-    if (!(s = loadFromKeyring("mailgun_region")).empty()) {
-        cfg.mailgun_region = s;
-        std::cout << "[JWTA] Keyring: mailgun_region" << std::endl;
+    if (!cfg.mailgun_api_key_name.empty()) {
+        if (!(s = loadFromKeyring(cfg.mailgun_api_key_name)).empty()) {
+            cfg.mailgun_api_key = s;
+        }
     }
 
-    // Require mailgun config
+    // Validate required config
+    if (cfg.host.empty()) {
+        std::cerr << "[JWTA] Error: host required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.port <= 0) {
+        std::cerr << "[JWTA] Error: port required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.jrpc_path.empty()) {
+        std::cerr << "[JWTA] Error: jrpc_path required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.sqlite_file.empty()) {
+        std::cerr << "[JWTA] Error: sqlite.file required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.mailgun_api_key_name.empty()) {
+        std::cerr << "[JWTA] Error: mailgun.api_key required in config (keyring key name)" << std::endl;
+        return 1;
+    }
     if (cfg.mailgun_api_key.empty()) {
-        std::cerr << "[JWTA] Error: mailgun_api_key not configured" << std::endl;
-        std::cerr << "[JWTA] Set via keyring: keyctl add user \"jwta:mailgun_api_key\" \"KEY\" @u" << std::endl;
+        std::cerr << "[JWTA] Error: " << cfg.mailgun_api_key_name << " not in keyring" << std::endl;
+        std::cerr << "[JWTA] Set via: keyctl add user \"" << cfg.mailgun_api_key_name << "\" \"KEY\" @u" << std::endl;
+        return 1;
+    }
+    if (cfg.mailgun_domain.empty()) {
+        std::cerr << "[JWTA] Error: mailgun.domain required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.mailgun_region.empty()) {
+        std::cerr << "[JWTA] Error: mailgun.region required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.otp_from.empty()) {
+        std::cerr << "[JWTA] Error: otp_from required in config" << std::endl;
+        return 1;
+    }
+    if (cfg.otp_text.empty()) {
+        std::cerr << "[JWTA] Error: otp_text required in config" << std::endl;
         return 1;
     }
 
-    auto store = jwta::createStore(cfg.db_path);
+    std::string db_path = data_area + cfg.sqlite_file;
+    auto store = jwta::createStore(db_path);
     if (!store) {
-        std::cerr << "[JWTA] Error: Failed to open database: " << cfg.db_path << std::endl;
+        std::cerr << "[JWTA] Error: Failed to open database: " << db_path << std::endl;
         return 1;
     }
-    std::cout << "[JWTA] Database: " << cfg.db_path << std::endl;
+    std::cout << "[JWTA] Database: " << db_path << std::endl;
 
-    auto mailer = jwta::createMailer(cfg.mailgun_api_key, cfg.mailgun_domain, cfg.mailgun_from, cfg.mailgun_region);
+    auto mailer = jwta::createMailer(cfg.mailgun_api_key, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
     std::cout << "[JWTA] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
 
     jwta::Service service(*store, *mailer);
@@ -267,11 +301,7 @@ int main(int argc, char* argv[]) {
 
     httplib::Server svr;
 
-    svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
-        res.set_content("{\"status\":\"ok\"}", "application/json");
-    });
-
-    svr.Post("/rpc", [&service](const httplib::Request& req, httplib::Response& res) {
+    svr.Post(cfg.jrpc_path, [&service](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Content-Type", "application/json");
         const std::string& body = req.body;
         std::string id = extractId(body);
@@ -374,39 +404,43 @@ int main(int argc, char* argv[]) {
         }
     });
 
-    svr.Post("/boot", [&service, &cfg, &store](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Content-Type", "application/json");
-        std::string body_plain = req.has_param("body-plain") ? req.get_param_value("body-plain") : req.body;
+    if (!cfg.boot_path.empty()) {
+        svr.Post(cfg.boot_path, [&service, &cfg, &store](const httplib::Request& req, httplib::Response& res) {
+            res.set_header("Content-Type", "application/json");
+            std::string body_plain = req.has_param("body-plain") ? req.get_param_value("body-plain") : req.body;
 
-        std::string token;
-        for (size_t i = 0; i + 64 <= body_plain.size(); ++i) {
-            bool valid = true;
-            for (size_t j = 0; j < 64; ++j) {
-                char c = body_plain[i + j];
-                if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) { valid = false; break; }
+            std::string token;
+            for (size_t i = 0; i + 64 <= body_plain.size(); ++i) {
+                bool valid = true;
+                for (size_t j = 0; j < 64; ++j) {
+                    char c = body_plain[i + j];
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) { valid = false; break; }
+                }
+                if (valid) {
+                    token = body_plain.substr(i, 64);
+                    for (char& c : token) if (c >= 'A' && c <= 'F') c = c - 'A' + 'a';
+                    break;
+                }
             }
-            if (valid) {
-                token = body_plain.substr(i, 64);
-                for (char& c : token) if (c >= 'A' && c <= 'F') c = c - 'A' + 'a';
-                break;
+
+            if (token.empty()) { res.set_content("{\"ok\":false,\"error\":\"no_token\"}", "application/json"); return; }
+            if (!service.verifyBootstrapToken(token)) { res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json"); return; }
+
+            if (!cfg.admin_email.empty()) {
+                auto user = store->getUserByEmail(cfg.admin_email);
+                if (user) {
+                    store->updateUserRole(user->id, "PQTR");
+                    std::cout << "[BOOT] Admin: " << cfg.admin_email << std::endl;
+                } else {
+                    std::cout << "[BOOT] Token verified, admin gets PQTR on register" << std::endl;
+                }
             }
-        }
+            res.set_content("{\"ok\":true}", "application/json");
+        });
+        std::cout << "[JWTA] Boot: " << cfg.boot_path << std::endl;
+    }
 
-        if (token.empty()) { res.set_content("{\"ok\":false,\"error\":\"no_token\"}", "application/json"); return; }
-        if (!service.verifyBootstrapToken(token)) { res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json"); return; }
-
-        if (!cfg.admin_email.empty()) {
-            auto user = store->getUserByEmail(cfg.admin_email);
-            if (user) {
-                store->updateUserRole(user->id, "PQTR");
-                std::cout << "[BOOT] Admin: " << cfg.admin_email << std::endl;
-            } else {
-                std::cout << "[BOOT] Token verified, admin gets PQTR on register" << std::endl;
-            }
-        }
-        res.set_content("{\"ok\":true}", "application/json");
-    });
-
+    std::cout << "[JWTA] JRPC: " << cfg.jrpc_path << std::endl;
     std::cout << "[JWTA] Listening on " << cfg.host << ":" << cfg.port << std::endl;
     if (!svr.listen(cfg.host, cfg.port)) {
         std::cerr << "[JWTA] Failed to start server" << std::endl;
