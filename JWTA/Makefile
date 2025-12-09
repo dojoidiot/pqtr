@@ -53,7 +53,7 @@ $(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 
 $(SERVER_TARGET): $(SRC_DIR)/server.cpp $(LIB_TARGET) $(SODIUM_LIB)
 	@mkdir -p $(BIN_DIR)
-	$(CXX) $(CXXFLAGS) $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lkeyutils -o $@
+	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lkeyutils -lssl -lcrypto -o $@
 
 $(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@

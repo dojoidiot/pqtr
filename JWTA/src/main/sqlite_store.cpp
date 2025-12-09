@@ -33,10 +33,9 @@ bool SqliteStore::open(const std::string& path) {
             id TEXT PRIMARY KEY,
             email TEXT UNIQUE NOT NULL,
             tier TEXT NOT NULL,
-            created_at INTEGER NOT NULL,
-            pubkey BLOB NOT NULL,
-            privkey_encrypted BLOB NOT NULL,
-            privkey_salt BLOB
+            role TEXT NOT NULL DEFAULT 'NONE',
+            locked INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS otps (
@@ -75,8 +74,8 @@ void SqliteStore::close() {
 
 bool SqliteStore::createUser(const User& user) {
     const char* sql = R"(
-        INSERT INTO users (id, email, tier, created_at, pubkey, privkey_encrypted, privkey_salt)
-        VALUES (?, ?, ?, ?, ?, ?, ?);
+        INSERT INTO users (id, email, tier, role, locked, created_at)
+        VALUES (?, ?, ?, ?, ?, ?);
     )";
 
     sqlite3_stmt* stmt = nullptr;
@@ -86,15 +85,9 @@ bool SqliteStore::createUser(const User& user) {
     sqlite3_bind_text(stmt, 1, user.id.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, user.email.c_str(), -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 3, user.tier.c_str(), -1, SQLITE_TRANSIENT);
-    sqlite3_bind_int64(stmt, 4, user.created_at);
-    sqlite3_bind_blob(stmt, 5, user.pubkey.data(), user.pubkey.size(), SQLITE_TRANSIENT);
-    sqlite3_bind_blob(stmt, 6, user.privkey_encrypted.data(), user.privkey_encrypted.size(), SQLITE_TRANSIENT);
-
-    if (!user.privkey_salt.empty()) {
-        sqlite3_bind_blob(stmt, 7, user.privkey_salt.data(), user.privkey_salt.size(), SQLITE_TRANSIENT);
-    } else {
-        sqlite3_bind_null(stmt, 7);
-    }
+    sqlite3_bind_text(stmt, 4, user.role.empty() ? "NONE" : user.role.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_int(stmt, 5, user.locked ? 1 : 0);
+    sqlite3_bind_int64(stmt, 6, user.created_at);
 
     rc = sqlite3_step(stmt);
     sqlite3_finalize(stmt);
@@ -103,7 +96,7 @@ bool SqliteStore::createUser(const User& user) {
 }
 
 std::optional<User> SqliteStore::getUser(const std::string& id) {
-    const char* sql = "SELECT id, email, tier, created_at, pubkey, privkey_encrypted, privkey_salt FROM users WHERE id = ?;";
+    const char* sql = "SELECT id, email, tier, role, locked, created_at FROM users WHERE id = ?;";
 
     sqlite3_stmt* stmt = nullptr;
     int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
@@ -121,24 +114,10 @@ std::optional<User> SqliteStore::getUser(const std::string& id) {
     user.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
     user.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
     user.tier = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-    user.created_at = sqlite3_column_int64(stmt, 3);
-
-    const void* pubkey_data = sqlite3_column_blob(stmt, 4);
-    int pubkey_size = sqlite3_column_bytes(stmt, 4);
-    user.pubkey.assign(static_cast<const uint8_t*>(pubkey_data),
-                       static_cast<const uint8_t*>(pubkey_data) + pubkey_size);
-
-    const void* privkey_data = sqlite3_column_blob(stmt, 5);
-    int privkey_size = sqlite3_column_bytes(stmt, 5);
-    user.privkey_encrypted.assign(static_cast<const uint8_t*>(privkey_data),
-                                   static_cast<const uint8_t*>(privkey_data) + privkey_size);
-
-    if (sqlite3_column_type(stmt, 6) != SQLITE_NULL) {
-        const void* salt_data = sqlite3_column_blob(stmt, 6);
-        int salt_size = sqlite3_column_bytes(stmt, 6);
-        user.privkey_salt.assign(static_cast<const uint8_t*>(salt_data),
-                                  static_cast<const uint8_t*>(salt_data) + salt_size);
-    }
+    const char* role_text = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+    user.role = role_text ? role_text : "NONE";
+    user.locked = sqlite3_column_int(stmt, 4) != 0;
+    user.created_at = sqlite3_column_int64(stmt, 5);
 
     sqlite3_finalize(stmt);
     return user;
@@ -274,6 +253,89 @@ bool SqliteStore::revokeRefreshToken(const std::string& user_id) {
     sqlite3_finalize(stmt);
 
     return rc == SQLITE_DONE;
+}
+
+bool SqliteStore::updateUserRole(const std::string& id, const std::string& role) {
+    const char* sql = "UPDATE users SET role = ? WHERE id = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, role.c_str(), -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, id.c_str(), -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return rc == SQLITE_DONE;
+}
+
+bool SqliteStore::updateUserLocked(const std::string& id, bool locked) {
+    const char* sql = "UPDATE users SET locked = ? WHERE id = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return false;
+
+    sqlite3_bind_int(stmt, 1, locked ? 1 : 0);
+    sqlite3_bind_text(stmt, 2, id.c_str(), -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return rc == SQLITE_DONE;
+}
+
+bool SqliteStore::deleteUser(const std::string& id) {
+    const char* sql = "DELETE FROM users WHERE id = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return false;
+
+    sqlite3_bind_text(stmt, 1, id.c_str(), -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    sqlite3_finalize(stmt);
+
+    return rc == SQLITE_DONE;
+}
+
+int SqliteStore::countUsers() {
+    const char* sql = "SELECT COUNT(*) FROM users;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return 0;
+
+    rc = sqlite3_step(stmt);
+    int count = 0;
+    if (rc == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+
+    return count;
+}
+
+int SqliteStore::countUsersByRole(const std::string& role) {
+    const char* sql = "SELECT COUNT(*) FROM users WHERE role = ?;";
+
+    sqlite3_stmt* stmt = nullptr;
+    int rc = sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr);
+    if (rc != SQLITE_OK) return 0;
+
+    sqlite3_bind_text(stmt, 1, role.c_str(), -1, SQLITE_TRANSIENT);
+
+    rc = sqlite3_step(stmt);
+    int count = 0;
+    if (rc == SQLITE_ROW) {
+        count = sqlite3_column_int(stmt, 0);
+    }
+    sqlite3_finalize(stmt);
+
+    return count;
 }
 
 } // namespace jwta

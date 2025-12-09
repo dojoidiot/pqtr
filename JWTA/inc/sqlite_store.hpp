@@ -23,6 +23,13 @@ public:
     std::optional<User> getUser(const std::string& id) override;
     std::optional<User> getUserByEmail(const std::string& email) override;
 
+    // Admin: user management
+    bool updateUserRole(const std::string& id, const std::string& role) override;
+    bool updateUserLocked(const std::string& id, bool locked) override;
+    bool deleteUser(const std::string& id) override;
+    int countUsers() override;
+    int countUsersByRole(const std::string& role) override;
+
     bool createOtp(const Otp& otp) override;
     std::optional<Otp> getOtp(const std::string& email) override;
     bool deleteOtp(const std::string& email) override;

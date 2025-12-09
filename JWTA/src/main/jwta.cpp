@@ -3,7 +3,6 @@
 
 #include "jwta.hpp"
 #include <sodium.h>
-#include <keyutils.h>
 #include <ctime>
 #include <cstdlib>
 #include <cstdio>
@@ -22,156 +21,6 @@ namespace crypto {
 
 bool init() {
     return sodium_init() >= 0;
-}
-
-std::string loadFromKeyring(const std::string& key_name) {
-    // Search for key in session keyring, then user keyring
-    key_serial_t key = request_key("user", key_name.c_str(), nullptr, KEY_SPEC_SESSION_KEYRING);
-    if (key < 0) {
-        key = request_key("user", key_name.c_str(), nullptr, KEY_SPEC_USER_KEYRING);
-    }
-    if (key < 0) {
-        return "";
-    }
-
-    // Get key size
-    long len = keyctl_read(key, nullptr, 0);
-    if (len <= 0) {
-        return "";
-    }
-
-    // Read key data
-    std::string data(len, '\0');
-    if (keyctl_read(key, &data[0], len) != len) {
-        return "";
-    }
-
-    return data;
-}
-
-// Helper to parse hex string to bytes
-static bool parseHexKey(const std::string& hex, std::vector<uint8_t>& key) {
-    if (hex.length() != 64) {
-        return false;  // Must be 64 hex chars = 32 bytes
-    }
-
-    key.resize(32);
-    for (size_t i = 0; i < 32; i++) {
-        unsigned int byte;
-        if (sscanf(hex.c_str() + i * 2, "%02x", &byte) != 1) {
-            key.clear();
-            return false;
-        }
-        key[i] = static_cast<uint8_t>(byte);
-    }
-    return true;
-}
-
-bool loadMasterKey(std::vector<uint8_t>& master_key) {
-    // Try kernel keyring first
-    std::string keyring_val = loadFromKeyring("jwta_master");
-    if (!keyring_val.empty()) {
-        if (parseHexKey(keyring_val, master_key)) {
-            return true;
-        }
-        // If keyring has raw bytes (32 bytes), use directly
-        if (keyring_val.size() == 32) {
-            master_key.assign(keyring_val.begin(), keyring_val.end());
-            return true;
-        }
-    }
-
-    // Fall back to environment variable
-    const char* env = std::getenv("JWTA_MASTER_KEY");
-    if (env) {
-        return parseHexKey(env, master_key);
-    }
-
-    return false;
-}
-
-std::vector<uint8_t> generateSalt() {
-    std::vector<uint8_t> salt(16);
-    randombytes_buf(salt.data(), salt.size());
-    return salt;
-}
-
-std::vector<uint8_t> encryptPrivkey(
-    const std::vector<uint8_t>& privkey,
-    const std::vector<uint8_t>& master_key,
-    const std::vector<uint8_t>& salt)
-{
-    if (master_key.size() != 32 || salt.size() != 16) {
-        return {};
-    }
-
-    // Derive per-user encryption key using BLAKE2b
-    std::vector<uint8_t> derived_key(crypto_secretbox_KEYBYTES);  // 32 bytes
-    crypto_generichash_state state;
-    crypto_generichash_init(&state, master_key.data(), master_key.size(), derived_key.size());
-    crypto_generichash_update(&state, salt.data(), salt.size());
-    crypto_generichash_final(&state, derived_key.data(), derived_key.size());
-
-    // Generate random nonce
-    std::vector<uint8_t> nonce(crypto_secretbox_NONCEBYTES);  // 24 bytes
-    randombytes_buf(nonce.data(), nonce.size());
-
-    // Encrypt: ciphertext = privkey + auth tag
-    std::vector<uint8_t> ciphertext(privkey.size() + crypto_secretbox_MACBYTES);  // 64 + 16 = 80 bytes
-    if (crypto_secretbox_easy(ciphertext.data(), privkey.data(), privkey.size(),
-                              nonce.data(), derived_key.data()) != 0) {
-        return {};
-    }
-
-    // Return: ciphertext || nonce (80 + 24 = 104 bytes)
-    std::vector<uint8_t> result;
-    result.reserve(ciphertext.size() + nonce.size());
-    result.insert(result.end(), ciphertext.begin(), ciphertext.end());
-    result.insert(result.end(), nonce.begin(), nonce.end());
-
-    // Zero out derived key
-    sodium_memzero(derived_key.data(), derived_key.size());
-
-    return result;
-}
-
-std::vector<uint8_t> decryptPrivkey(
-    const std::vector<uint8_t>& encrypted,
-    const std::vector<uint8_t>& master_key,
-    const std::vector<uint8_t>& salt)
-{
-    if (master_key.size() != 32 || salt.size() != 16) {
-        return {};
-    }
-
-    // Expected size: 64 (privkey) + 16 (tag) + 24 (nonce) = 104 bytes
-    const size_t expected_size = crypto_sign_SECRETKEYBYTES + crypto_secretbox_MACBYTES + crypto_secretbox_NONCEBYTES;
-    if (encrypted.size() != expected_size) {
-        return {};
-    }
-
-    // Split encrypted data
-    size_t ciphertext_size = encrypted.size() - crypto_secretbox_NONCEBYTES;
-    const uint8_t* ciphertext = encrypted.data();
-    const uint8_t* nonce = encrypted.data() + ciphertext_size;
-
-    // Derive per-user encryption key
-    std::vector<uint8_t> derived_key(crypto_secretbox_KEYBYTES);
-    crypto_generichash_state state;
-    crypto_generichash_init(&state, master_key.data(), master_key.size(), derived_key.size());
-    crypto_generichash_update(&state, salt.data(), salt.size());
-    crypto_generichash_final(&state, derived_key.data(), derived_key.size());
-
-    // Decrypt
-    std::vector<uint8_t> privkey(ciphertext_size - crypto_secretbox_MACBYTES);
-    if (crypto_secretbox_open_easy(privkey.data(), ciphertext, ciphertext_size,
-                                    nonce, derived_key.data()) != 0) {
-        sodium_memzero(derived_key.data(), derived_key.size());
-        return {};  // Decryption failed (wrong key or tampered)
-    }
-
-    sodium_memzero(derived_key.data(), derived_key.size());
-    return privkey;
 }
 
 bool generateKeypair(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) {
@@ -264,6 +113,10 @@ std::string generateRefreshToken() {
     return oss.str();
 }
 
+std::string generateBootstrapToken() {
+    return generateRefreshToken();  // Same format - 64 hex chars
+}
+
 } // namespace crypto
 
 // ============================================================
@@ -327,15 +180,6 @@ std::vector<uint8_t> base64url_decode(const std::string& str) {
     return result;
 }
 
-std::string toHex(const std::vector<uint8_t>& data) {
-    std::ostringstream oss;
-    oss << std::hex << std::setfill('0');
-    for (uint8_t b : data) {
-        oss << std::setw(2) << static_cast<int>(b);
-    }
-    return oss.str();
-}
-
 } // anonymous namespace
 
 // ============================================================
@@ -355,6 +199,7 @@ std::string encode(const Claims& claims, const std::vector<uint8_t>& signing_key
     payload << R"("sub":")" << claims.sub << R"(",)";
     payload << R"("email":")" << claims.email << R"(",)";
     payload << R"("tier":")" << claims.tier << R"(",)";
+    payload << R"("role":")" << claims.role << R"(",)";
     payload << R"("iat":)" << claims.iat << ",";
     payload << R"("exp":)" << claims.exp;
     payload << "}";
@@ -421,6 +266,7 @@ std::optional<Claims> decode(const std::string& token, const std::vector<uint8_t
     claims.sub = extractString("sub");
     claims.email = extractString("email");
     claims.tier = extractString("tier");
+    claims.role = extractString("role");
     claims.iat = extractInt("iat");
     claims.exp = extractInt("exp");
 
@@ -449,9 +295,6 @@ bool Service::init() {
     if (!crypto::init()) {
         return false;
     }
-
-    // Load master key from environment (optional - allows testing without encryption)
-    crypto::loadMasterKey(m_master_key);
 
     // Generate JWTA's signing keypair
     if (!crypto::generateKeypair(m_signing_pubkey, m_signing_privkey)) {
@@ -535,27 +378,9 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
         user.id = crypto::generateUuid();
         user.email = req.email;
         user.tier = "registered";
+        // Bootstrap admin gets PQTR role
+        user.role = (!m_admin_email.empty() && req.email == m_admin_email) ? "PQTR" : "NONE";
         user.created_at = now;
-
-        // Generate user's ed25519 keypair
-        std::vector<uint8_t> privkey;
-        if (!crypto::generateKeypair(user.pubkey, privkey)) {
-            return resp;
-        }
-
-        // Encrypt private key at rest
-        if (!m_master_key.empty()) {
-            user.privkey_salt = crypto::generateSalt();
-            user.privkey_encrypted = crypto::encryptPrivkey(privkey, m_master_key, user.privkey_salt);
-            if (user.privkey_encrypted.empty()) {
-                return resp;  // Encryption failed
-            }
-            // Zero out plaintext private key
-            sodium_memzero(privkey.data(), privkey.size());
-        } else {
-            // No master key - store unencrypted (for testing only)
-            user.privkey_encrypted = privkey;
-        }
 
         if (!m_store.createUser(user)) {
             return resp;
@@ -583,13 +408,14 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     claims.sub = user.id;
     claims.email = user.email;
     claims.tier = user.tier;
+    claims.role = user.role.empty() ? "NONE" : user.role;
     claims.iat = now;
     claims.exp = now + 3600;  // 1 hour
 
     resp.jwt = jwt::encode(claims, m_signing_privkey);
     resp.refresh_token = refresh_token;
     resp.user_id = user.id;
-    resp.pubkey_hex = toHex(user.pubkey);
+    resp.role = claims.role;
 
     return resp;
 }
@@ -600,6 +426,12 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     // Check if user exists
     auto existing = m_store.getUserByEmail(req.email);
     if (!existing) {
+        resp.ok = false;
+        return resp;
+    }
+
+    // Check if account is locked
+    if (existing->locked) {
         resp.ok = false;
         return resp;
     }
@@ -653,20 +485,147 @@ rpc::RefreshResponse Service::handleRefresh(const rpc::RefreshRequest& req) {
     return resp;
 }
 
-rpc::PubkeyResponse Service::handlePubkey(const rpc::PubkeyRequest& req) {
-    rpc::PubkeyResponse resp{};
+std::vector<uint8_t> Service::getSigningPubkey() const {
+    return m_signing_pubkey;
+}
 
-    auto user = m_store.getUser(req.user_id);
+// Helper: verify JWT and check for PQTR role
+static bool verifyAdminJwt(const std::string& token, const std::vector<uint8_t>& pubkey) {
+    auto claims = jwt::decode(token, pubkey);
+    if (!claims) return false;
+    return claims->role == "PQTR";
+}
+
+rpc::FindResponse Service::handleFind(const rpc::FindRequest& req) {
+    rpc::FindResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;  // Unauthorized
+    }
+
+    auto user = m_store.getUserByEmail(req.email);
     if (!user) {
         return resp;
     }
 
-    resp.pubkey_hex = toHex(user->pubkey);
+    resp.user_id = user->id;
+    resp.email = user->email;
+    resp.tier = user->tier;
+    resp.role = user->role;
+    resp.locked = user->locked;
+    resp.created_at = user->created_at;
+
     return resp;
 }
 
-std::vector<uint8_t> Service::getSigningPubkey() const {
-    return m_signing_pubkey;
+rpc::GiveResponse Service::handleGive(const rpc::GiveRequest& req) {
+    rpc::GiveResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    // Validate role
+    if (req.role != "NONE" && req.role != "PLAY" && req.role != "HERO" && req.role != "PQTR") {
+        return resp;
+    }
+
+    resp.ok = m_store.updateUserRole(req.user_id, req.role);
+    return resp;
+}
+
+rpc::TakeResponse Service::handleTake(const rpc::TakeRequest& req) {
+    rpc::TakeResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    resp.ok = m_store.updateUserRole(req.user_id, "NONE");
+    return resp;
+}
+
+rpc::LockResponse Service::handleLock(const rpc::LockRequest& req) {
+    rpc::LockResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    resp.ok = m_store.updateUserLocked(req.user_id, true);
+    return resp;
+}
+
+rpc::FreeResponse Service::handleFree(const rpc::FreeRequest& req) {
+    rpc::FreeResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    resp.ok = m_store.updateUserLocked(req.user_id, false);
+    return resp;
+}
+
+rpc::DropResponse Service::handleDrop(const rpc::DropRequest& req) {
+    rpc::DropResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    // Also revoke refresh tokens
+    m_store.revokeRefreshToken(req.user_id);
+    resp.ok = m_store.deleteUser(req.user_id);
+    return resp;
+}
+
+rpc::InfoResponse Service::handleInfo(const rpc::InfoRequest& req) {
+    rpc::InfoResponse resp{};
+
+    if (!verifyAdminJwt(req.jwt, m_signing_pubkey)) {
+        return resp;
+    }
+
+    resp.total_users = m_store.countUsers();
+    resp.users_none = m_store.countUsersByRole("NONE");
+    resp.users_play = m_store.countUsersByRole("PLAY");
+    resp.users_hero = m_store.countUsersByRole("HERO");
+    resp.users_pqtr = m_store.countUsersByRole("PQTR");
+
+    return resp;
+}
+
+bool Service::sendBootstrapEmail(const std::string& boot_email) {
+    // Generate one-time bootstrap token
+    m_bootstrap_token = crypto::generateBootstrapToken();
+
+    // Send email with bootstrap link
+    // The email contains a link that forwards to /boot endpoint via Mailgun Routes
+    std::string message = "JWTA Bootstrap Token: " + m_bootstrap_token +
+                          "\n\nReply to this email to activate admin account.";
+
+    return m_mailer.sendOtp(boot_email, m_bootstrap_token);
+}
+
+bool Service::verifyBootstrapToken(const std::string& token) {
+    if (m_bootstrap_token.empty()) {
+        return false;  // No bootstrap pending
+    }
+
+    // Constant-time comparison
+    if (token.length() != m_bootstrap_token.length()) {
+        return false;
+    }
+
+    bool match = sodium_memcmp(token.c_str(), m_bootstrap_token.c_str(), token.length()) == 0;
+
+    if (match) {
+        // Clear token after successful verification (one-time use)
+        m_bootstrap_token.clear();
+    }
+
+    return match;
 }
 
 } // namespace jwta

@@ -19,12 +19,9 @@ struct User {
     std::string id;           // UUID
     std::string email;
     std::string tier;         // "anonymous", "registered", "pro"
+    std::string role;         // "NONE" (default), "PLAY", "HERO", "PQTR" (admin)
+    bool locked = false;      // Account locked (cannot login)
     int64_t created_at;       // Unix timestamp
-
-    // ed25519 keypair
-    std::vector<uint8_t> pubkey;              // 32 bytes, plaintext
-    std::vector<uint8_t> privkey_encrypted;   // 64 + 24 + 16 bytes (ciphertext + nonce + tag)
-    std::vector<uint8_t> privkey_salt;        // 16 bytes, random per user
 };
 
 // ============================================================
@@ -47,6 +44,7 @@ struct Claims {
     std::string sub;          // user_id
     std::string email;
     std::string tier;
+    std::string role;         // "NONE", "PLAY", "HERO", "PQTR"
     int64_t iat;              // Issued at
     int64_t exp;              // Expires at
 };
@@ -63,6 +61,13 @@ public:
     virtual bool createUser(const User& user) = 0;
     virtual std::optional<User> getUser(const std::string& id) = 0;
     virtual std::optional<User> getUserByEmail(const std::string& email) = 0;
+
+    // Admin: user management
+    virtual bool updateUserRole(const std::string& id, const std::string& role) = 0;
+    virtual bool updateUserLocked(const std::string& id, bool locked) = 0;
+    virtual bool deleteUser(const std::string& id) = 0;
+    virtual int countUsers() = 0;
+    virtual int countUsersByRole(const std::string& role) = 0;
 
     // OTPs
     virtual bool createOtp(const Otp& otp) = 0;
@@ -93,36 +98,8 @@ namespace crypto {
     // Initialize libsodium (call once at startup)
     bool init();
 
-    // Load master key - tries in order:
-    // 1. Linux kernel keyring (key name: "jwta_master")
-    // 2. JWTA_MASTER_KEY env var (64 hex chars = 32 bytes)
-    // Returns false if neither available
-    bool loadMasterKey(std::vector<uint8_t>& master_key);
-
-    // Load secret from kernel keyring by name
-    // Returns empty string if not found
-    std::string loadFromKeyring(const std::string& key_name);
-
-    // Generate ed25519 keypair
-    // pubkey: 32 bytes, privkey: 64 bytes
+    // Generate ed25519 keypair (for JWT signing)
     bool generateKeypair(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey);
-
-    // Encrypt private key with master key + per-user salt
-    // Returns ciphertext (privkey + nonce + auth tag)
-    std::vector<uint8_t> encryptPrivkey(
-        const std::vector<uint8_t>& privkey,
-        const std::vector<uint8_t>& master_key,
-        const std::vector<uint8_t>& salt);
-
-    // Decrypt private key
-    // Returns empty vector on failure (wrong key or tampered)
-    std::vector<uint8_t> decryptPrivkey(
-        const std::vector<uint8_t>& encrypted,
-        const std::vector<uint8_t>& master_key,
-        const std::vector<uint8_t>& salt);
-
-    // Generate random salt (16 bytes)
-    std::vector<uint8_t> generateSalt();
 
     // Sign message with private key
     std::vector<uint8_t> sign(const std::vector<uint8_t>& message, const std::vector<uint8_t>& privkey);
@@ -141,6 +118,9 @@ namespace crypto {
 
     // Generate random refresh token
     std::string generateRefreshToken();
+
+    // Generate random bootstrap token (32 bytes hex)
+    std::string generateBootstrapToken();
 }
 
 // ============================================================
@@ -181,7 +161,7 @@ namespace rpc {
         std::string jwt;
         std::string refresh_token;
         std::string user_id;
-        std::string pubkey_hex;
+        std::string role;
     };
 
     // Login: request OTP for existing user
@@ -201,12 +181,76 @@ namespace rpc {
         std::string jwt;
     };
 
-    // Pubkey: get user's public key
-    struct PubkeyRequest {
+    // Admin: find user by email
+    struct FindRequest {
+        std::string jwt;       // Must be PQTR role
+        std::string email;
+    };
+    struct FindResponse {
+        std::string user_id;
+        std::string email;
+        std::string tier;
+        std::string role;
+        bool locked;
+        int64_t created_at;
+    };
+
+    // Admin: set user role
+    struct GiveRequest {
+        std::string jwt;       // Must be PQTR role
+        std::string user_id;
+        std::string role;      // NONE, PLAY, HERO, PQTR
+    };
+    struct GiveResponse {
+        bool ok;
+    };
+
+    // Admin: reset user role to NONE
+    struct TakeRequest {
+        std::string jwt;       // Must be PQTR role
         std::string user_id;
     };
-    struct PubkeyResponse {
-        std::string pubkey_hex;
+    struct TakeResponse {
+        bool ok;
+    };
+
+    // Admin: lock user account
+    struct LockRequest {
+        std::string jwt;       // Must be PQTR role
+        std::string user_id;
+    };
+    struct LockResponse {
+        bool ok;
+    };
+
+    // Admin: unlock user account
+    struct FreeRequest {
+        std::string jwt;       // Must be PQTR role
+        std::string user_id;
+    };
+    struct FreeResponse {
+        bool ok;
+    };
+
+    // Admin: delete user
+    struct DropRequest {
+        std::string jwt;       // Must be PQTR role
+        std::string user_id;
+    };
+    struct DropResponse {
+        bool ok;
+    };
+
+    // Admin: system info
+    struct InfoRequest {
+        std::string jwt;       // Must be PQTR role
+    };
+    struct InfoResponse {
+        int total_users;
+        int users_none;
+        int users_play;
+        int users_hero;
+        int users_pqtr;
     };
 }
 
@@ -220,8 +264,7 @@ public:
     ~Service();
 
     // Initialize service
-    // Loads master key from JWTA_MASTER_KEY env var
-    // Generates JWTA signing keypair if needed
+    // Generates JWTA signing keypair for JWT signing
     bool init();
 
     // JRPC handlers
@@ -229,24 +272,40 @@ public:
     rpc::VerifyResponse handleVerify(const rpc::VerifyRequest& req);
     rpc::LoginResponse handleLogin(const rpc::LoginRequest& req);
     rpc::RefreshResponse handleRefresh(const rpc::RefreshRequest& req);
-    rpc::PubkeyResponse handlePubkey(const rpc::PubkeyRequest& req);
+
+    // Admin handlers (require PQTR role)
+    rpc::FindResponse handleFind(const rpc::FindRequest& req);
+    rpc::GiveResponse handleGive(const rpc::GiveRequest& req);
+    rpc::TakeResponse handleTake(const rpc::TakeRequest& req);
+    rpc::LockResponse handleLock(const rpc::LockRequest& req);
+    rpc::FreeResponse handleFree(const rpc::FreeRequest& req);
+    rpc::DropResponse handleDrop(const rpc::DropRequest& req);
+    rpc::InfoResponse handleInfo(const rpc::InfoRequest& req);
 
     // Get JWTA's public key (for JWT verification)
     std::vector<uint8_t> getSigningPubkey() const;
 
-    // Check if master key is loaded (for testing without encryption)
-    bool hasMasterKey() const { return !m_master_key.empty(); }
+    // Set bootstrap admin email (gets PQTR role on first register)
+    void setAdminEmail(const std::string& email) { m_admin_email = email; }
+
+    // Bootstrap: send token to boot email, verify via /boot webhook
+    bool sendBootstrapEmail(const std::string& boot_email);
+    bool verifyBootstrapToken(const std::string& token);
+    std::string getBootstrapToken() const { return m_bootstrap_token; }
 
 private:
     Store& m_store;
     Mailer& m_mailer;
 
-    // Master key for encrypting user private keys (from env var)
-    std::vector<uint8_t> m_master_key;
-
     // JWTA's own signing keypair
     std::vector<uint8_t> m_signing_pubkey;
     std::vector<uint8_t> m_signing_privkey;
+
+    // Bootstrap admin email (gets PQTR role on first register)
+    std::string m_admin_email;
+
+    // Bootstrap token (one-time, cleared after use)
+    std::string m_bootstrap_token;
 };
 
 } // namespace jwta
