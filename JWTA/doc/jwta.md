@@ -1,61 +1,56 @@
-# JWTA Protocol
+# JWTA - JWT Web Auth
 
-## Rule
-
-**JWTA = JWT Web Auth**
-
-Dedicated authentication service with custodial ed25519 keys.
-
-## Features
-
-- Email OTP registration/login (no passwords)
-- Custodial ed25519 keypair per user
-- JWT with EdDSA signatures
-- Secrets via Linux kernel keyring
+Email OTP authentication with role-based access control.
 
 ## Architecture
 
 ```
-┌─────────┐     ┌─────────┐     ┌─────────┐
-│ Browser │     │  JWTA   │     │  SAAS   │
-└────┬────┘     └────┬────┘     └────┬────┘
-     │               │               │
-     │── register ──>│               │
-     │<── OTP email ─│               │
-     │── verify ────>│               │
-     │<── JWT ───────│               │
-     │               │               │
-     │──── JWT ──────────────────────>│
-     │<──── JRPC ────────────────────│
+inc/
+  jwta.hpp    # Claims, crypto, jwt, rpc, Service
+  data.hpp    # Store interface (User, Otp)
+  mail.hpp    # Mailer interface
+
+src/main/
+  jwta.cpp    # crypto, jwt, Service implementation
+  host.cpp    # HTTP server (main)
+  plug/
+    sqlite.cpp   # Store implementation
+    mailgun.cpp  # Mailer implementation
 ```
 
 ## JRPC Endpoints
 
-Single endpoint: `POST /rpc` (JSON-RPC 2.0)
-
-### Methods
+`POST /rpc` (JSON-RPC 2.0)
 
 | Method | Params | Returns |
 |--------|--------|---------|
 | `register` | `email` | `{ok, expires}` |
-| `verify` | `email, otp` | `{jwt, refresh_token, user_id, pubkey_hex}` |
+| `verify` | `email, otp` | `{jwt, refresh_token, user_id, role}` |
 | `login` | `email` | `{ok, expires}` |
 | `refresh` | `refresh_token` | `{jwt}` |
-| `pubkey` | `user_id` | `{pubkey_hex}` |
 
-### Example
+### Admin Methods (PQTR role)
 
-```json
-{"jsonrpc":"2.0","method":"register","params":{"email":"user@example.com"},"id":1}
-```
+| Method | Params | Returns |
+|--------|--------|---------|
+| `find` | `jwt, email` | `{user_id, email, tier, role, locked, created_at}` |
+| `give` | `jwt, user_id, role` | `{ok}` |
+| `take` | `jwt, user_id` | `{ok}` |
+| `lock` | `jwt, user_id` | `{ok}` |
+| `free` | `jwt, user_id` | `{ok}` |
+| `drop` | `jwt, user_id` | `{ok}` |
+| `info` | `jwt` | `{total_users, users_none, users_play, users_hero, users_pqtr}` |
 
-```json
-{"jsonrpc":"2.0","result":{"ok":true,"expires":600},"id":1}
-```
+## Roles
+
+| Role | Description |
+|------|-------------|
+| `NONE` | Default, no special access |
+| `PLAY` | Player access |
+| `HERO` | Enhanced access |
+| `PQTR` | Admin, can manage users |
 
 ## JWT Format
-
-### Header
 
 ```json
 {
@@ -64,47 +59,16 @@ Single endpoint: `POST /rpc` (JSON-RPC 2.0)
 }
 ```
 
-### Payload
-
 ```json
 {
   "iss": "jwta.pqtr.io",
-  "sub": "user_123",
+  "sub": "user-uuid",
   "email": "user@example.com",
   "tier": "registered",
+  "role": "NONE",
   "iat": 1702000000,
-  "exp": 1702086400
+  "exp": 1702003600
 }
-```
-
-### Tiers
-
-| Tier | Description |
-|------|-------------|
-| `anonymous` | No account, rate limited |
-| `registered` | Email verified, personal storage |
-| `pro` | Paid, higher limits |
-
-## Token Lifetimes
-
-| Token | Lifetime |
-|-------|----------|
-| Access JWT | 1 hour |
-| Refresh token | 30 days |
-| OTP | 10 minutes |
-
-## Secrets
-
-Secrets loaded from Linux kernel keyring (preferred) or environment:
-
-| Key Name | Env Fallback | Description |
-|----------|--------------|-------------|
-| `jwta_master` | `JWTA_MASTER_KEY` | 32-byte master key (64 hex chars) |
-| `jwta_smtp_pass` | `JWTA_SMTP_PASS` | SMTP password |
-
-```bash
-# Load at boot
-keyctl add user jwta_master "00010203...1e1f" @s
 ```
 
 ## Config
@@ -113,31 +77,45 @@ keyctl add user jwta_master "00010203...1e1f" @s
 
 ```json
 {
-    "host": "127.0.0.1",
-    "port": 8080,
-    "db_path": "var/jwta.db",
-    "smtp": {
-        "host": "smtp.mailgun.org",
-        "port": 587,
-        "user": "postmaster@example.com",
-        "from": "noreply@example.com"
-    }
+  "host": "127.0.0.1",
+  "port": 8080,
+  "db_path": "var/jwta.db",
+  "admin_email": "admin@example.com",
+  "boot_email": "boot@example.com",
+  "mailgun": {
+    "domain": "example.com",
+    "from": "noreply@example.com",
+    "region": "eu"
+  }
 }
 ```
 
-## Storage
+## Secrets
 
-SQLite database with tables:
+Linux kernel keyring (required):
 
-- `users` - id, email, tier, pubkey, privkey_encrypted, privkey_salt
-- `otps` - email, code, expires_at, purpose
-- `refresh_tokens` - user_id, token_hash
+```bash
+keyctl add user "jwta:mailgun_api_key" "YOUR_KEY" @u
+keyctl add user "jwta:mailgun_domain" "example.com" @u
+keyctl add user "jwta:mailgun_from" "noreply@example.com" @u
+keyctl add user "jwta:mailgun_region" "eu" @u
+```
 
-## Encryption
+## CLI
 
-User private keys encrypted at rest:
+```bash
+./tmp/make/jwta --info-file etc/jwta.json --data-area /path/to/data/
+```
 
-1. Per-user random salt (16 bytes)
-2. BLAKE2b key derivation (master + salt)
-3. XChaCha20-Poly1305 authenticated encryption
-4. Stored as 104 bytes (ciphertext + nonce + tag)
+## Bootstrap
+
+1. Configure `admin_email` and `boot_email` in config
+2. Start server - sends bootstrap token to `boot_email`
+3. Reply to email (Mailgun routes to `/boot` endpoint)
+4. `admin_email` gets PQTR role on next register/login
+
+## Endpoints
+
+- `GET /health` - Health check
+- `POST /rpc` - JSON-RPC 2.0
+- `POST /boot` - Bootstrap webhook (Mailgun)

@@ -1,5 +1,4 @@
 # JWTA - JWT Web Auth Service
-# Static library and server build
 
 CXX = g++
 CC = gcc
@@ -12,8 +11,7 @@ ARFLAGS = rcs
 SRC_DIR = src/main
 INC_DIR = inc
 LIB_DIR = lib
-BIN_DIR = bin
-TMP_DIR = tmp
+TMP_DIR = tmp/make
 
 # libsodium
 SODIUM_INC = $(LIB_DIR)/libsodium/src/libsodium/include
@@ -29,21 +27,16 @@ HTTPLIB_INC = $(LIB_DIR)/cpp-httplib
 # Includes
 INCLUDES = -I$(INC_DIR) -I$(SODIUM_INC) -I$(SQLITE_DIR) -I$(HTTPLIB_INC)
 
-# Library sources - objects go to tmp/
-LIB_SRCS = $(SRC_DIR)/jwta.cpp $(SRC_DIR)/sqlite_store.cpp
-LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite_store.o
+# Objects
+LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o
 
 # Output
 LIB_TARGET = $(TMP_DIR)/jwta.a
-SERVER_TARGET = $(BIN_DIR)/jwta
+HOST_TARGET = $(TMP_DIR)/jwta
 
-.PHONY: all clean server lib
+.PHONY: all clean
 
-all: lib server
-
-lib: $(LIB_TARGET)
-
-server: $(SERVER_TARGET)
+all: $(HOST_TARGET)
 
 $(TMP_DIR):
 	@mkdir -p $(TMP_DIR)
@@ -51,18 +44,20 @@ $(TMP_DIR):
 $(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(SERVER_TARGET): $(SRC_DIR)/server.cpp $(LIB_TARGET) $(SODIUM_LIB)
-	@mkdir -p $(BIN_DIR)
+$(HOST_TARGET): $(SRC_DIR)/host.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lkeyutils -lssl -lcrypto -o $@
 
 $(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(TMP_DIR)/jwta.o: $(SRC_DIR)/jwta.cpp $(INC_DIR)/jwta.hpp | $(TMP_DIR)
+$(TMP_DIR)/jwta.o: $(SRC_DIR)/jwta.cpp $(INC_DIR)/jwta.hpp $(INC_DIR)/data.hpp $(INC_DIR)/mail.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-$(TMP_DIR)/sqlite_store.o: $(SRC_DIR)/sqlite_store.cpp $(INC_DIR)/sqlite_store.hpp $(INC_DIR)/jwta.hpp | $(TMP_DIR)
+$(TMP_DIR)/sqlite.o: $(SRC_DIR)/plug/sqlite.cpp $(INC_DIR)/data.hpp | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(TMP_DIR)/mailgun.o: $(SRC_DIR)/plug/mailgun.cpp $(INC_DIR)/mail.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -rf $(TMP_DIR) $(SERVER_TARGET)
+	rm -rf $(TMP_DIR)
