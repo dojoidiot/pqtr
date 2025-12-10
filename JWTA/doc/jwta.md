@@ -2,6 +2,8 @@
 
 Email OTP authentication with role-based access control.
 
+**NOTE: Secrets currently in secrets file waiting for safe**
+
 ## Architecture
 
 ```
@@ -42,7 +44,7 @@ src/main/
         "file": "jwta.db"
     },
     "mailgun": {
-        "api_key": "mailgun.api_key",
+        "otp_skey": "mailgun.secret",
         "domain": "example.com",
         "region": "eu"
     }
@@ -51,10 +53,12 @@ src/main/
 
 ## Secrets
 
-Linux kernel keyring (key name from `mailgun.api_key` in config):
+Secrets are loaded from files. `otp_skey` is a path (relative to `--data-area` or absolute):
 
 ```bash
-keyctl add user "mailgun.api_key" "YOUR_KEY" @u
+# Create secret file /home/svc/jwta/var/04af4ed8-fd207426 with the secret in it.
+chmod 600 /home/svc/jwta/var/04af4ed8-fd207426
+chown svc:svc /home/svc/jwta/var/04af4ed8-fd207426
 ```
 
 ## JRPC Endpoints

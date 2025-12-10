@@ -23,16 +23,16 @@ bool validEmail(const std::string& s) {
 }
 
 class MailgunMailer : public Mailer {
-    std::string m_api_key;
+    std::string m_secret;
     std::string m_domain;
     std::string m_from;
     std::string m_otp_text;
     std::string m_base_url;
 
 public:
-    MailgunMailer(const std::string& api_key, const std::string& domain,
+    MailgunMailer(const std::string& secret, const std::string& domain,
                   const std::string& from, const std::string& otp_text, const std::string& region)
-        : m_api_key(api_key), m_domain(domain), m_from(from), m_otp_text(otp_text) {
+        : m_secret(secret), m_domain(domain), m_from(from), m_otp_text(otp_text) {
         m_base_url = (region == "eu") ? "https://api.eu.mailgun.net" : "https://api.mailgun.net";
     }
 
@@ -43,7 +43,7 @@ public:
 
         std::ostringstream cmd;
         cmd << "curl -s --max-time 10 "
-            << "--user 'api:" << m_api_key << "' "
+            << "--user 'api:" << m_secret << "' "
             << m_base_url << "/v3/" << m_domain << "/messages "
             << "-F 'from=" << m_from << "' "
             << "-F 'to=" << email << "' "
@@ -73,10 +73,10 @@ public:
     }
 };
 
-std::unique_ptr<Mailer> createMailer(const std::string& api_key, const std::string& domain,
+std::unique_ptr<Mailer> createMailer(const std::string& secret, const std::string& domain,
                                       const std::string& from, const std::string& otp_text,
                                       const std::string& region) {
-    return std::make_unique<MailgunMailer>(api_key, domain, from, otp_text, region);
+    return std::make_unique<MailgunMailer>(secret, domain, from, otp_text, region);
 }
 
 } // namespace jwta

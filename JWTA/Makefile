@@ -45,7 +45,7 @@ $(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 	$(AR) $(ARFLAGS) $@ $^
 
 $(HOST_TARGET): $(SRC_DIR)/host.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR)
-	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lkeyutils -lssl -lcrypto -o $@
+	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lssl -lcrypto -o $@
 
 $(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@

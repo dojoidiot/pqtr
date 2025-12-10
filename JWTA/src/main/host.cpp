@@ -8,7 +8,6 @@
 #include <sstream>
 #include <cstdlib>
 #include <memory>
-#include <keyutils.h>
 
 namespace {
 
@@ -24,22 +23,21 @@ struct Config {
     // sqlite
     std::string sqlite_file;
     // mailgun
-    std::string mailgun_api_key_name;  // keyring key name from config
-    std::string mailgun_api_key;       // actual value from keyring
+    std::string mailgun_otp_skey;      // sending key from config (keyring lookup name)
+    std::string mailgun_secret;        // secret from keyring (looked up by otp_skey)
     std::string mailgun_domain;
     std::string mailgun_region;
 };
 
-std::string loadFromKeyring(const std::string& name) {
-    key_serial_t key = request_key("user", name.c_str(), nullptr, KEY_SPEC_USER_KEYRING);
-    if (key < 0) return "";
-
-    long size = keyctl_read(key, nullptr, 0);
-    if (size <= 0) return "";
-
-    std::string value(size, '\0');
-    if (keyctl_read(key, value.data(), size) != size) return "";
-    return value;
+std::string loadSecret(const std::string& path) {
+    std::ifstream f(path);
+    if (!f.is_open()) return "";
+    std::string secret;
+    std::getline(f, secret);
+    // Trim trailing whitespace/newline
+    while (!secret.empty() && (secret.back() == '\n' || secret.back() == '\r' || secret.back() == ' '))
+        secret.pop_back();
+    return secret;
 }
 
 bool loadConfig(const std::string& path, Config& cfg) {
@@ -61,7 +59,12 @@ bool loadConfig(const std::string& path, Config& cfg) {
         pos++;
         std::string result;
         while (pos < json.size() && json[pos] != '"') {
-            if (json[pos] == '\\' && pos + 1 < json.size()) pos++;
+            if (json[pos] == '\\' && pos + 1 < json.size()) {
+                pos++;
+                if (json[pos] == 'n') { result += '\n'; pos++; continue; }
+                if (json[pos] == 'r') { result += '\r'; pos++; continue; }
+                if (json[pos] == 't') { result += '\t'; pos++; continue; }
+            }
             result += json[pos++];
         }
         return result;
@@ -110,10 +113,10 @@ bool loadConfig(const std::string& path, Config& cfg) {
     // sqlite.file
     if (!(s = getNestedString("sqlite", "file")).empty()) cfg.sqlite_file = s;
 
-    // mailgun.domain, mailgun.region, mailgun.api_key (keyring key name)
+    // mailgun.domain, mailgun.region, mailgun.otp_skey (keyring lookup name)
     if (!(s = getNestedString("mailgun", "domain")).empty()) cfg.mailgun_domain = s;
     if (!(s = getNestedString("mailgun", "region")).empty()) cfg.mailgun_region = s;
-    if (!(s = getNestedString("mailgun", "api_key")).empty()) cfg.mailgun_api_key_name = s;
+    if (!(s = getNestedString("mailgun", "otp_skey")).empty()) cfg.mailgun_otp_skey = s;
 
     return true;
 }
@@ -187,22 +190,22 @@ int main(int argc, char* argv[]) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::cout << "JWTA Server - JWT Web Auth\n\n"
-                      << "Usage: jwta [options] <config.json>\n\n"
+                      << "Usage: jwta --info-file <config.json> --data-area <path>\n\n"
                       << "Options:\n"
+                      << "  --info-file <path>   Config file (required)\n"
                       << "  --data-area <path>   Data directory (required)\n"
                       << "  -h, --help           Show this help\n";
             return 0;
+        } else if (arg == "--info-file" && i + 1 < argc) {
+            config_path = argv[++i];
         } else if (arg == "--data-area" && i + 1 < argc) {
             data_area = argv[++i];
             if (!data_area.empty() && data_area.back() != '/') data_area += '/';
-        } else if (arg[0] != '-') {
-            config_path = arg;
         }
     }
 
     if (config_path.empty()) {
-        std::cerr << "[JWTA] Error: config file required\n";
-        std::cerr << "Usage: jwta [options] <config.json>\n";
+        std::cerr << "[JWTA] Error: --info-file required\n";
         return 1;
     }
     if (data_area.empty()) {
@@ -217,11 +220,16 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "[JWTA] Config: " << config_path << std::endl;
 
-    // Load mailgun api_key from keyring using name from config
+    // Load mailgun secret from file (otp_skey is the file path)
     std::string s;
-    if (!cfg.mailgun_api_key_name.empty()) {
-        if (!(s = loadFromKeyring(cfg.mailgun_api_key_name)).empty()) {
-            cfg.mailgun_api_key = s;
+    if (!cfg.mailgun_otp_skey.empty()) {
+        std::string secret_path = cfg.mailgun_otp_skey;
+        // If relative path, resolve relative to data_area
+        if (!secret_path.empty() && secret_path[0] != '/') {
+            secret_path = data_area + secret_path;
+        }
+        if (!(s = loadSecret(secret_path)).empty()) {
+            cfg.mailgun_secret = s;
         }
     }
 
@@ -242,13 +250,12 @@ int main(int argc, char* argv[]) {
         std::cerr << "[JWTA] Error: sqlite.file required in config" << std::endl;
         return 1;
     }
-    if (cfg.mailgun_api_key_name.empty()) {
-        std::cerr << "[JWTA] Error: mailgun.api_key required in config (keyring key name)" << std::endl;
+    if (cfg.mailgun_otp_skey.empty()) {
+        std::cerr << "[JWTA] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
         return 1;
     }
-    if (cfg.mailgun_api_key.empty()) {
-        std::cerr << "[JWTA] Error: " << cfg.mailgun_api_key_name << " not in keyring" << std::endl;
-        std::cerr << "[JWTA] Set via: keyctl add user \"" << cfg.mailgun_api_key_name << "\" \"KEY\" @u" << std::endl;
+    if (cfg.mailgun_secret.empty()) {
+        std::cerr << "[JWTA] Error: failed to load secret from: " << cfg.mailgun_otp_skey << std::endl;
         return 1;
     }
     if (cfg.mailgun_domain.empty()) {
@@ -276,7 +283,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "[JWTA] Database: " << db_path << std::endl;
 
-    auto mailer = jwta::createMailer(cfg.mailgun_api_key, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
+    auto mailer = jwta::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
     std::cout << "[JWTA] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
 
     jwta::Service service(*store, *mailer);

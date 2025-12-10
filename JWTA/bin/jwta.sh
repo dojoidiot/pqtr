@@ -16,10 +16,13 @@ DATA_AREA=$HERE/var
 PROC_AREA=$HERE/run
 PROC_FILE=$PROC_AREA/$NAME.pid
 LOGS_FILE=$PROC_AREA/$NAME.log
-mkdir -p $LOGS_PATH
 
 if [ ! -d $DATA_AREA ]; then
     mkdir -p $DATA_AREA
+fi
+
+if [ ! -d $PROC_AREA ]; then
+    mkdir -p $PROC_AREA
 fi
 
 if [ "$TASK" = "exec" ]; then
@@ -29,7 +32,7 @@ if [ "$TASK" = "exec" ]; then
         fi
         rm $PROC_FILE
     fi
-    nohup  $EXEC_FILE --info-file $INFO_FILE --data-area 1$DATA_AREA >$LOGS_FILE 2>&1 &
+    nohup $EXEC_FILE --info-file $INFO_FILE --data-area $DATA_AREA >$LOGS_FILE 2>&1 &
     echo $! >$PROC_FILE
     echo "[info] $TASK: started $NAME"
     exit 0
