@@ -90,6 +90,7 @@ We use a **PIMPL-style separation** at the project level:
 
 | Project | Description | Status |
 |---------|-------------|--------|
+| [**APEX**](./APEX/README.md) | Core infrastructure (Hold, Sink) | Active |
 | [**RAWS**](./RAWS/README.md) | Camera RAW decoder (Sony, Canon, Nikon) | Active |
 | [**LABS**](./LABS/README.md) | Core processing engine with 45 adjustment dials | Active |
 | [**DESK**](./DESK/README.md) | Create vibes | In Dev |

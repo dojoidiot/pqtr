@@ -2,120 +2,106 @@
 
 ## Current State (2025-12-10)
 
-### Incremental Camera Profiles - IMPLEMENTED
+### Modular Pipe Refactor - PHASE 0 COMPLETE
 
-Camera profiles now learn incrementally from each processed image:
+New Task-based pipe API added alongside legacy HEAD→BODY→TAIL.
+
+**Done:**
+- `pipe::Info` - Tree-structured metadata (nodes + leaves)
+- `pipe::Data` - Concrete `View` + `Info` bundle
+- `pipe::Task` - Universal interface with `view()` and `tune()`
+- `pipe::Pipe` - Chain runner with `add()`, `view()`, `tune()`
+- Legacy API preserved (`LegacyData`, `Head`, `Body`, `Tail`)
+
+**Next:** Extract LUTE module using new Task interface.
+
+## Architecture
+
+**LABS** = orchestrator with two pipe modes:
+- `view` - render image
+- `tune` - optimize + render + diff
+
+**Modules contribute to both pipes:**
+
+| Module | View | Tune | State |
+|--------|------|------|-------|
+| **RAWS** | decode flat | decode flat | - |
+| **LUTE** | apply profile LUT | accumulate profile LUT | `~/.pqtr/var/profiles/*.json` |
+| **DROP** | apply DRO curves | learn DRO curves | `~/.pqtr/var/dro/*.json` |
+| **VIBE** | apply 45 dials | optimize 45 dials | `.pipe.json` |
 
 ```
-~/.pqtr/var/profiles/Sony_ILCE-7M4_Standard.json
+LABS view: RAWS.view → LUTE.view → DROP.view → VIBE.view → PNG
+LABS tune: RAWS.tune → LUTE.tune → DROP.tune → VIBE.tune → PNG + DIFF + loss
 ```
 
-**Note:** DRO excluded from profile key - it's spatially-varying (per-pixel local tone mapping) and can't be captured in a global LUT. All DRO levels mix into one profile. Accept ~11% error floor for high-DR scenes.
+### Module Responsibilities
 
-**Lifecycle:**
-1. Cold start: identity LUT, full dial optimization
-2. Learning: each image accumulates into 17³ LUT grid
-3. Converged: profile frozen when delta < 0.1% and coverage > 70%
-4. Frozen: just apply LUT, skip optimization
+| Module | Purpose | Input | Output |
+|--------|---------|-------|--------|
+| **RAWS** | RAW decode | RAW file | flat scene-linear |
+| **LUTE** | Camera profile | flat + preview (same file) | profile LUT |
+| **DROP** | DRO correction | RAW pairs with varying DRO | DRO curves |
+| **VIBE** | Style matching | any two images | 45 dials |
 
-**Key files:**
-- `RAWS/inc/raws.hpp` - CameraLut struct with convergence tracking
-- `RAWS/src/main/raws.cpp` - tune(), save(), load(), snapshot(), computeDelta()
-- `LABS/src/main/tune.cpp` - Profile integration in PHASE 0
+### Key Principles
 
-### Research Validated ✓
-
-| Image | Scene | 3D LUT | Final | Notes |
-|-------|-------|--------|-------|-------|
-| DSC00202 | Urban | 5.2% | **3.6%** | Excellent |
-| DSC00012 | Indoor | ~7% | **5.2%** | Good |
-| DSC00144 | High-DR | 11.6% | **11.1%** | DRO floor |
-
-### Current Issues
-
-**HSV LUT disabled** - 73° hue shifts, needs debugging
-
-**ACEO bypassed** - Falls through to SPSA (test block unreachable)
-
-**Profile LUT application** - TODO: Wire CameraLut to Link's lut3d module (currently using legacy poly_coeffs fallback)
+1. **RAWS** extracts flat + embedded preview from same RAW file
+2. **LUTE** only learns from RAWS output (paired flat/preview)
+3. **VIBE** is camera-agnostic (any source/reference pair)
+4. **DROP** deferred (handles 11% DRO error floor)
+5. Modules are independent - LABS just runs the pipe
 
 ---
 
-## Implementation Priority
+## Implementation Plan
 
-### 1. Wire CameraLut to lut3d module
+### Phase 1: Extract LUTE module
+- [ ] Create `LUTE/` project structure
+- [ ] Move CameraLut from RAWS to LUTE
+- [ ] LUTE.view(): apply profile LUT
+- [ ] LUTE.tune(): accumulate profile LUT
+- [ ] Wire LUTE into LABS
 
-Currently profiles accumulate but aren't applied. Need to:
-1. Add `setLut()` method to Link's Lut3d module
-2. Call it in tune.cpp PHASE 0 when profile has coverage > 30%
-3. Test: run same image twice, second run should start with lower error
+### Phase 2: Extract VIBE module
+- [ ] Create `VIBE/` project structure
+- [ ] Move 45 dials + optimizer from LABS
+- [ ] VIBE.view(): apply dials
+- [ ] VIBE.tune(): optimize dials
+- [ ] Wire VIBE into LABS
 
-### 2. Test incremental learning
+### Phase 3: Clean up LABS
+- [ ] LABS becomes thin orchestrator
+- [ ] view mode: RAWS → LUTE → VIBE → PNG
+- [ ] tune mode: same + loss + diff output
 
-```bash
-cd LABS
-# Process first image
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune var/pics/DSC00144.ARW preview
-
-# Check profile created
-cat ~/.pqtr/var/profiles/*.json | head -20
-
-# Process second image (should accumulate)
-LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune var/pics/DSC00202.ARW preview
-
-# Check coverage increased
-cat ~/.pqtr/var/profiles/*.json | grep coverage
-```
-
-### 3. Debug HSV LUT (optional)
-
-The 73° hue shifts suggest estimation bug. Low priority - 3D LUT alone gets <5%.
-
-### 4. Implement axis contrast loss (deferred)
-
-For R-C axis collapse on DSC01531. Not blocking - profiles should help.
+### Phase 4: DROP (deferred)
+- [ ] DRO characterization research
+- [ ] DROP.tune(): learn DRO curves
+- [ ] DROP.view(): apply DRO correction
 
 ---
 
-## Architecture Summary
-
-```
-TUNE Flow:
-  1. Load profile (key: make_model_style_dro)
-  2. Apply accumulated LUT (if coverage > 30%)
-  3. Optimize dials (skip if frozen)
-  4. Accumulate into profile
-  5. Save profile (auto-freeze at convergence)
-
-Profile Convergence:
-  - Minimum 10 samples
-  - Delta < 0.1% (average cell change)
-  - Coverage > 70%
-  → frozen = true, skip future optimization
-```
-
----
-
-## What's Working
+## What's Working (from previous impl)
 
 - ✅ CameraLut accumulator with convergence tracking
 - ✅ Profile save/load to JSON
-- ✅ Key generation from EXIF (camera + style + DRO)
-- ✅ Integration in tune.cpp PHASE 0
-- ✅ Auto-freeze when converged
+- ✅ Key generation from EXIF (camera + style)
+- ✅ 45 style dials
+- ✅ GeoS optimizer
 
-## What's TODO
+## What's Blocked
 
-- ⏳ Apply profile LUT via Link's lut3d module
-- ⏳ Test end-to-end profile learning
-- ⏳ HSV LUT debugging (low priority)
+- ⏳ Profile LUT not wired to pipeline (will fix in LUTE module)
+- ⏳ HSV LUT disabled (73° hue shifts)
+- ⏳ DRO handling (deferred to DROP)
 
 ---
 
 ## Build & Test
 
 ```bash
-bash wire.sh && make labs
+./wire.sh && make
 
 cd LABS
 LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune var/pics/DSC00144.ARW preview

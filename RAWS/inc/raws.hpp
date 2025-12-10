@@ -107,11 +107,11 @@ namespace raws {
 
         // Scene-linear RGB data
         pipe::View data;          // CV_32FC3, scene-linear sRGB
-        pipe::Info dataInfo;      // Metadata (decoder, dimensions, camera, etc.)
+        pipe::InfoMap dataInfo;   // Metadata (decoder, dimensions, camera, etc.)
 
         // Embedded camera preview (target for tuning)
         pipe::View preview;       // CV_8UC3, display-referred sRGB
-        pipe::Info previewInfo;   // Preview metadata (creative style, etc.)
+        pipe::InfoMap previewInfo;   // Preview metadata (creative style, etc.)
     };
 
     // Load a RAW file

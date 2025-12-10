@@ -1,7 +1,17 @@
 // pipe.hpp
-// Public API for the three-stage pipe: HEAD (decode) → BODY (process) → TAIL (save)
+// Public API for the processing pipe
 //
-// User apps include only this header and link against labs.so.
+// Two modes:
+//   view - render image (apply transforms)
+//   tune - learn + render (optimize transforms)
+//
+// Modules contribute Tasks to the pipe:
+//   RAWS - decode RAW to flat
+//   LUTE - camera profile LUT
+//   DROP - DRO correction (deferred)
+//   VIBE - 45 style dials
+//
+// User apps include only this header and link against labs.a.
 // Implementation details are hidden (PIMPL pattern).
 
 #pragma once
@@ -10,6 +20,7 @@
 #include <sink.hpp>
 #include <string>
 #include <map>
+#include <vector>
 #include <memory>
 #include <opencv2/core.hpp>
 
@@ -19,28 +30,122 @@ namespace pipe
     // Type Aliases
     // ============================================================
 
-    using Info = std::map<std::string, std::string>;  // Metadata (EXIF, camera, etc.)
     using View = cv::UMat;                            // GPU-accelerated image matrix
-    using Name = std::string;                         // Link identifier
+    using Name = std::string;                         // Identifier
 
     // ============================================================
-    // Forward Declarations
+    // Info - Tree-structured metadata
+    // ============================================================
+    //
+    // Hierarchical key-value store for EXIF, camera settings, etc.
+    // Nodes contain children, leaves contain values.
+    //
+    // Example:
+    //   info.node("camera").set("make", "Sony");
+    //   info.node("camera").set("model", "ILCE-7M4");
+    //   info.node("style").set("creative", "Standard");
+    //
+    // Access:
+    //   info.node("camera").get("make")  // "Sony"
+    //   info.get("camera.make")          // "Sony" (dot notation)
+
+    class Info
+    {
+    public:
+        Info() = default;
+        ~Info() = default;
+
+        // Node access (creates if doesn't exist)
+        Info& node(const Name& name);
+        const Info* node(const Name& name) const;
+
+        // Leaf value access
+        void set(const Name& key, const std::string& value);
+        std::string get(const Name& key, const std::string& fallback = "") const;
+        bool has(const Name& key) const;
+
+        // Dot notation access (e.g., "camera.make")
+        std::string path(const std::string& dotpath, const std::string& fallback = "") const;
+
+        // Iteration
+        std::vector<Name> keys() const;      // Leaf keys
+        std::vector<Name> children() const;  // Child node names
+
+        // Bulk operations
+        void merge(const Info& other);       // Merge other into this
+        void clear();
+
+    private:
+        std::map<Name, std::string> _values;             // Leaf values
+        std::map<Name, std::shared_ptr<Info>> _nodes;    // Child nodes (shared for copyability)
+    };
+
+    // Legacy alias for compatibility
+    using InfoMap = std::map<std::string, std::string>;
+
+    // ============================================================
+    // Data - Image + Metadata bundle
+    // ============================================================
+    //
+    // Passed between Tasks in the pipe.
+    // Each Task receives Data, transforms it, returns Data.
+
+    class Data
+    {
+    public:
+        View view;  // Image pixels
+        Info info;  // Metadata tree
+
+        Data() = default;
+        Data(View v, Info i) : view(std::move(v)), info(std::move(i)) {}
+
+        bool empty() const { return view.empty(); }
+    };
+
+    // ============================================================
+    // Task - Universal processing interface
+    // ============================================================
+    //
+    // Every module contributes a Task to the pipe.
+    // Tasks implement both view() and tune() modes.
+    //
+    // view(): Apply learned/configured transform
+    // tune(): Learn from data, then apply
+
+    class Task
+    {
+    public:
+        virtual ~Task() = default;
+
+        // Apply transform (execution mode)
+        virtual Data view(Data in) = 0;
+
+        // Learn + apply (training mode)
+        // Default: just calls view() (no learning)
+        virtual Data tune(Data in) { return view(std::move(in)); }
+
+        // Task identity (for debugging/logging)
+        virtual Name name() const = 0;
+    };
+
+    // ============================================================
+    // Forward Declarations (Legacy API - to be refactored)
     // ============================================================
 
-    class Data;
     class Head;
     class Body;
     class Tail;
 
     // ============================================================
-    // Data - Combines image view with metadata
+    // LegacyData - Old virtual interface (for compatibility)
     // ============================================================
+    // TODO: Migrate users to concrete Data class above
 
-    class Data
+    class LegacyData
     {
     public:
-        virtual ~Data() = default;
-        virtual Info info() = 0;
+        virtual ~LegacyData() = default;
+        virtual InfoMap info() = 0;
         virtual View view() = 0;
     };
 
@@ -487,7 +592,7 @@ namespace pipe
         virtual Iterator& links() = 0;
 
         // Current state of image data and metadata (scene-linear RGB)
-        virtual Data& data() = 0;
+        virtual LegacyData& data() = 0;
 
         // Run pipeline and return display-ready image
         // Processes all links, applies gamma encoding
@@ -530,10 +635,10 @@ namespace pipe
         virtual ~Head() = default;
 
         // Access decoded image data and metadata for the pipeline.
-        virtual Data& data() = 0;
+        virtual LegacyData& data() = 0;
 
         // Access the embedded camera made view image.
-        virtual Data& view() = 0;
+        virtual LegacyData& view() = 0;
 
         // Base curve derived from RAW→preview comparison
         // Per-channel RGB: 768 floats [B0..B255, G0..G255, R0..R255]
@@ -553,15 +658,38 @@ namespace pipe
     };
 
     // ============================================================
-    // Pipe - Entry point for the processing system
+    // Pipe - Task chain and entry point
     // ============================================================
+    //
+    // Pipe is both the chain runner and the entry point.
+    // Add Tasks, then run view() or tune() to process Data.
+    //
+    // Example:
+    //   auto pipe = pipe::make();
+    //   pipe->add(raws::task());   // decode
+    //   pipe->add(lute::task());   // camera profile
+    //   pipe->add(vibe::task());   // 45 dials
+    //   Data out = pipe->view(in);
 
     class Pipe
     {
     public:
         virtual ~Pipe() = default;
 
-        // Open RAW data (decoder auto-detected from file signature)
+        // Add task to pipeline
+        virtual Pipe& add(pqtr::Hold<Task> task) = 0;
+
+        // Run all tasks in view mode
+        virtual Data view(Data in) = 0;
+
+        // Run all tasks in tune mode
+        virtual Data tune(Data in) = 0;
+
+        // Access tasks
+        virtual size_t size() const = 0;
+        virtual Task& at(size_t i) = 0;
+
+        // Legacy: Open RAW data (decoder auto-detected from file signature)
         // Returns Head for access to decoded data, then chain to Body, then Tail
         virtual pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) = 0;
     };
