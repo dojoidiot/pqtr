@@ -91,8 +91,11 @@ We use a **PIMPL-style separation** at the project level:
 | Project | Description | Status |
 |---------|-------------|--------|
 | [**APEX**](./APEX/README.md) | Core infrastructure (Hold, Sink) | Active |
+| [**DAWN**](./DAWN/README.md) | WebGPU via Google Dawn | Active |
 | [**RAWS**](./RAWS/README.md) | Camera RAW decoder (Sony, Canon, Nikon) | Active |
-| [**LABS**](./LABS/README.md) | Core processing engine with 45 adjustment dials | Active |
+| [**LUTE**](./LUTE/README.md) | Camera profile LUT module | Active |
+| [**VIBE**](./VIBE/README.md) | Style processing module (45 dials + LUTs) | Active |
+| [**LABS**](./LABS/README.md) | Core processing engine - orchestrates pipeline | Active |
 | [**DESK**](./DESK/README.md) | Create vibes | In Dev |
 | [**FAST**](./FAST/README.md) | Perfect social media delivery, now | Planned |
 | [**PLAY**](./PLAY/README.md) | Apply pro vibes | Planned |
@@ -104,10 +107,13 @@ We use a **PIMPL-style separation** at the project level:
 Camera RAW files
        │
        ▼
-    [RAWS] ─── decodes ───► Scene-linear RGB
+    [RAWS] ─── decode ───► Scene-linear RGB
        │
        ▼
-    [LABS] ─── TUNE ──► Vibe (style preset)
+    [LUTE] ─── profile ──► Camera-corrected RGB
+       │
+       ▼
+    [VIBE] ─── style ───► Display-ready RGB
        │
        ├──► DESK (create Vibes)
        ├──► FAST (apply Vibes in field)

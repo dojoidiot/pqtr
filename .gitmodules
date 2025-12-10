@@ -16,3 +16,6 @@
 [submodule "JWTA/lib/cpp-httplib"]
 	path = JWTA/lib/cpp-httplib
 	url = https://github.com/yhirose/cpp-httplib.git
+[submodule "DAWN/lib/dawn"]
+	path = DAWN/lib/dawn
+	url = https://dawn.googlesource.com/dawn

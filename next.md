@@ -2,38 +2,36 @@
 
 ## Current State (2025-12-10)
 
-### Modular Pipe Refactor - PHASE 0 COMPLETE
+### Modular Pipe Refactor - PHASE 1 COMPLETE
 
-New Task-based pipe API added alongside legacy HEAD→BODY→TAIL.
+Project structures created for modular pipeline:
 
 **Done:**
 - `pipe::Info` - Tree-structured metadata (nodes + leaves)
 - `pipe::Data` - Concrete `View` + `Info` bundle
 - `pipe::Task` - Universal interface with `view()` and `tune()`
 - `pipe::Pipe` - Chain runner with `add()`, `view()`, `tune()`
-- Legacy API preserved (`LegacyData`, `Head`, `Body`, `Tail`)
+- **DAWN** - WebGPU via Google Dawn (lib/dawn.a built)
+- **LUTE** - Camera profile LUT module (structure created)
+- **VIBE** - Style processing module (45 dials interface)
 
-**Next:** Extract LUTE module using new Task interface.
+**Next:** Implement LUTE and VIBE internals, wire into LABS.
 
 ## Architecture
 
-**LABS** = orchestrator with two pipe modes:
-- `view` - render image
-- `tune` - optimize + render + diff
+**LABS** = orchestrator with modular pipe:
 
-**Modules contribute to both pipes:**
+```
+RAWS.view → LUTE.view → VIBE.view → PNG
+```
+
+**Modules contribute Tasks to both pipes:**
 
 | Module | View | Tune | State |
 |--------|------|------|-------|
 | **RAWS** | decode flat | decode flat | - |
 | **LUTE** | apply profile LUT | accumulate profile LUT | `~/.pqtr/var/profiles/*.json` |
-| **DROP** | apply DRO curves | learn DRO curves | `~/.pqtr/var/dro/*.json` |
-| **VIBE** | apply 45 dials | optimize 45 dials | `.pipe.json` |
-
-```
-LABS view: RAWS.view → LUTE.view → DROP.view → VIBE.view → PNG
-LABS tune: RAWS.tune → LUTE.tune → DROP.tune → VIBE.tune → PNG + DIFF + loss
-```
+| **VIBE** | apply 45 dials | optimize 45 dials | `.vibe.json` |
 
 ### Module Responsibilities
 
@@ -41,7 +39,6 @@ LABS tune: RAWS.tune → LUTE.tune → DROP.tune → VIBE.tune → PNG + DIFF + 
 |--------|---------|-------|--------|
 | **RAWS** | RAW decode | RAW file | flat scene-linear |
 | **LUTE** | Camera profile | flat + preview (same file) | profile LUT |
-| **DROP** | DRO correction | RAW pairs with varying DRO | DRO curves |
 | **VIBE** | Style matching | any two images | 45 dials |
 
 ### Key Principles
@@ -49,36 +46,42 @@ LABS tune: RAWS.tune → LUTE.tune → DROP.tune → VIBE.tune → PNG + DIFF + 
 1. **RAWS** extracts flat + embedded preview from same RAW file
 2. **LUTE** only learns from RAWS output (paired flat/preview)
 3. **VIBE** is camera-agnostic (any source/reference pair)
-4. **DROP** deferred (handles 11% DRO error floor)
-5. Modules are independent - LABS just runs the pipe
+4. Modules are independent - LABS just runs the pipe
 
 ---
 
 ## Implementation Plan
 
-### Phase 1: Extract LUTE module
-- [ ] Create `LUTE/` project structure
+### Phase 1: Module Structures ✅
+- [x] Create `LUTE/` project structure
+- [x] Create `VIBE/` project structure
+- [x] Define `lute.hpp` API
+- [x] Define `vibe.hpp` API (45 dials)
+- [x] Build DAWN WebGPU library
+
+### Phase 2: LUTE Implementation
 - [ ] Move CameraLut from RAWS to LUTE
+- [ ] Implement Profile class (accumulator)
+- [ ] Implement Lute class (manager + Task)
 - [ ] LUTE.view(): apply profile LUT
 - [ ] LUTE.tune(): accumulate profile LUT
 - [ ] Wire LUTE into LABS
 
-### Phase 2: Extract VIBE module
-- [ ] Create `VIBE/` project structure
-- [ ] Move 45 dials + optimizer from LABS
+### Phase 3: VIBE Implementation
+- [ ] Move 45 dials + optimizer from LABS/Body
+- [ ] Implement Vibe class with all modules
 - [ ] VIBE.view(): apply dials
-- [ ] VIBE.tune(): optimize dials
+- [ ] VIBE.tune(): optimize dials (GeoS)
 - [ ] Wire VIBE into LABS
 
-### Phase 3: Clean up LABS
+### Phase 4: Clean up LABS
 - [ ] LABS becomes thin orchestrator
 - [ ] view mode: RAWS → LUTE → VIBE → PNG
 - [ ] tune mode: same + loss + diff output
 
-### Phase 4: DROP (deferred)
-- [ ] DRO characterization research
-- [ ] DROP.tune(): learn DRO curves
-- [ ] DROP.view(): apply DRO correction
+### Phase 5: GPU Acceleration (DAWN)
+- [ ] Move color transforms to WGSL shaders
+- [ ] Benchmark vs OpenCV UMat
 
 ---
 
@@ -94,7 +97,7 @@ LABS tune: RAWS.tune → LUTE.tune → DROP.tune → VIBE.tune → PNG + DIFF + 
 
 - ⏳ Profile LUT not wired to pipeline (will fix in LUTE module)
 - ⏳ HSV LUT disabled (73° hue shifts)
-- ⏳ DRO handling (deferred to DROP)
+- ⏳ DROP module deferred (DRO handling)
 
 ---
 
