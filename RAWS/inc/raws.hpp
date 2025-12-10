@@ -46,6 +46,11 @@ namespace raws {
         std::string dro;             // "Off", "Auto", "Lv1", etc.
         int sample_count = 0;        // Number of image pairs accumulated
 
+        // Convergence tracking
+        double prev_avg[TOTAL];      // Previous average RGB per cell (for delta calc)
+        float last_delta = 1.0f;     // Average cell change from last tune()
+        bool frozen = false;         // True when converged - skip further training
+
         // Initialize to zero accumulators
         void reset();
 
@@ -72,6 +77,23 @@ namespace raws {
         // Returns list of scene suggestions to fill gaps
         // e.g., "dark reds", "bright cyans", "saturated greens"
         std::vector<std::string> missing() const;
+
+        // Convergence: check if LUT is stable
+        // Call after tune() to see if more training is needed
+        // threshold: max average RGB delta (0.001 = 0.1% change)
+        bool converged(float threshold = 0.001f) const;
+
+        // Snapshot current state for delta tracking
+        // Called internally by tune() before accumulating
+        void snapshot();
+
+        // Compute delta from snapshot after tune()
+        // Returns average RGB change per cell
+        float computeDelta() const;
+
+        // Save/load profile to JSON
+        bool save(const std::string& path) const;
+        bool load(const std::string& path);
     };
 
     // Analyze which cells a flat/target pair would fill

@@ -9,8 +9,10 @@
 #include "raws.hpp"
 #include "sony.h"
 #include <sstream>
+#include <fstream>
 #include <iostream>
 #include <cmath>
+#include <cctype>
 #include <opencv2/imgproc.hpp>
 
 namespace raws {
@@ -22,13 +24,17 @@ namespace raws {
 void CameraLut::reset()
 {
     // Zero accumulators
-    for (int i = 0; i < TOTAL; i++)
+    for (int i = 0; i < TOTAL; i++) {
         sum[i] = 0.0;
+        prev_avg[i] = 0.0;
+    }
     for (int i = 0; i < CELLS; i++)
         count[i] = 0;
 
     estimated = false;
     sample_count = 0;
+    last_delta = 1.0f;
+    frozen = false;
     camera_make.clear();
     camera_model.clear();
     creative_style.clear();
@@ -205,6 +211,223 @@ std::vector<std::string> CameraLut::missing() const
         suggestions.push_back("good coverage - no major gaps");
 
     return suggestions;
+}
+
+bool CameraLut::converged(float threshold) const
+{
+    return frozen || (sample_count >= 5 && last_delta < threshold);
+}
+
+void CameraLut::snapshot()
+{
+    // Save current averages for delta comparison after tune()
+    for (int i = 0; i < CELLS; i++)
+    {
+        int base = i * 3;
+        if (count[i] > 0)
+        {
+            prev_avg[base + 0] = sum[base + 0] / count[i];
+            prev_avg[base + 1] = sum[base + 1] / count[i];
+            prev_avg[base + 2] = sum[base + 2] / count[i];
+        }
+        else
+        {
+            // Identity for empty cells
+            int ri = i / (GRID_SIZE * GRID_SIZE);
+            int gi = (i / GRID_SIZE) % GRID_SIZE;
+            int bi = i % GRID_SIZE;
+            prev_avg[base + 0] = static_cast<double>(ri) / (GRID_SIZE - 1);
+            prev_avg[base + 1] = static_cast<double>(gi) / (GRID_SIZE - 1);
+            prev_avg[base + 2] = static_cast<double>(bi) / (GRID_SIZE - 1);
+        }
+    }
+}
+
+float CameraLut::computeDelta() const
+{
+    // Average RGB change per cell since snapshot
+    double total_delta = 0.0;
+    int cells_with_data = 0;
+
+    for (int i = 0; i < CELLS; i++)
+    {
+        if (count[i] > 0)
+        {
+            int base = i * 3;
+            double curr_r = sum[base + 0] / count[i];
+            double curr_g = sum[base + 1] / count[i];
+            double curr_b = sum[base + 2] / count[i];
+
+            double dr = std::abs(curr_r - prev_avg[base + 0]);
+            double dg = std::abs(curr_g - prev_avg[base + 1]);
+            double db = std::abs(curr_b - prev_avg[base + 2]);
+
+            total_delta += (dr + dg + db) / 3.0;
+            cells_with_data++;
+        }
+    }
+
+    if (cells_with_data == 0)
+        return 1.0f;  // No data yet
+
+    return static_cast<float>(total_delta / cells_with_data);
+}
+
+bool CameraLut::save(const std::string& path) const
+{
+    std::ofstream file(path);
+    if (!file.is_open())
+    {
+        std::cerr << "[CameraLut] Failed to open for write: " << path << "\n";
+        return false;
+    }
+
+    file << "{\n";
+    file << "  \"version\": 1,\n";
+    file << "  \"camera_make\": \"" << camera_make << "\",\n";
+    file << "  \"camera_model\": \"" << camera_model << "\",\n";
+    file << "  \"creative_style\": \"" << creative_style << "\",\n";
+    file << "  \"dro\": \"" << dro << "\",\n";
+    file << "  \"sample_count\": " << sample_count << ",\n";
+    file << "  \"coverage\": " << coverage() << ",\n";
+    file << "  \"last_delta\": " << last_delta << ",\n";
+    file << "  \"frozen\": " << (frozen ? "true" : "false") << ",\n";
+    file << "  \"grid_size\": " << GRID_SIZE << ",\n";
+
+    // Save sum array
+    file << "  \"sum\": [";
+    for (int i = 0; i < TOTAL; i++)
+    {
+        if (i > 0) file << ",";
+        if (i % 12 == 0) file << "\n    ";
+        file << sum[i];
+    }
+    file << "\n  ],\n";
+
+    // Save count array
+    file << "  \"count\": [";
+    for (int i = 0; i < CELLS; i++)
+    {
+        if (i > 0) file << ",";
+        if (i % 20 == 0) file << "\n    ";
+        file << count[i];
+    }
+    file << "\n  ]\n";
+
+    file << "}\n";
+
+    std::cerr << "[CameraLut] Saved " << key() << " (" << sample_count << " samples, "
+              << (coverage() * 100.0f) << "% coverage) to: " << path << "\n";
+    return true;
+}
+
+bool CameraLut::load(const std::string& path)
+{
+    std::ifstream file(path);
+    if (!file.is_open())
+    {
+        // Not an error - cold start
+        return false;
+    }
+
+    std::string content((std::istreambuf_iterator<char>(file)),
+                        std::istreambuf_iterator<char>());
+
+    // Simple JSON parsing (no dependencies)
+    auto extractString = [&](const std::string& key) -> std::string {
+        std::string search = "\"" + key + "\": \"";
+        size_t pos = content.find(search);
+        if (pos == std::string::npos) return "";
+        pos += search.length();
+        size_t end = content.find("\"", pos);
+        if (end == std::string::npos) return "";
+        return content.substr(pos, end - pos);
+    };
+
+    auto extractInt = [&](const std::string& key) -> int {
+        std::string search = "\"" + key + "\": ";
+        size_t pos = content.find(search);
+        if (pos == std::string::npos) return 0;
+        pos += search.length();
+        return std::stoi(content.substr(pos));
+    };
+
+    auto extractFloat = [&](const std::string& key) -> float {
+        std::string search = "\"" + key + "\": ";
+        size_t pos = content.find(search);
+        if (pos == std::string::npos) return 0.0f;
+        pos += search.length();
+        return std::stof(content.substr(pos));
+    };
+
+    auto extractBool = [&](const std::string& key) -> bool {
+        std::string search = "\"" + key + "\": ";
+        size_t pos = content.find(search);
+        if (pos == std::string::npos) return false;
+        pos += search.length();
+        return content.substr(pos, 4) == "true";
+    };
+
+    // Parse metadata
+    camera_make = extractString("camera_make");
+    camera_model = extractString("camera_model");
+    creative_style = extractString("creative_style");
+    dro = extractString("dro");
+    sample_count = extractInt("sample_count");
+    last_delta = extractFloat("last_delta");
+    frozen = extractBool("frozen");
+
+    int loaded_grid = extractInt("grid_size");
+    if (loaded_grid != GRID_SIZE)
+    {
+        std::cerr << "[CameraLut] Grid size mismatch: " << loaded_grid << " vs " << GRID_SIZE << "\n";
+        return false;
+    }
+
+    // Parse sum array
+    size_t sum_pos = content.find("\"sum\": [");
+    if (sum_pos != std::string::npos)
+    {
+        sum_pos = content.find("[", sum_pos);
+        sum_pos++;
+        for (int i = 0; i < TOTAL; i++)
+        {
+            while (sum_pos < content.size() && (content[sum_pos] == ' ' || content[sum_pos] == '\n' || content[sum_pos] == ','))
+                sum_pos++;
+            size_t end = sum_pos;
+            while (end < content.size() && (std::isdigit(content[end]) || content[end] == '.' || content[end] == '-' || content[end] == 'e' || content[end] == 'E' || content[end] == '+'))
+                end++;
+            if (end > sum_pos)
+                sum[i] = std::stod(content.substr(sum_pos, end - sum_pos));
+            sum_pos = end;
+        }
+    }
+
+    // Parse count array
+    size_t count_pos = content.find("\"count\": [");
+    if (count_pos != std::string::npos)
+    {
+        count_pos = content.find("[", count_pos);
+        count_pos++;
+        for (int i = 0; i < CELLS; i++)
+        {
+            while (count_pos < content.size() && (content[count_pos] == ' ' || content[count_pos] == '\n' || content[count_pos] == ','))
+                count_pos++;
+            size_t end = count_pos;
+            while (end < content.size() && std::isdigit(content[end]))
+                end++;
+            if (end > count_pos)
+                count[i] = std::stoi(content.substr(count_pos, end - count_pos));
+            count_pos = end;
+        }
+    }
+
+    estimated = sample_count > 0;
+
+    std::cerr << "[CameraLut] Loaded " << key() << " (" << sample_count << " samples, "
+              << (coverage() * 100.0f) << "% coverage"
+              << (frozen ? ", FROZEN" : "") << ")\n";
+    return true;
 }
 
 // ============================================================
@@ -407,6 +630,16 @@ bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut)
         return false;
     }
 
+    // Skip if already converged
+    if (lut.frozen)
+    {
+        std::cerr << "[raws::tune] Profile frozen, skipping training\n";
+        return true;
+    }
+
+    // Snapshot current state for delta tracking
+    lut.snapshot();
+
     constexpr int GRID = CameraLut::GRID_SIZE;
 
     try
@@ -496,9 +729,23 @@ bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut)
         lut.estimated = true;
         lut.sample_count++;
 
+        // Compute convergence delta
+        lut.last_delta = lut.computeDelta();
+
+        // Check for convergence (auto-freeze)
+        bool just_converged = false;
+        if (lut.sample_count >= 10 && lut.last_delta < 0.001f && lut.coverage() > 0.7f)
+        {
+            lut.frozen = true;
+            just_converged = true;
+        }
+
         std::cerr << "[raws::tune] Accumulated " << (pixels_added/1000) << "k pixels"
                   << ", coverage " << (lut.coverage() * 100.0f) << "%"
-                  << ", sample #" << lut.sample_count << "\n";
+                  << ", delta " << (lut.last_delta * 100.0f) << "%"
+                  << ", sample #" << lut.sample_count
+                  << (just_converged ? " -> CONVERGED (frozen)" : "")
+                  << "\n";
 
         return true;
     }

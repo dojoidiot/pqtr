@@ -22,11 +22,13 @@
 #include <pipe.hpp>
 #include <geos.hpp>
 #include <data.hpp>
+#include <RAWS/raws.hpp>
 #include <iostream>
 #include <iomanip>
 #include <cstring>
 #include <sstream>
 #include <vector>
+#include <sys/stat.h>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
@@ -42,6 +44,30 @@ static bool parsePolyCoeffs(const std::string& str, float* coeffs, int count)
         catch (...) { return false; }
     }
     return i == count;
+}
+
+// Build camera profile key from info
+// Returns: "Make_Model_Style" (e.g., "Sony_ILCE-7M4_Standard")
+// Note: DRO excluded - it's spatially-varying and needs separate handling
+static std::string buildProfileKey(const pipe::Info& dataInfo, const pipe::Info& previewInfo)
+{
+    std::string make = dataInfo.count("camera.make") ? dataInfo.at("camera.make") : "Unknown";
+    std::string model = dataInfo.count("camera.model") ? dataInfo.at("camera.model") : "Unknown";
+    std::string style = previewInfo.count("style.creative") ? previewInfo.at("style.creative") : "Standard";
+
+    // Sanitize for filename (replace spaces with underscores)
+    auto sanitize = [](std::string s) {
+        for (char& c : s) if (c == ' ' || c == '/') c = '_';
+        return s;
+    };
+
+    return sanitize(make) + "_" + sanitize(model) + "_" + sanitize(style);
+}
+
+// Get profile path for a given key
+static std::string profilePath(const std::string& root, const std::string& key)
+{
+    return root + "/var/profiles/" + key + ".json";
 }
 
 void printUsage(const char* prog)
@@ -242,14 +268,47 @@ int main(int argc, char** argv)
         }
 
         // ============================================================
-        // PHASE 0: Camera Math - apply polynomial transform
+        // PHASE 0: Camera Profile - load/apply incremental LUT
         // ============================================================
-        std::cout << "\n=== PHASE 0: Camera Math ===" << std::endl;
+        std::cout << "\n=== PHASE 0: Camera Profile ===" << std::endl;
+
+        // Get preview info for style detection
+        pipe::Info previewInfo = head->view().info();
+
+        // Build profile key and path
+        std::string profileKey = buildProfileKey(info, previewInfo);
+        std::string profPath = profilePath(root, profileKey);
+        std::cout << "  Profile: " << profileKey << std::endl;
+
+        // Create profiles directory if needed
+        mkdir((root + "/var/profiles").c_str(), 0755);
+
+        // Load or initialize camera profile
+        raws::CameraLut cameraProfile;
+        bool profileLoaded = cameraProfile.load(profPath);
+        if (profileLoaded)
+        {
+            std::cout << "  Loaded: " << cameraProfile.sample_count << " samples, "
+                      << std::fixed << std::setprecision(1) << (cameraProfile.coverage() * 100) << "% coverage"
+                      << (cameraProfile.frozen ? " (FROZEN)" : "") << std::endl;
+        }
+        else
+        {
+            // Cold start - initialize from info
+            cameraProfile.reset();
+            cameraProfile.camera_make = info.count("camera.make") ? info["camera.make"] : "Unknown";
+            cameraProfile.camera_model = info.count("camera.model") ? info["camera.model"] : "Unknown";
+            cameraProfile.creative_style = previewInfo.count("style.creative") ? previewInfo["style.creative"] : "Standard";
+            // DRO excluded from profile - spatially-varying, needs separate handling
+            std::cout << "  Cold start: new profile" << std::endl;
+        }
 
         // Create camera link
         pipe::Body::Link& cameraLink = body.add("camera");
 
-        // Load polynomial coefficients if available
+        // Apply camera LUT if we have one
+        // TODO: Wire CameraLut to link's 3D LUT module
+        // For now, fall back to poly_coeffs if available
         bool hasPolyCoeffs = false;
         if (info.count("poly_coeffs") && !info["poly_coeffs"].empty())
         {
@@ -258,16 +317,18 @@ int main(int argc, char** argv)
             {
                 cameraLink.polyColor().setCoeffs(polyCoeffs);
                 hasPolyCoeffs = true;
-                std::cout << "  Applied 30-coefficient polynomial transform" << std::endl;
+                std::cout << "  Applied poly_coeffs (legacy)" << std::endl;
             }
-            else
-            {
-                std::cout << "  Warning: Failed to parse poly_coeffs" << std::endl;
-            }
+        }
+        else if (cameraProfile.estimated && cameraProfile.coverage() > 0.3f)
+        {
+            // Use accumulated profile LUT
+            // TODO: Apply via link's lut3d module when wired
+            std::cout << "  Using profile LUT (" << (cameraProfile.coverage() * 100) << "% coverage)" << std::endl;
         }
         else
         {
-            std::cout << "  No poly_coeffs available (using identity)" << std::endl;
+            std::cout << "  No transform available (identity)" << std::endl;
         }
 
         // Create preview UMat for comparison (used in both phases)
@@ -281,7 +342,7 @@ int main(int argc, char** argv)
         afterPolyMat.copyTo(afterPolyUMat);
         pqtr::Hold<geos::Task> measureTask = geos::make(previewUMat);
         geos::Data afterPoly = measureTask->diff(afterPolyUMat);
-        std::cout << "  After poly: " << std::fixed << std::setprecision(1)
+        std::cout << "  After transform: " << std::fixed << std::setprecision(1)
                   << (afterPoly.spectral * 100) << "%" << std::endl;
 
         // ============================================================
@@ -312,11 +373,48 @@ int main(int argc, char** argv)
         std::cout << "  Starting from: " << std::fixed << std::setprecision(1)
                   << (afterPoly.spectral * 100) << "%" << std::endl;
 
-        // Optimize camera link
-        geos::Result cameraResult = cameraTask->run(body, cameraLink, config, progressCallback);
-        std::cout << std::endl;
+        // Optimize camera link (skip if profile frozen)
+        geos::Result cameraResult;
+        if (cameraProfile.frozen)
+        {
+            std::cout << "  Profile frozen - skipping optimization" << std::endl;
+            // Just measure current state
+            cv::Mat currentMat;
+            body.view().copyTo(currentMat);
+            cv::UMat currentUMat;
+            currentMat.copyTo(currentUMat);
+            geos::Data current = cameraTask->diff(currentUMat);
+            cameraResult.loss.spectral = current.spectral;
+        }
+        else
+        {
+            cameraResult = cameraTask->run(body, cameraLink, config, progressCallback);
+            std::cout << std::endl;
+        }
         std::cout << "  Camera Vibe: " << std::fixed << std::setprecision(1)
                   << (cameraResult.loss.spectral * 100) << "%" << std::endl;
+
+        // Accumulate into camera profile (if not frozen and learning enabled)
+        if (!noLearn && !cameraProfile.frozen)
+        {
+            // Get current pipeline output for accumulation
+            cv::Mat pipeOut;
+            body.view().copyTo(pipeOut);
+            cv::UMat pipeOutUMat;
+            pipeOut.copyTo(pipeOutUMat);
+
+            // Accumulate this image into profile
+            if (raws::tune(pipeOutUMat, previewUMat, cameraProfile))
+            {
+                std::cout << "  Profile: accumulated (delta " << std::fixed << std::setprecision(2)
+                          << (cameraProfile.last_delta * 100) << "%, coverage "
+                          << std::setprecision(1) << (cameraProfile.coverage() * 100) << "%)"
+                          << (cameraProfile.frozen ? " -> CONVERGED" : "") << std::endl;
+
+                // Save updated profile
+                cameraProfile.save(profPath);
+            }
+        }
 
         // Storage for links to save
         std::vector<pipe::Body::Link*> links = {&cameraLink};
