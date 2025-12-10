@@ -1,5 +1,7 @@
 # LUTE
 
+The Lookup Table Estimator. 
+
 Camera profile LUT module for PQTR. Learns and applies camera-specific color transforms.
 
 ## What It Does

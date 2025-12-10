@@ -28,6 +28,8 @@ namespace vibe
 
     using View = cv::UMat;
     using Name = std::string;
+    using Dial = float;           // 0.0-1.0 normalized parameter
+    using Grid = const float*;    // LUT/matrix data pointer
 
     // ============================================================
     // ColourSpace - Processing domain for each module

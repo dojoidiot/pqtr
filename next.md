@@ -2,20 +2,21 @@
 
 ## Current State (2025-12-10)
 
-### Modular Pipe Refactor - PHASE 1 COMPLETE
-
-Project structures created for modular pipeline:
+### VIBE Module - PHASE 3 IN PROGRESS
 
 **Done:**
-- `pipe::Info` - Tree-structured metadata (nodes + leaves)
-- `pipe::Data` - Concrete `View` + `Info` bundle
-- `pipe::Task` - Universal interface with `view()` and `tune()`
-- `pipe::Pipe` - Chain runner with `add()`, `view()`, `tune()`
-- **DAWN** - WebGPU via Google Dawn (lib/dawn.a built)
-- **LUTE** - Camera profile LUT module (structure created)
-- **VIBE** - Style processing module (45 dials interface)
+- 17 image transform modules ported to VIBE with type aliases (`View`, `Dial`, `Grid`)
+- Theory-based test harness: `theory.h` (pure math) vs CV implementation
+- **15/17 gold tests pass** - theory matches CV where floating-point allows
+- **17/17 CV tests pass** - VIBE = LABS (IDENTICAL output)
+- Algorithm documentation in `VIBE/doc/hunt.md`
 
-**Next:** Implement LUTE and VIBE internals, wire into LABS.
+**2 Gold Failures (expected):**
+- `global_color` (14.7%) - CV uses 8-bit Lab conversion
+- `selective_color` (16.6%) - CV uses 8-bit HLS conversion
+- These are inherent CV quantization artifacts, not algorithm errors
+
+**Next:** Wire VIBE into LABS pipeline, implement Vibe orchestrator class.
 
 ## Architecture
 
@@ -31,22 +32,21 @@ RAWS.view → LUTE.view → VIBE.view → PNG
 |--------|------|------|-------|
 | **RAWS** | decode flat | decode flat | - |
 | **LUTE** | apply profile LUT | accumulate profile LUT | `~/.pqtr/var/profiles/*.json` |
-| **VIBE** | apply 45 dials | optimize 45 dials | `.vibe.json` |
+| **VIBE** | apply 17 mods | optimize dials | `.vibe.json` |
 
-### Module Responsibilities
+### VIBE Module Architecture
 
-| Module | Purpose | Input | Output |
-|--------|---------|-------|--------|
-| **RAWS** | RAW decode | RAW file | flat scene-linear |
-| **LUTE** | Camera profile | flat + preview (same file) | profile LUT |
-| **VIBE** | Style matching | any two images | 45 dials |
-
-### Key Principles
-
-1. **RAWS** extracts flat + embedded preview from same RAW file
-2. **LUTE** only learns from RAWS output (paired flat/preview)
-3. **VIBE** is camera-agnostic (any source/reference pair)
-4. Modules are independent - LABS just runs the pipe
+| Module | Dials | Purpose |
+|--------|-------|---------|
+| exposure | 1 | EV adjustment |
+| white_balance | 2 | Temperature + tint |
+| tone_map | 7 | Contrast, shadows, highlights |
+| global_color | 3 | Vibrance, saturation, density |
+| geometric | 6 | Crop, zoom, rotation |
+| selective_color | 24 | 8-band HSL |
+| split_tone | 4 | Shadow/highlight grading |
+| detail | 4 | Sharpen, denoise |
+| + 9 meta mods | - | LUTs, curves, matrices |
 
 ---
 
@@ -56,7 +56,7 @@ RAWS.view → LUTE.view → VIBE.view → PNG
 - [x] Create `LUTE/` project structure
 - [x] Create `VIBE/` project structure
 - [x] Define `lute.hpp` API
-- [x] Define `vibe.hpp` API (45 dials)
+- [x] Define `vibe.hpp` API
 - [x] Build DAWN WebGPU library
 
 ### Phase 2: LUTE Implementation
@@ -67,11 +67,14 @@ RAWS.view → LUTE.view → VIBE.view → PNG
 - [ ] LUTE.tune(): accumulate profile LUT
 - [ ] Wire LUTE into LABS
 
-### Phase 3: VIBE Implementation
-- [ ] Move 45 dials + optimizer from LABS/Body
-- [ ] Implement Vibe class with all modules
-- [ ] VIBE.view(): apply dials
-- [ ] VIBE.tune(): optimize dials (GeoS)
+### Phase 3: VIBE Implementation ⬅️ CURRENT
+- [x] Port 17 mods from LABS to VIBE
+- [x] Create theory-based test harness
+- [x] Validate 15/17 mods against theory gold
+- [x] Document algorithms in hunt.md
+- [ ] Implement Vibe orchestrator class
+- [ ] VIBE.view(): apply all mods in order
+- [ ] VIBE.tune(): optimize dials (GeoS from LABS)
 - [ ] Wire VIBE into LABS
 
 ### Phase 4: Clean up LABS
@@ -80,22 +83,24 @@ RAWS.view → LUTE.view → VIBE.view → PNG
 - [ ] tune mode: same + loss + diff output
 
 ### Phase 5: GPU Acceleration (DAWN)
-- [ ] Move color transforms to WGSL shaders
+- [ ] Port VIBE mods to WGSL shaders
+- [ ] PIMPL backend switching (CV vs DAWN)
 - [ ] Benchmark vs OpenCV UMat
 
 ---
 
-## What's Working (from previous impl)
+## What's Working
 
+- ✅ 17 VIBE modules (CV backend)
+- ✅ Theory-based gold testing (15/17 pass)
 - ✅ CameraLut accumulator with convergence tracking
 - ✅ Profile save/load to JSON
 - ✅ Key generation from EXIF (camera + style)
-- ✅ 45 style dials
-- ✅ GeoS optimizer
+- ✅ GeoS optimizer (in LABS)
 
 ## What's Blocked
 
-- ⏳ Profile LUT not wired to pipeline (will fix in LUTE module)
+- ⏳ VIBE not wired to LABS pipeline yet
 - ⏳ HSV LUT disabled (73° hue shifts)
 - ⏳ DROP module deferred (DRO handling)
 
@@ -106,6 +111,10 @@ RAWS.view → LUTE.view → VIBE.view → PNG
 ```bash
 ./wire.sh && make
 
+# Test VIBE
+cd VIBE && make test
+
+# Test LABS
 cd LABS
 LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune var/pics/DSC00144.ARW preview
 ```

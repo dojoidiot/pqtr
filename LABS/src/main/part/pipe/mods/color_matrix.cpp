@@ -32,12 +32,6 @@ namespace mods
 
         try
         {
-            // Debug: print the color matrix being applied
-            std::cout << "  Color matrix:\n";
-            std::cout << "    [" << matrix(0,0) << ", " << matrix(0,1) << ", " << matrix(0,2) << "]\n";
-            std::cout << "    [" << matrix(1,0) << ", " << matrix(1,1) << ", " << matrix(1,2) << "]\n";
-            std::cout << "    [" << matrix(2,0) << ", " << matrix(2,1) << ", " << matrix(2,2) << "]\n";
-
             // Convert matrix to Mat for transform
             cv::Mat matrixMat(matrix);
 
