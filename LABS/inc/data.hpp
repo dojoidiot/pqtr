@@ -82,10 +82,10 @@ namespace data
     namespace info
     {
         // Serialize info map to JSON string
-        std::string toJson(const pipe::Info& info);
+        std::string toJson(const pipe::InfoMap& info);
 
         // Save info to file
-        bool save(const pipe::Info& info, const std::string& path);
+        bool save(const pipe::InfoMap& info, const std::string& path);
 
     } // namespace info
 

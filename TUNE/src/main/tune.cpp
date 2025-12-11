@@ -49,7 +49,7 @@ static bool parsePolyCoeffs(const std::string& str, float* coeffs, int count)
 // Build camera profile key from info
 // Returns: "Make_Model_Style" (e.g., "Sony_ILCE-7M4_Standard")
 // Note: DRO excluded - it's spatially-varying and needs separate handling
-static std::string buildProfileKey(const pipe::Info& dataInfo, const pipe::Info& previewInfo)
+static std::string buildProfileKey(const pipe::InfoMap& dataInfo, const pipe::InfoMap& previewInfo)
 {
     std::string make = dataInfo.count("camera.make") ? dataInfo.at("camera.make") : "Unknown";
     std::string model = dataInfo.count("camera.model") ? dataInfo.at("camera.model") : "Unknown";
@@ -169,7 +169,7 @@ int main(int argc, char** argv)
             throw std::runtime_error("Failed to decode: " + sourcePath);
         }
 
-        pipe::Info info = head->data().info();
+        pipe::InfoMap info = head->data().info();
         std::cout << "  Size: " << info["width"] << "x" << info["height"] << std::endl;
         std::cout << "  Camera: " << info["camera_model"] << std::endl;
         std::cout << "  BaseCurve: " << (head->hasBaseCurve() ? "yes" : "no") << std::endl;
@@ -273,7 +273,7 @@ int main(int argc, char** argv)
         std::cout << "\n=== PHASE 0: Camera Profile ===" << std::endl;
 
         // Get preview info for style detection
-        pipe::Info previewInfo = head->view().info();
+        pipe::InfoMap previewInfo = head->view().info();
 
         // Build profile key and path
         std::string profileKey = buildProfileKey(info, previewInfo);
@@ -296,9 +296,9 @@ int main(int argc, char** argv)
         {
             // Cold start - initialize from info
             cameraProfile.reset();
-            cameraProfile.camera_make = info.count("camera.make") ? info["camera.make"] : "Unknown";
-            cameraProfile.camera_model = info.count("camera.model") ? info["camera.model"] : "Unknown";
-            cameraProfile.creative_style = previewInfo.count("style.creative") ? previewInfo["style.creative"] : "Standard";
+            cameraProfile.camera_make = info.count("camera.make") ? info.at("camera.make") : "Unknown";
+            cameraProfile.camera_model = info.count("camera.model") ? info.at("camera.model") : "Unknown";
+            cameraProfile.creative_style = previewInfo.count("style.creative") ? previewInfo.at("style.creative") : "Standard";
             // DRO excluded from profile - spatially-varying, needs separate handling
             std::cout << "  Cold start: new profile" << std::endl;
         }
@@ -310,10 +310,10 @@ int main(int argc, char** argv)
         // TODO: Wire CameraLut to link's 3D LUT module
         // For now, fall back to poly_coeffs if available
         bool hasPolyCoeffs = false;
-        if (info.count("poly_coeffs") && !info["poly_coeffs"].empty())
+        if (info.count("poly_coeffs") && !info.at("poly_coeffs").empty())
         {
             float polyCoeffs[30];
-            if (parsePolyCoeffs(info["poly_coeffs"], polyCoeffs, 30))
+            if (parsePolyCoeffs(info.at("poly_coeffs"), polyCoeffs, 30))
             {
                 cameraLink.polyColor().setCoeffs(polyCoeffs);
                 hasPolyCoeffs = true;

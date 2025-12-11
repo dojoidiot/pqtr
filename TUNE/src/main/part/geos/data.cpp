@@ -608,7 +608,7 @@ bool load(pipe::Body::Link& link, const std::string& path)
 namespace data::info
 {
 
-std::string toJson(const pipe::Info& info)
+std::string toJson(const pipe::InfoMap& info)
 {
     std::ostringstream ss;
     ss << "{\n";
@@ -635,7 +635,7 @@ std::string toJson(const pipe::Info& info)
     return ss.str();
 }
 
-bool save(const pipe::Info& info, const std::string& path)
+bool save(const pipe::InfoMap& info, const std::string& path)
 {
     std::ofstream file(path);
     if (!file.is_open())

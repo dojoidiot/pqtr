@@ -2,51 +2,43 @@
 #
 # Usage:
 #   make           # Build library (labs.a)
-#   make tune      # Build bin/tune + tests
-#   make test      # Run quick tests (mods + tune-fast)
-#   make test-all  # Run full test suite
+#   make test      # Run tests (mods)
+#   make test-dawn # Run DAWN GPU shader tests
 #   make all       # Build everything
 #   make clean     # Clean all build artifacts
 
-.PHONY: all lib tune test test-all clean help
+.PHONY: all lib test test-dawn clean help
 
 help:
 	@echo "LABS Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  lib       Build labs.a library"
-	@echo "  tune      Build bin/tune + tests (optimizer)"
-	@echo "  test      Run quick tests (mods + tune-fast)"
-	@echo "  test-all  Run full test suite (+ tune-full + tune-rnd)"
-	@echo "  all       Build everything"
-	@echo "  clean     Remove all build artifacts"
+	@echo "  lib        Build labs.a library"
+	@echo "  test       Run mods tests"
+	@echo "  test-dawn  Run DAWN GPU shader tests (in VIBE)"
+	@echo "  all        Build everything"
+	@echo "  clean      Remove all build artifacts"
+	@echo ""
+	@echo "Note: TUNE (style optimizer) is now a separate project"
 
 # Default: build library
 lib:
 	$(MAKE) -f Makefile.labs
 
-# Build bin/tune and tests
-tune: lib
-	$(MAKE) -f Makefile.tune
-
-# Quick tests
+# Tests
 test: lib
 	$(MAKE) -f Makefile.mods test
-	$(MAKE) -f Makefile.tune test-fast
 
-# Full test suite
-test-all: lib
-	$(MAKE) -f Makefile.mods test
-	$(MAKE) -f Makefile.tune test-full
+# DAWN tests (delegate to VIBE)
+test-dawn:
+	$(MAKE) -C ../VIBE test-dawn
 
 # All: library + test binaries
 all: lib
 	$(MAKE) -f Makefile.mods all
-	$(MAKE) -f Makefile.tune all
 
 # Clean everything
 clean:
 	$(MAKE) -f Makefile.labs clean
 	$(MAKE) -f Makefile.mods clean
-	$(MAKE) -f Makefile.tune clean
 	rm -rf tmp/var
