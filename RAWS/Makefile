@@ -7,17 +7,18 @@
 #   make all       # Build everything
 #   make clean     # Clean all build artifacts
 
-.PHONY: all lib test test-all clean help
+.PHONY: all lib test test-all test-dawn clean help
 
 help:
 	@echo "RAWS Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  lib       Build RAWS.a library"
-	@echo "  test      Run sony decoder test"
-	@echo "  test-all  Run full test suite (+ distortion)"
-	@echo "  all       Build everything"
-	@echo "  clean     Remove all build artifacts"
+	@echo "  lib        Build RAWS.a library"
+	@echo "  test       Run sony decoder test"
+	@echo "  test-all   Run full test suite (+ distortion)"
+	@echo "  test-dawn  Run DAWN GPU shader tests"
+	@echo "  all        Build everything"
+	@echo "  clean      Remove all build artifacts"
 
 # Default: build library
 lib:
@@ -36,8 +37,13 @@ test-all: lib
 all: lib
 	$(MAKE) -f Makefile.sony all
 
+# DAWN shader tests
+test-dawn:
+	$(MAKE) -f Makefile.dawn test
+
 # Clean everything
 clean:
 	$(MAKE) -f Makefile.raws clean
 	$(MAKE) -f Makefile.sony clean
+	$(MAKE) -f Makefile.dawn clean 2>/dev/null || true
 	rm -rf tmp/var
