@@ -1,4 +1,4 @@
-# JWTA - JWT Web Auth Service
+# BASE - Web server + JWT Auth Service
 
 CXX = g++
 CC = gcc
@@ -32,7 +32,7 @@ LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o
 
 # Output
 LIB_TARGET = $(TMP_DIR)/jwta.a
-HOST_TARGET = $(TMP_DIR)/jwta
+HOST_TARGET = bin/base
 
 .PHONY: all clean
 
@@ -41,10 +41,13 @@ all: $(HOST_TARGET)
 $(TMP_DIR):
 	@mkdir -p $(TMP_DIR)
 
+bin:
+	@mkdir -p bin
+
 $(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(HOST_TARGET): $(SRC_DIR)/host.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR)
+$(HOST_TARGET): $(SRC_DIR)/host.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR) bin
 	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lssl -lcrypto -o $@
 
 $(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
@@ -60,4 +63,4 @@ $(TMP_DIR)/mailgun.o: $(SRC_DIR)/plug/mailgun.cpp $(INC_DIR)/mail.hpp | $(TMP_DI
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -rf $(TMP_DIR)
+	rm -rf $(TMP_DIR) bin/base

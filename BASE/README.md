@@ -1,24 +1,25 @@
-# JWTA
+# BASE
 
-JWT Web Auth service.
+Base web operations - static site serving + JWT authentication.
 
 ## Structure
 
 ```
-JWTA/
+BASE/
 ├── bin/      # Built executables
 ├── doc/      # Documentation
 ├── inc/      # Headers
 ├── lib/      # Libraries
 ├── src/      # Source code
+├── www/      # Static site files
 └── tmp/      # Build artifacts (gitignored)
 ```
 
 ## Purpose
 
-Standalone authentication service for pqtr ecosystem.
+Unified web server for pqtr ecosystem:
 
+- Static file serving (www/)
+- JWT authentication service (JRPC endpoints)
 - OAuth 2.0 integration (Google, GitHub)
-- JWT issuance and refresh
-- User management
-- Stateless token validation (consumers verify signature only)
+- User management and roles

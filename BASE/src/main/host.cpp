@@ -1,5 +1,5 @@
 // host.cpp
-// JWTA HTTP server with JRPC endpoints
+// BASE HTTP server - static site + JRPC auth endpoints
 
 #include "jwta.hpp"
 #include "httplib.h"
@@ -14,6 +14,7 @@ namespace {
 struct Config {
     std::string host;
     int port = 0;
+    std::string www_path;              // static file root (optional)
     std::string jrpc_path;
     std::string boot_path;
     std::string admin_email;
@@ -103,6 +104,7 @@ bool loadConfig(const std::string& path, Config& cfg) {
 
     if (!(s = getString("host")).empty()) cfg.host = s;
     if ((i = getInt("port")) > 0) cfg.port = i;
+    if (!(s = getString("www_path")).empty()) cfg.www_path = s;
     if (!(s = getString("jrpc_path")).empty()) cfg.jrpc_path = s;
     if (!(s = getString("boot_path")).empty()) cfg.boot_path = s;
     if (!(s = getString("admin_email")).empty()) cfg.admin_email = s;
@@ -189,8 +191,8 @@ int main(int argc, char* argv[]) {
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
-            std::cout << "JWTA Server - JWT Web Auth\n\n"
-                      << "Usage: jwta --info-file <config.json> --data-area <path>\n\n"
+            std::cout << "BASE Server - Static site + JWT Auth\n\n"
+                      << "Usage: base --info-file <config.json> --data-area <path>\n\n"
                       << "Options:\n"
                       << "  --info-file <path>   Config file (required)\n"
                       << "  --data-area <path>   Data directory (required)\n"
@@ -205,20 +207,20 @@ int main(int argc, char* argv[]) {
     }
 
     if (config_path.empty()) {
-        std::cerr << "[JWTA] Error: --info-file required\n";
+        std::cerr << "[BASE] Error: --info-file required\n";
         return 1;
     }
     if (data_area.empty()) {
-        std::cerr << "[JWTA] Error: --data-area required\n";
+        std::cerr << "[BASE] Error: --data-area required\n";
         return 1;
     }
 
     Config cfg;
     if (!loadConfig(config_path, cfg)) {
-        std::cerr << "[JWTA] Error: Failed to load config: " << config_path << std::endl;
+        std::cerr << "[BASE] Error: Failed to load config: " << config_path << std::endl;
         return 1;
     }
-    std::cout << "[JWTA] Config: " << config_path << std::endl;
+    std::cout << "[BASE] Config: " << config_path << std::endl;
 
     // Load mailgun secret from file (otp_skey is the file path)
     std::string s;
@@ -235,74 +237,74 @@ int main(int argc, char* argv[]) {
 
     // Validate required config
     if (cfg.host.empty()) {
-        std::cerr << "[JWTA] Error: host required in config" << std::endl;
+        std::cerr << "[BASE] Error: host required in config" << std::endl;
         return 1;
     }
     if (cfg.port <= 0) {
-        std::cerr << "[JWTA] Error: port required in config" << std::endl;
+        std::cerr << "[BASE] Error: port required in config" << std::endl;
         return 1;
     }
     if (cfg.jrpc_path.empty()) {
-        std::cerr << "[JWTA] Error: jrpc_path required in config" << std::endl;
+        std::cerr << "[BASE] Error: jrpc_path required in config" << std::endl;
         return 1;
     }
     if (cfg.sqlite_file.empty()) {
-        std::cerr << "[JWTA] Error: sqlite.file required in config" << std::endl;
+        std::cerr << "[BASE] Error: sqlite.file required in config" << std::endl;
         return 1;
     }
     if (cfg.mailgun_otp_skey.empty()) {
-        std::cerr << "[JWTA] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
+        std::cerr << "[BASE] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
         return 1;
     }
     if (cfg.mailgun_secret.empty()) {
-        std::cerr << "[JWTA] Error: failed to load secret from: " << cfg.mailgun_otp_skey << std::endl;
+        std::cerr << "[BASE] Error: failed to load secret from: " << cfg.mailgun_otp_skey << std::endl;
         return 1;
     }
     if (cfg.mailgun_domain.empty()) {
-        std::cerr << "[JWTA] Error: mailgun.domain required in config" << std::endl;
+        std::cerr << "[BASE] Error: mailgun.domain required in config" << std::endl;
         return 1;
     }
     if (cfg.mailgun_region.empty()) {
-        std::cerr << "[JWTA] Error: mailgun.region required in config" << std::endl;
+        std::cerr << "[BASE] Error: mailgun.region required in config" << std::endl;
         return 1;
     }
     if (cfg.otp_from.empty()) {
-        std::cerr << "[JWTA] Error: otp_from required in config" << std::endl;
+        std::cerr << "[BASE] Error: otp_from required in config" << std::endl;
         return 1;
     }
     if (cfg.otp_text.empty()) {
-        std::cerr << "[JWTA] Error: otp_text required in config" << std::endl;
+        std::cerr << "[BASE] Error: otp_text required in config" << std::endl;
         return 1;
     }
 
     std::string db_path = data_area + cfg.sqlite_file;
     auto store = jwta::createStore(db_path);
     if (!store) {
-        std::cerr << "[JWTA] Error: Failed to open database: " << db_path << std::endl;
+        std::cerr << "[BASE] Error: Failed to open database: " << db_path << std::endl;
         return 1;
     }
-    std::cout << "[JWTA] Database: " << db_path << std::endl;
+    std::cout << "[BASE] Database: " << db_path << std::endl;
 
     auto mailer = jwta::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
-    std::cout << "[JWTA] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
+    std::cout << "[BASE] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
 
     jwta::Service service(*store, *mailer);
     if (!service.init()) {
-        std::cerr << "[JWTA] Error: Failed to initialize service" << std::endl;
+        std::cerr << "[BASE] Error: Failed to initialize service" << std::endl;
         return 1;
     }
 
     if (!cfg.admin_email.empty()) {
         service.setAdminEmail(cfg.admin_email);
-        std::cout << "[JWTA] Admin: " << cfg.admin_email << std::endl;
+        std::cout << "[BASE] Admin: " << cfg.admin_email << std::endl;
     }
 
     if (!cfg.boot_email.empty() && store->countUsersByRole("PQTR") == 0) {
-        std::cout << "[JWTA] No admin found, sending bootstrap to " << cfg.boot_email << std::endl;
+        std::cout << "[BASE] No admin found, sending bootstrap to " << cfg.boot_email << std::endl;
         if (service.sendBootstrapEmail(cfg.boot_email)) {
-            std::cout << "[JWTA] Bootstrap token sent" << std::endl;
+            std::cout << "[BASE] Bootstrap token sent" << std::endl;
         } else {
-            std::cerr << "[JWTA] Failed to send bootstrap email" << std::endl;
+            std::cerr << "[BASE] Failed to send bootstrap email" << std::endl;
         }
     }
 
@@ -444,13 +446,28 @@ int main(int argc, char* argv[]) {
             }
             res.set_content("{\"ok\":true}", "application/json");
         });
-        std::cout << "[JWTA] Boot: " << cfg.boot_path << std::endl;
+        std::cout << "[BASE] Boot: " << cfg.boot_path << std::endl;
     }
 
-    std::cout << "[JWTA] JRPC: " << cfg.jrpc_path << std::endl;
-    std::cout << "[JWTA] Listening on " << cfg.host << ":" << cfg.port << std::endl;
+    std::cout << "[BASE] JRPC: " << cfg.jrpc_path << std::endl;
+
+    // Static file serving
+    if (!cfg.www_path.empty()) {
+        std::string www_root = cfg.www_path;
+        // If relative path, resolve relative to data_area
+        if (!www_root.empty() && www_root[0] != '/') {
+            www_root = data_area + www_root;
+        }
+        if (svr.set_mount_point("/", www_root)) {
+            std::cout << "[BASE] WWW: " << www_root << std::endl;
+        } else {
+            std::cerr << "[BASE] Warning: Failed to mount www: " << www_root << std::endl;
+        }
+    }
+
+    std::cout << "[BASE] Listening on " << cfg.host << ":" << cfg.port << std::endl;
     if (!svr.listen(cfg.host, cfg.port)) {
-        std::cerr << "[JWTA] Failed to start server" << std::endl;
+        std::cerr << "[BASE] Failed to start server" << std::endl;
         return 1;
     }
     return 0;
