@@ -9,7 +9,7 @@ CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -fPIC
 
 # OpenCV (assumes LABS provides it)
-OPENCV_ROOT = ../LABS/lib/opencv
+OPENCV_ROOT = ../PIPE/lib/opencv
 OPENCV_INC = -I$(OPENCV_ROOT)/build \
              -I$(OPENCV_ROOT)/modules/core/include \
              -I$(OPENCV_ROOT)/modules/imgproc/include \
@@ -60,7 +60,7 @@ TEST_MODS_DIR = src/test/mods
 TEST_OBJ_DIR = tmp/obj/test
 TEST_MODS_OBJ_DIR = tmp/obj/test/mods
 TEST_BIN = tmp/test/test
-LABS_A = ../LABS/lib/labs.a
+LABS_A = ../PIPE/lib/labs.a
 OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 
 TEST_SRCS = $(wildcard $(TEST_DIR)/*.cpp)
@@ -69,7 +69,7 @@ TEST_OBJS = $(TEST_SRCS:$(TEST_DIR)/%.cpp=$(TEST_OBJ_DIR)/%.o)
 TEST_MODS_OBJS = $(TEST_MODS_SRCS:$(TEST_MODS_DIR)/%.cpp=$(TEST_MODS_OBJ_DIR)/%.o)
 ALL_TEST_OBJS = $(TEST_OBJS) $(TEST_MODS_OBJS)
 
-TEST_INC = $(INCLUDES) -I$(TEST_DIR) -I../LABS/src/main/part/pipe
+TEST_INC = $(INCLUDES) -I$(TEST_DIR) -I../PIPE/src/main/part/pipe
 
 test: $(VIBE_A) $(TEST_BIN)
 	LD_LIBRARY_PATH=$(OPENCV_LIB) $(TEST_BIN)

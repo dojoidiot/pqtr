@@ -9,7 +9,7 @@ CXX = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 
 # OpenCV paths (GEAR depends on LABS for OpenCV)
-OPENCV_ROOT = ../LABS/lib/opencv
+OPENCV_ROOT = ../PIPE/lib/opencv
 OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/core/include \
                  -I$(OPENCV_ROOT)/modules/imgproc/include \
@@ -19,7 +19,7 @@ OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
 INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
            -I./src/main/part \
-           -I../LABS/inc
+           -I../PIPE/inc
 
 # Directories
 SRC_DIR = src/main

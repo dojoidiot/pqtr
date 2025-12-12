@@ -6,9 +6,9 @@
 # Usage:
 #   make           # Build everything (wire + raws + labs + tune + desk)
 #   make raws      # Build GEAR library
-#   make labs      # Build LABS library + tune/labs binaries
-#   make tune      # Build LABS tune binary only
-#   make desk      # Build DESK app (builds LABS first)
+#   make labs      # Build PIPE library + tune/labs binaries
+#   make tune      # Build PIPE tune binary only
+#   make desk      # Build DESK app (builds PIPE first)
 #   make test      # Run all tests
 #   make clean     # Clean all projects
 #   make rewire    # Remove and recreate all symlinks
@@ -24,8 +24,8 @@ help:
 	@echo "Build targets:"
 	@echo "  all       Build everything (default)"
 	@echo "  raws      Build GEAR library"
-	@echo "  labs      Build LABS library + tune/labs binaries"
-	@echo "  tune      Build LABS tune binary only"
+	@echo "  labs      Build PIPE library + tune/labs binaries"
+	@echo "  tune      Build PIPE tune binary only"
 	@echo "  desk      Build DESK application"
 	@echo ""
 	@echo "Run targets:"
@@ -34,9 +34,9 @@ help:
 	@echo "  ./labs.sh ...   Run labs processor"
 	@echo ""
 	@echo "Test targets:"
-	@echo "  test      Run all tests (GEAR + LABS)"
+	@echo "  test      Run all tests (GEAR + PIPE)"
 	@echo "  test-raws Run GEAR decoder test"
-	@echo "  test-labs Run LABS test suite"
+	@echo "  test-labs Run PIPE test suite"
 	@echo ""
 	@echo "Other:"
 	@echo "  wire      Create symlinks between projects"
@@ -61,20 +61,20 @@ raws: wire
 	@echo "=== Building GEAR ==="
 	$(MAKE) -C GEAR lib
 
-# LABS: core library + binaries (depends on GEAR)
+# PIPE: core library + binaries (depends on GEAR)
 labs: raws
 	@echo ""
-	@echo "=== Building LABS ==="
-	$(MAKE) -C LABS lib
-	$(MAKE) -C LABS -f Makefile.tune tune labs
+	@echo "=== Building PIPE ==="
+	$(MAKE) -C PIPE lib
+	$(MAKE) -C PIPE -f Makefile.tune tune labs
 
 # TUNE: just the tune binary
 tune: labs
 	@echo ""
 	@echo "=== Building TUNE ==="
-	$(MAKE) -C LABS -f Makefile.tune tune
+	$(MAKE) -C PIPE -f Makefile.tune tune
 
-# DESK: GUI application (depends on LABS)
+# DESK: GUI application (depends on PIPE)
 desk: labs
 	@echo ""
 	@echo "=== Building DESK ==="
@@ -93,11 +93,11 @@ test-raws: raws
 	@echo "=== Testing GEAR ==="
 	$(MAKE) -C GEAR test
 
-# LABS tests
+# PIPE tests
 test-labs: labs
 	@echo ""
-	@echo "=== Testing LABS ==="
-	$(MAKE) -C LABS test-all
+	@echo "=== Testing PIPE ==="
+	$(MAKE) -C PIPE test-all
 
 # ============================================================
 # Clean
@@ -105,5 +105,5 @@ test-labs: labs
 
 clean:
 	$(MAKE) -C GEAR clean 2>/dev/null || true
-	$(MAKE) -C LABS clean 2>/dev/null || true
+	$(MAKE) -C PIPE clean 2>/dev/null || true
 	$(MAKE) -C DESK -f Makefile.desk clean 2>/dev/null || true

@@ -1,5 +1,5 @@
-[submodule "LABS/lib/opencv"]
-	path = LABS/lib/opencv
+[submodule "PIPE/lib/opencv"]
+	path = PIPE/lib/opencv
 	url = https://github.com/opencv/opencv.git
 [submodule "DESK/lib/imgui"]
 	path = DESK/lib/imgui

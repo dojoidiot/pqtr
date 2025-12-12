@@ -10,7 +10,7 @@ CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -fPIC
 
 # OpenCV (assumes LABS provides it)
-OPENCV_ROOT = ../LABS/lib/opencv
+OPENCV_ROOT = ../PIPE/lib/opencv
 OPENCV_INC = -I$(OPENCV_ROOT)/build \
              -I$(OPENCV_ROOT)/modules/core/include \
              -I$(OPENCV_ROOT)/modules/imgproc/include \

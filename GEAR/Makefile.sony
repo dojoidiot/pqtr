@@ -11,7 +11,7 @@ CXX = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 
 # OpenCV paths
-OPENCV_ROOT = ../LABS/lib/opencv
+OPENCV_ROOT = ../PIPE/lib/opencv
 OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/core/include \
                  -I$(OPENCV_ROOT)/modules/imgproc/include \
@@ -22,7 +22,7 @@ OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
            -I./src/main/part \
-           -I../LABS/inc
+           -I../PIPE/inc
 
 # Library flags
 LDFLAGS = -L$(OPENCV_LIB) -L./lib

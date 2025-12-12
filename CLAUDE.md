@@ -7,11 +7,11 @@ When starting a new session, read these files to get up to speed:
 
 ## Hard Shut
 When the user says **"hard shut"**, immediately:
-1. Read `LABS/doc/docs.md` for documentation standards
+1. Read `PIPE/doc/docs.md` for documentation standards
 2. Update all affected docs to reflect current implementation:
-   - `LABS/doc/tldr.md` - current status summary
-   - `LABS/doc/todo.md` - remaining work
-   - `LABS/README.md` - if architecture changed
+   - `PIPE/doc/tldr.md` - current status summary
+   - `PIPE/doc/todo.md` - remaining work
+   - `PIPE/README.md` - if architecture changed
    - Module docs if dials/features changed
 3. Apply docs.md rules: present tense, correct terminology, accurate counts
 4. Verify dial counts match code (45 style dials)
@@ -27,9 +27,9 @@ When the user says **"hard shut"**, immediately:
 - Always wire before build: `./wire.sh && make`
 - OpenCV needs: `LD_LIBRARY_PATH=lib/opencv/build/lib`
 
-## Testing LABS
+## Testing PIPE
 ```bash
-cd LABS
+cd PIPE
 LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
   var/pics/DSC00144.ARW preview \
   --save-area tmp/var/tune \
@@ -37,12 +37,12 @@ LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
 ```
 
 ## Project Structure
-- MAINs: GEAR, LABS, DESK, FAST, PLAY, SITE
+- MAINs: GEAR, PIPE, DESK, FAST, PLAY, SITE
 - Each MAIN is self-contained with `src/`, `inc/`, `lib/`, `bin/`
 - Dependencies via `wire.sh` symlinks
 
 ## Conventions
-- 45 dials total in LABS pipeline
+- 45 dials total in PIPE pipeline
 - Vibes = portable style presets (.pipe.json)
 - GEAR output is scene-linear (flat) - this is correct
 - TUNE matches styles, not GEAR appearance

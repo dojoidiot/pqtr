@@ -31,7 +31,7 @@ Two-phase processing that mirrors professional workflow:
 | LUTE | Active | Camera profiles |
 | VIBE | Active | Creative styles (51 dials) |
 | TUNE | Active | Style optimizer |
-| LABS | Active | Pipeline orchestrator |
+| PIPE | Active | Pipeline orchestrator |
 | WGPU | Active | GPU compute |
 | DESK | In Dev | Desktop GUI |
 | BASE | Active | Web server |
@@ -45,8 +45,8 @@ Two-phase processing that mirrors professional workflow:
 
 ## Next
 
-- [ ] Wire LUTE into LABS pipeline
-- [ ] Wire VIBE into LABS pipeline
+- [ ] Wire LUTE into PIPE pipeline
+- [ ] Wire VIBE into PIPE pipeline
 - [ ] DESK UI for vibe creation
 - [ ] Profile convergence testing
 

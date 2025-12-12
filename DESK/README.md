@@ -2,14 +2,14 @@
 
 [back](../README.md)
 
-Desktop application for power users. Create and tune image processing styles using the full LABS pipeline.
+Desktop application for power users. Create and tune image processing styles using the full PIPE pipeline.
 
 ## Role in PQTR
 
 DESK is for professionals and enthusiasts who want full control over RAW processing. Styles created in DESK can be shared with PLAY users.
 
 ```
-[LABS] ──► [DESK] ──► Styles (.pipe.json)
+[PIPE] ──► [DESK] ──► Styles (.pipe.json)
              │              │
              │              └──► PLAY users apply these
              └── Power user workflow
@@ -83,7 +83,7 @@ DESK/
 ├── bin/
 │   └── desk              # Built executable
 ├── lib/
-│   ├── LABS.a            # [symlink] → LABS/lib/labs.a
+│   ├── PIPE.a            # [symlink] → PIPE/lib/labs.a
 │   ├── imgui/            # ImGui library
 │   ├── glfw/             # GLFW library
 │   └── ImGuiFileDialog/  # File dialog

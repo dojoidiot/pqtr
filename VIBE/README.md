@@ -5,7 +5,7 @@ Style processing module for PQTR. Handles 17 image transform modules with PIMPL 
 ## What It Does
 
 VIBE transforms images to match a target style. Given a source image and reference, it:
-1. Optimizes dials to minimize perceptual difference (tune mode - in LABS)
+1. Optimizes dials to minimize perceptual difference (tune mode - in PIPE)
 2. Applies the learned style to new images (view mode)
 
 ## Architecture
@@ -79,17 +79,17 @@ make tidy   # Clean
 
 ## Integration
 
-VIBE is used by LABS as part of the processing pipeline:
+VIBE is used by PIPE as part of the processing pipeline:
 
 ```
 GEAR → LUTE → VIBE → output
 ```
 
-Wire into LABS:
+Wire into PIPE:
 ```bash
 # In wire.sh
-WIRE VIBE inc LABS
-WIRE VIBE lib LABS
+WIRE VIBE inc PIPE
+WIRE VIBE lib PIPE
 ```
 
 ## Files

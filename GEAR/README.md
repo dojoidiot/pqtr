@@ -38,7 +38,7 @@ Camera RAW ──► [GEAR] ──► scene-linear RGB ──► [LUTE] ──�
 
 - **Produces**: `GEAR.a` static library
 - **Exposes**: `gear::load(Sink&)` → `gear::Result`
-- **Used by**: LABS (links into `labs.a`)
+- **Used by**: PIPE (links into `pipe.a`)
 
 ## Project Structure
 
@@ -104,7 +104,7 @@ namespace gear {
 }
 ```
 
-LABS calls `gear::load()` and receives scene-linear RGB plus the embedded preview. It knows nothing about Sony, Canon, or Nikon internals.
+PIPE calls `gear::load()` and receives scene-linear RGB plus the embedded preview. It knows nothing about Sony, Canon, or Nikon internals.
 
 ## Adding a New Format
 
@@ -147,7 +147,7 @@ See [doc/sony.md](doc/sony.md) for full technical documentation.
 
 ## Dependencies
 
-- **OpenCV** (from LABS): `../LABS/lib/opencv`
-- **LABS headers**: `../LABS/inc` (pipe.hpp, sink.hpp)
+- **OpenCV** (from PIPE): `../PIPE/lib/opencv`
+- **PIPE headers**: `../PIPE/inc` (pipe.hpp, sink.hpp)
 - **C++17** compiler
 - No GPL dependencies (clean-room implementation)
