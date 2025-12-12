@@ -2,7 +2,7 @@
 # Builds lib/labs.a static library
 #
 # Exposes:
-#   - sony::Decoder (via RAWS library)
+#   - sony::Decoder (via GEAR library)
 #   - pipe::mods::* (processing modules)
 #   - geos::Task (optimization)
 #   - pqtr::Sink, pqtr::Tool, pqtr::Hold (infrastructure, header-only)
@@ -22,7 +22,7 @@ OPENCV_LIB = $(OPENCV_ROOT)/build/lib
 # Include paths
 INCLUDES = $(OPENCV_INCLUDE) \
            -I./inc \
-           -I./inc/RAWS \
+           -I./inc/GEAR \
            -I./src/main/part/pipe \
            -I./src/main/part/geos
 
@@ -31,8 +31,8 @@ SRC_DIR = src/main
 OBJ_DIR = tmp/obj/labs
 LIB_DIR = lib
 
-# RAWS library (via wire.sh symlink)
-RAWS_A = $(LIB_DIR)/RAWS.a
+# GEAR library (via wire.sh symlink)
+GEAR_A = $(LIB_DIR)/GEAR.a
 
 # Pipe sources (HEAD/BODY/TAIL + internal)
 PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp \
@@ -105,13 +105,13 @@ LABS_A = $(LIB_DIR)/labs.a
 
 all: $(LABS_A)
 
-# Combine LABS objects with RAWS library into labs.a
-$(LABS_A): $(ALL_OBJS) $(RAWS_A) | $(LIB_DIR)
+# Combine LABS objects with GEAR library into labs.a
+$(LABS_A): $(ALL_OBJS) $(GEAR_A) | $(LIB_DIR)
 	@rm -rf $(OBJ_DIR)/merge && mkdir -p $(OBJ_DIR)/merge
-	cd $(OBJ_DIR)/merge && ar x ../../../../$(RAWS_A)
+	cd $(OBJ_DIR)/merge && ar x ../../../../$(GEAR_A)
 	ar rcs $@ $(ALL_OBJS) $(OBJ_DIR)/merge/*.o
 	@rm -rf $(OBJ_DIR)/merge
-	@echo "Built: $@ (includes RAWS)"
+	@echo "Built: $@ (includes GEAR)"
 
 # Pipe objects
 $(OBJ_DIR)/pipe/%.o: $(SRC_DIR)/part/pipe/%.cpp | $(OBJ_DIR)/pipe
@@ -144,5 +144,5 @@ clean:
 info:
 	@echo "Target: $(LABS_A)"
 	@echo "Objects: $(ALL_OBJS)"
-	@echo "RAWS: $(RAWS_A)"
+	@echo "GEAR: $(GEAR_A)"
 	@echo "OpenCV: $(OPENCV_LIB)"

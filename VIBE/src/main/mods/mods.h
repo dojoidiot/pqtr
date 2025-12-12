@@ -54,7 +54,7 @@ namespace mods
     bool white_balance(const View& in, View& out, Dial temperature, Dial tint);
 
     //--------------------------------------------------------------------------
-    // Base Curve (from RAWS, no dials)
+    // Base Curve (from GEAR, no dials)
     //--------------------------------------------------------------------------
 
     bool base_curve(const View& in, View& out, Grid curve);

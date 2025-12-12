@@ -1,51 +1,56 @@
-# PQTR:RAWS
+# PQTR:GEAR
 
 [back](../README.md)
 
-RAW decoder library for PQTR. Provides `raws::decode()` API that auto-detects camera format and returns scene-linear RGB.
+Camera gear library for PQTR. Handles RAW decoding, metadata extraction, and scene-linear normalization. Provides the `gear::load()` API that auto-detects camera format and returns scene-linear RGB plus embedded preview for LUTE learning.
 
 ## Role in PQTR
 
-RAWS is where camera support R&D happens. It's isolated from LABS—adding new camera support doesn't change downstream code.
+GEAR is where camera support R&D happens. It's isolated from the rest of the pipeline — adding new camera support doesn't change downstream code.
 
 ```
-Camera RAW ──► [RAWS] ──► scene-linear RGB ──► [LABS]
+Camera RAW ──► [GEAR] ──► scene-linear RGB ──► [LUTE] ──► [VIBE]
                 │
-                └── raws::decode() API
-                    (format auto-detection)
+                ├── gear::load() API
+                │   (format auto-detection)
+                │
+                └── Outputs:
+                    - Scene-linear RGB (data)
+                    - Metadata (camera, lens, exposure)
+                    - Embedded preview (for LUTE learning)
 ```
 
 ### Separation of Concerns
 
-**RAWS extracts canonical data. TUNE applies style.**
+**GEAR extracts canonical data. LUTE/VIBE apply style.**
 
-| RAWS does | RAWS does NOT |
+| GEAR does | GEAR does NOT |
 |-----------|---------------|
 | Decompress sensor data | Apply tone curves |
 | Black level subtraction | Add contrast/saturation |
 | White balance (camera-reported) | Match camera JPEG appearance |
 | Demosaic | Make "pleasing" output |
 | ColorMatrix → standard colorspace | Any stylistic decisions |
+| Extract embedded preview | Apply creative styles |
+| Extract camera metadata | |
 
-**RAWS output will look flat and desaturated.** This is correct—scene-linear data has no tone curve or color grading. The camera JPEG look is achieved by TUNE, not RAWS.
+**GEAR output will look flat and desaturated.** This is correct — scene-linear data has no tone curve or color grading. The camera JPEG look is achieved by LUTE (learned from the embedded preview), not GEAR.
 
-**Validation:** If TUNE achieves low error rates, RAWS is extracting correct data. Visual appearance of raw RAWS output is not a validation criterion.
-
-- **Produces**: `RAWS.a` static library
-- **Exposes**: `raws::decode(Sink&)` → `raws::Result`
+- **Produces**: `GEAR.a` static library
+- **Exposes**: `gear::load(Sink&)` → `gear::Result`
 - **Used by**: LABS (links into `labs.a`)
 
 ## Project Structure
 
 ```
-RAWS/
+GEAR/
 ├── inc/
-│   └── raws.hpp              # Public API
+│   └── gear.hpp              # Public API
 ├── lib/
-│   └── RAWS.a                # Built library
+│   └── GEAR.a                # Built library
 ├── src/
 │   ├── main/
-│   │   ├── raws.cpp          # Format detection, dispatch
+│   │   ├── gear.cpp          # Format detection, dispatch
 │   │   └── part/
 │   │       ├── sony.cpp      # Sony decoder entry
 │   │       ├── sony.h        # Sony internal header
@@ -59,14 +64,14 @@ RAWS/
 │   ├── bin/                  # Test binaries
 │   └── var/                  # Test output
 ├── Makefile                  # Top-level (delegates)
-├── Makefile.raws             # Builds lib/RAWS.a
+├── Makefile.gear             # Builds lib/GEAR.a
 └── Makefile.sony             # Sony decoder tests
 ```
 
 ## Building
 
 ```bash
-make              # Build lib/RAWS.a (default)
+make              # Build lib/GEAR.a (default)
 make test         # Run sony decoder test
 make test-all     # Run full test suite (+ distortion)
 make all          # Build everything
@@ -85,28 +90,28 @@ make clean        # Clean all artifacts
 ## Public API
 
 ```cpp
-// RAWS/inc/raws.hpp
-namespace raws {
+// GEAR/inc/gear.hpp
+namespace gear {
     struct Result {
         bool success;
         pipe::View data;          // Scene-linear RGB (CV_32FC3)
-        pipe::Info dataInfo;      // Metadata
+        pipe::InfoMap dataInfo;   // Metadata
         pipe::View preview;       // Embedded camera JPEG (BGR, 8-bit)
-        pipe::Info previewInfo;   // Preview metadata
+        pipe::InfoMap previewInfo; // Preview metadata (style settings)
     };
 
-    Result decode(pqtr::Sink& sink);
+    Result load(pqtr::Sink& sink);
 }
 ```
 
-LABS calls `raws::decode()` and receives scene-linear RGB. It knows nothing about Sony, Canon, or Nikon internals.
+LABS calls `gear::load()` and receives scene-linear RGB plus the embedded preview. It knows nothing about Sony, Canon, or Nikon internals.
 
 ## Adding a New Format
 
 1. Create `src/main/part/<format>.cpp` and `src/main/part/<format>/` directory
 2. Implement decoder following Sony pattern (prepare → process_linear)
-3. Add format detection in `src/main/raws.cpp`
-4. Add source files to `Makefile.raws`
+3. Add format detection in `src/main/gear.cpp`
+4. Add source files to `Makefile.gear`
 5. Create test in `src/test/<format>/`
 6. Create `doc/<format>.md` for technical documentation
 
@@ -134,7 +139,7 @@ RAW → BLC (Bayer) → WB (Bayer) → Demosaic → Color Matrix → Crop → Li
 
 ### Embedded Preview
 
-Extracts camera-rendered JPEG and style metadata (creative_style, contrast, saturation, sharpness). Provides reference target for LABS tune module.
+Extracts camera-rendered JPEG and style metadata (creative_style, contrast, saturation, sharpness). Provides reference target for LUTE learning.
 
 See [doc/sony.md](doc/sony.md) for full technical documentation.
 

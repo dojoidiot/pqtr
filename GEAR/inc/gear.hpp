@@ -1,19 +1,19 @@
-// RAWS - RAW loader library
-// Loads RAW files to scene-linear RGB
+// GEAR - Camera gear library
+// Handles RAW decoding, metadata extraction, and scene-linear normalization
 // Auto-detects format (Sony ARW, Canon CR2/CR3, Nikon NEF, etc.)
 //
-// RAWS provides:
-//   load() - decode RAW to flat scene-linear
+// GEAR provides:
+//   load() - decode RAW to flat scene-linear RGB
 //   tune() - estimate camera LUT from flat/jpeg pairs
 //
-// Camera LUT becomes metadata that LABS pipe applies without knowing the camera.
+// Outputs: scene-linear RGB, metadata, embedded preview for LUTE learning
 
 #pragma once
 
 #include "pipe.hpp"
 #include "sink.hpp"
 
-namespace raws {
+namespace gear {
 
     // Forward declarations
     struct Result;
@@ -131,4 +131,4 @@ namespace raws {
     // Returns true on success
     bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut);
 
-} // namespace raws
+} // namespace gear

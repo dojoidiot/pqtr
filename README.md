@@ -22,7 +22,7 @@ The PQTR pipeline manages your workflow using a simple pipeline that takes your 
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
 │   HEAD ─────────────────────────────────────────────────────    │
-│      │  RAW file → RAWS decode → scene-linear RGB               │
+│      │  RAW file → GEAR decode → scene-linear RGB               │
 │      │  Extract: Bayer data, metadata, embedded preview         │
 │      ▼                                                          │
 │   BODY ─────────────────────────────────────────────────────    │
@@ -58,7 +58,7 @@ When an image enters the pipeline, LUTE does three things:
 3. Apply the learned profile in the pipeline
 
 ```
-RAW file ──► RAWS (decode) ──► scene-linear RGB
+RAW file ──► GEAR (decode) ──► scene-linear RGB
                                     │
 embedded JPEG ─────────────────────►│ compare
                                     ▼
@@ -123,11 +123,11 @@ BASE is your PQTR home base. It is the web server, authentication system, and ho
 
 | Project | Purpose |
 |---------|---------|
-| **RAWS** | RAW decoder — extracts scene-linear RGB from camera files |
+| **GEAR** | Camera gear — RAW decoding, metadata, scene-linear normalization |
 | **LUTE** | Camera profiles — learns gear manufacturer's color science |
 | **VIBE** | Creative styles — 51 adjustable dials for photographer expression |
 | **TUNE** | Style optimizer — finds dial values to match a reference |
-| **LABS** | Pipeline orchestrator — coordinates RAWS → LUTE → VIBE |
+| **LABS** | Pipeline orchestrator — coordinates GEAR → LUTE → VIBE |
 | **WGPU** | GPU compute — WebGPU/WGSL shaders for fast processing |
 | **DESK** | Desktop app — GUI for creating and editing vibes |
 | **BASE** | Web server — JWT auth + static site for pqtr.ai |
@@ -144,7 +144,7 @@ make clean           # Clean everything
 ```bash
 # GPU shader tests
 cd VIBE && make test-dawn
-cd RAWS && make test-dawn
+cd GEAR && make test-dawn
 
 # Module tests
 cd VIBE && make test

@@ -5,7 +5,7 @@
 // on their LCD when composing shots.
 //
 // Camera profiles are learned from RAW + embedded JPEG pairs:
-//   1. RAWS decodes RAW to scene-linear
+//   1. GEAR decodes RAW to scene-linear
 //   2. LUTE accumulates RGB→RGB mappings into LUTs
 //   3. Profile converges across multiple images
 //

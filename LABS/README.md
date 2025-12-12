@@ -17,32 +17,32 @@ This drives the architecture: **Style first, then tweaks.** See [tldr.md](./doc/
 LABS sits between raw decoding and end-user applications:
 
 ```
-[RAWS] ──► [LABS] ──► DESK / FAST / PLAY
+[GEAR] ──► [LABS] ──► DESK / FAST / PLAY
             │
             └── pipe::Pipe API
                 HEAD → BODY → TAIL
 ```
 
-- **Consumes**: `RAWS.a` (RAW decoder, via symlink)
+- **Consumes**: `GEAR.a` (RAW decoder, via symlink)
 - **Produces**: `labs.a` (complete processing library)
 - **Used by**: DESK, FAST, PLAY
 
-LABS knows nothing about camera-specific decoding—it calls `raws::decode()` and receives scene-linear RGB. When new cameras are added to RAWS, LABS works unchanged.
+LABS knows nothing about camera-specific decoding—it calls `gear::decode()` and receives scene-linear RGB. When new cameras are added to GEAR, LABS works unchanged.
 
-### Separation of Concerns: RAWS vs TUNE
+### Separation of Concerns: GEAR vs TUNE
 
-**RAWS extracts. TUNE transforms.**
+**GEAR extracts. TUNE transforms.**
 
-| RAWS (upstream) | TUNE (in LABS) |
+| GEAR (upstream) | TUNE (in LABS) |
 |-----------------|----------------|
 | Canonical extraction | Style optimization |
 | Scene-referred linear RGB | Display-referred output |
 | Camera-specific decoding | Camera-agnostic transforms |
 | No style decisions | All style decisions |
 
-**The camera JPEG is just one style.** TUNE finds transforms to match any reference—camera JPEG, film emulation, or custom look. RAWS provides neutral, canonical data that TUNE can shape into any style.
+**The camera JPEG is just one style.** TUNE finds transforms to match any reference—camera JPEG, film emulation, or custom look. GEAR provides neutral, canonical data that TUNE can shape into any style.
 
-**Validation:** TUNE error rates prove RAWS correctness. If TUNE achieves low error, the extraction is working. Don't judge RAWS by visual appearance—scene-linear data looks flat before style transforms.
+**Validation:** TUNE error rates prove GEAR correctness. If TUNE achieves low error, the extraction is working. Don't judge GEAR by visual appearance—scene-linear data looks flat before style transforms.
 
 ## Project Structure
 
@@ -56,10 +56,10 @@ LABS/
 │   ├── sink.hpp      # Data buffer
 │   ├── hold.hpp      # Smart pointer
 │   ├── tool.hpp      # File utilities
-│   └── RAWS/         # [symlink] → RAWS/inc
+│   └── GEAR/         # [symlink] → GEAR/inc
 ├── lib/
-│   ├── labs.a        # Main library (includes RAWS)
-│   ├── RAWS.a        # [symlink] → RAWS/lib/RAWS.a
+│   ├── labs.a        # Main library (includes GEAR)
+│   ├── GEAR.a        # [symlink] → GEAR/lib/GEAR.a
 │   └── opencv/       # OpenCV dependency
 ├── src/
 │   ├── main/
@@ -136,12 +136,12 @@ Debug outputs (alongside photo.png):
 
 ## RAW Decoding
 
-RAW decoding is handled by [RAWS](../RAWS/README.md), a separate project that produces `RAWS.a`. LABS links this library and calls `raws::decode()` to obtain scene-linear RGB.
+RAW decoding is handled by [GEAR](../GEAR/README.md), a separate project that produces `GEAR.a`. LABS links this library and calls `gear::decode()` to obtain scene-linear RGB.
 
 This separation means:
-- Camera support R&D happens in RAWS, not LABS
+- Camera support R&D happens in GEAR, not LABS
 - Adding Sony/Canon/Nikon support doesn't change LABS code
-- LABS remains stable while RAWS evolves
+- LABS remains stable while GEAR evolves
 
 ## Out of Scope
 
@@ -159,7 +159,7 @@ See [out_of_scope.md](./doc/mods/out_of_scope.md) for detailed module ideas.
 4.  **Tune Optimizes All Roles**: 45 dials via SPSA/ACEO/HYBRID; optional 3D LUT.
 5.  **Performance Targets Met**: `tune`: ~65 seconds total.
 
-**Current results (2024-12-01)**: Most images achieve <5% final loss with base curve + 3D LUT. RAWS estimates per-channel curves (768 floats) from RAW→preview comparison. Baseline guard ensures optimizer never degrades quality.
+**Current results (2024-12-01)**: Most images achieve <5% final loss with base curve + 3D LUT. GEAR estimates per-channel curves (768 floats) from RAW→preview comparison. Baseline guard ensures optimizer never degrades quality.
 
 **Remaining gap analysis**: The 5% residual comes from per-channel curves shifting hue (50%), 3D LUT resolution limits (30%), DRO spatial variation (15%), and alignment/matrix precision (5%). Quick wins: neutral-pixel curve estimation and luminance-preserving tone mapping. See [todo.md](./doc/todo.md#strategic-analysis-path-to-camera-parity-2024-12-01) for full analysis.
 

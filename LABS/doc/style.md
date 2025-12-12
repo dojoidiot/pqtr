@@ -65,10 +65,10 @@ What it captures:
 
 ## Estimation Process
 
-Both transforms are estimated in RAWS by comparing RAW decode to reference:
+Both transforms are estimated in GEAR by comparing RAW decode to reference:
 
 ```cpp
-// In RAWS
+// In GEAR
 Result decode(Sink& sink) {
     // 1. Decode RAW
     cv::UMat data = decodeRaw(sink);

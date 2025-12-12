@@ -37,12 +37,12 @@ LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
 ```
 
 ## Project Structure
-- MAINs: RAWS, LABS, DESK, FAST, PLAY, SITE
+- MAINs: GEAR, LABS, DESK, FAST, PLAY, SITE
 - Each MAIN is self-contained with `src/`, `inc/`, `lib/`, `bin/`
 - Dependencies via `wire.sh` symlinks
 
 ## Conventions
 - 45 dials total in LABS pipeline
 - Vibes = portable style presets (.pipe.json)
-- RAWS output is scene-linear (flat) - this is correct
-- TUNE matches styles, not RAWS appearance
+- GEAR output is scene-linear (flat) - this is correct
+- TUNE matches styles, not GEAR appearance

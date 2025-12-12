@@ -1126,7 +1126,7 @@ bool load_embedded_preview(State& state, const Project& project) {
         return false;
     }
 
-    // Load base texture (scene-linear from RAWS)
+    // Load base texture (scene-linear from GEAR)
     // Apply simple gamma for visualization (scene-linear is too dark otherwise)
     pipe::View base_view = head->data().view();
     if (!base_view.empty()) {

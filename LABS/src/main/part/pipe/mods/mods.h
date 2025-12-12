@@ -86,10 +86,10 @@ namespace mods
         float tint);
 
     //--------------------------------------------------------------------------
-    // Base Curve (from RAWS decoder, no dials)
+    // Base Curve (from GEAR decoder, no dials)
     //--------------------------------------------------------------------------
 
-    // Apply base curve derived by RAWS from RAW→preview comparison
+    // Apply base curve derived by GEAR from RAW→preview comparison
     // curve: 256 float values mapping gamma-space input to output [0-1]
     bool base_curve(
         const cv::UMat &input,

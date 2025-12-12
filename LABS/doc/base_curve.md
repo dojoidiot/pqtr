@@ -4,7 +4,7 @@
 
 ## Purpose
 
-The base curve bridges the gap between flat RAW decode and camera JPEG appearance. RAWS estimates it automatically per-image from the RAW→preview comparison.
+The base curve bridges the gap between flat RAW decode and camera JPEG appearance. GEAR estimates it automatically per-image from the RAW→preview comparison.
 
 ## Problem Solved
 
@@ -31,14 +31,14 @@ The camera JPEG preview IS the photographer's reference point. By matching it, w
 ## Architecture
 
 ```
-RAWS (camera-specific):
+GEAR (camera-specific):
   1. Decode RAW → scene-linear data
   2. Extract embedded JPEG → preview
   3. Estimate per-channel curves: gamma-space RGB mapping data→preview
   4. Return {data, preview, baseCurve[768]} (BGR × 256)
 
 pipe::Head:
-  - Stores baseCurve from raws::Result
+  - Stores baseCurve from gear::Result
   - Exposes via head->baseCurve(), head->hasBaseCurve()
 
 Link (in BODY):
@@ -50,7 +50,7 @@ Link (in BODY):
 ## Estimation Algorithm
 
 ```cpp
-// In RAWS
+// In GEAR
 static void estimateBaseCurve(const cv::UMat& data, const cv::UMat& preview, float* curve)
 {
     // 1. Resize data to preview size
@@ -103,8 +103,8 @@ The gamma space conversion is critical - the curve was estimated in gamma space 
 
 | File | Purpose |
 |------|---------|
-| `RAWS/inc/raws.hpp` | Result struct with baseCurve[768] |
-| `RAWS/src/main/raws.cpp` | estimateBaseCurve() function |
+| `GEAR/inc/gear.hpp` | Result struct with baseCurve[768] |
+| `GEAR/src/main/raws.cpp` | estimateBaseCurve() function |
 | `LABS/inc/pipe.hpp` | Head::baseCurve(), Link::BaseCurve |
 | `LABS/src/main/part/pipe/pipe.cpp` | HeadImpl stores curve |
 | `LABS/src/main/part/pipe/link.cpp` | BaseCurveImpl |

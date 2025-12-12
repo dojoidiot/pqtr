@@ -613,7 +613,7 @@ The `--fine` option saves camera metadata to `meta.json` for analysis and record
 | `black_level` | RAW black level (pedestal) |
 | `camera_make` | Camera manufacturer |
 | `camera_model` | Camera model name |
-| `decoder` | RAWS decoder used |
+| `decoder` | GEAR decoder used |
 | `focal_length` | Lens focal length (mm) |
 | `height` | Image height (pixels) |
 | `iso` | ISO sensitivity |

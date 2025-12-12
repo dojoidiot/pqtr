@@ -5,7 +5,7 @@
 // ARCHITECTURE NOTE:
 // This is now PURE display conversion. All "look" processing (including sigmoid)
 // belongs in the pipe as configurable modules. The flow is:
-//   RAWS (decode) → Pipe (process via links) → View (gamma only) → Display
+//   GEAR (decode) → Pipe (process via links) → View (gamma only) → Display
 
 #include "view.hpp"
 #include <opencv2/imgproc.hpp>

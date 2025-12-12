@@ -70,7 +70,7 @@ Generic camera baseline implemented in HEAD. Clean separation of concerns:
 
 | Layer | Responsibility | Camera-specific? |
 |-------|---------------|------------------|
-| **RAWS** | Bayer decode, WB, color matrix | Yes |
+| **GEAR** | Bayer decode, WB, color matrix | Yes |
 | **HEAD baseline** | +0.7 EV exposure, highlight recovery | No (generic) |
 | **BODY** | 45 style dials, optimization | No (generic) |
 
@@ -86,7 +86,7 @@ Generic camera baseline implemented in HEAD. Clean separation of concerns:
 
 - [x] **Generic camera baseline** (2025-12-07)
   - `baseline.cpp`: highlight_recovery() + baseline() functions
-  - HeadImpl applies baseline_default() to RAWS scene-linear output
+  - HeadImpl applies baseline_default() to GEAR scene-linear output
   - +0.7 EV exposure boost (darktable default)
   - Highlight recovery @ 0.95 clip threshold
   - Camera-agnostic: works for any camera's scene-linear output
@@ -101,7 +101,7 @@ Generic camera baseline implemented in HEAD. Clean separation of concerns:
 - [x] **Resolution independence verified** (2024-12-01)
 - [x] **Baseline guard** (2024-12-01)
 - [x] **Jacobian estimation** (2024-12-01)
-- [x] **RAWS hasBaseCurve bug** - was stale library, fixed by rebuild
+- [x] **GEAR hasBaseCurve bug** - was stale library, fixed by rebuild
 - [x] **Polynomial color transform** (2024-12-01)
   - 30 coefficients (10 per channel) capture camera's global RGB→RGB transform
   - Achieves <5% error on most images (3.1% DSC00159, 3.7% DSC00144)
@@ -119,8 +119,8 @@ Generic camera baseline implemented in HEAD. Clean separation of concerns:
   - Found memory color patents (US6594388B1), saturation coupling to contrast
   - Documented in `doc/hack.md`
 - [x] **PolyColor pipeline integration** (2024-12-02)
-  - Added `polyCoeffs[30]` to RAWS Result
-  - RAWS estimates coefficients and serializes to `dataInfo["poly_coeffs"]`
+  - Added `polyCoeffs[30]` to GEAR Result
+  - GEAR estimates coefficients and serializes to `dataInfo["poly_coeffs"]`
   - Added `pipe::Link::PolyColor` module with `setCoeffs()`/`isActive()`
   - Pipeline order: ColorCorrection → BaseCurve → PolyColor → ToneMapping
   - **Finding**: BaseCurve (768 params) achieves 12.63% baseline vs PolyColor (30 params) at 13.51%
@@ -163,7 +163,7 @@ Debug outputs:
   - Results: DSC00202 achieves 2.4% (better than HYBRID's 3.7%)
 
 - [x] **Three-phase architecture** (2024-12-02)
-  - Phase 0: Camera Math - polynomial transform from RAWS
+  - Phase 0: Camera Math - polynomial transform from GEAR
   - Phase 1: Camera Vibe - optimize 45 dials to match preview
   - Phase 2: User Vibe - optimize dials to match user edit (if target != preview)
   - Results: DSC00202 achieves 2.6% error after poly, 3.2% final
@@ -212,7 +212,7 @@ Optimization flow:
 ### Base Curve Flow
 
 ```
-RAWS (camera-specific):
+GEAR (camera-specific):
   - Decodes RAW
   - Extracts embedded JPEG preview
   - Estimates per-channel curves from flat→preview (768 floats: BGR × 256)
@@ -229,8 +229,8 @@ LABS (generic):
 **Principle**: Each layer serializes its own metadata. Downstream layers don't know internals.
 
 ```
-RAWS owns:
-  - dataInfo["poly_coeffs"]     ← serialized by RAWS, not pipe
+GEAR owns:
+  - dataInfo["poly_coeffs"]     ← serialized by GEAR, not pipe
   - dataInfo["decoder"]
   - dataInfo["camera_model"]
   - baseCurve[768]              ← binary array (frequently accessed)
@@ -272,8 +272,8 @@ Potential use (not yet implemented):
 - `src/main/part/geos/staged.cpp` - STAGED optimizer (VIEW → POPS → Joint)
 - `src/main/part/geos/diff.cpp` - viewLoss(), popsLoss(), geodesicLoss()
 - `src/main/gold.cpp` - Test binary for STAGED mode
-- `RAWS/inc/raws.hpp` - Result has baseCurve[768], hasBaseCurve
-- `RAWS/src/main/raws.cpp` - estimateBaseCurve() function
+- `GEAR/inc/gear.hpp` - Result has baseCurve[768], hasBaseCurve
+- `GEAR/src/main/raws.cpp` - estimateBaseCurve() function
 - `LABS/inc/pipe.hpp` - Head::baseCurve(), Link::BaseCurve simplified
 - `LABS/src/main/part/pipe/pipe.cpp` - HeadImpl stores/exposes curve
 - `LABS/src/main/part/pipe/link.cpp` - BaseCurveImpl applies curve
@@ -403,7 +403,7 @@ metadata.color_matrix = cv::Matx33f(
 
 **Problem**: This is the camera's color transform for D65 illuminant. If WB temperature differs significantly, the matrix may be suboptimal.
 
-**Fix**: RAWS already has the correct color matrix from metadata. Validate it matches darktable/rawpy output. If discrepancy exists, investigate camera color profiles (DCP).
+**Fix**: GEAR already has the correct color matrix from metadata. Validate it matches darktable/rawpy output. If discrepancy exists, investigate camera color profiles (DCP).
 
 #### Phase 4: DRO Implementation (Spatially-Variant)
 
@@ -417,7 +417,7 @@ This is out of current scope but explains why some images have higher error.
 
 ### Immediate Next Steps (Prioritized)
 
-1. **Neutral-pixel curve estimation** (RAWS change)
+1. **Neutral-pixel curve estimation** (GEAR change)
    - Filter pixels by chroma < threshold before binning
    - Expected improvement: Better tone isolation, reduced hue shifts
 

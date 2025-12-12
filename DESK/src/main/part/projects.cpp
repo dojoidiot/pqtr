@@ -392,7 +392,7 @@ bool render_pipe_panel(State& state) {
     ImGuiTreeNodeFlags head_flags = ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_DefaultOpen;
     bool head_open = ImGui::TreeNodeEx("HEAD", head_flags);
     if (head_open) {
-        // base: scene-linear from RAWS
+        // base: scene-linear from GEAR
         ImGuiTreeNodeFlags base_flags = ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
         if (state.selection.pipe_view == PipeView::BASE) {
             base_flags |= ImGuiTreeNodeFlags_Selected;
@@ -404,7 +404,7 @@ bool render_pipe_panel(State& state) {
             selection_changed = true;
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("Scene-linear RGB from RAWS decoder");
+            ImGui::SetTooltip("Scene-linear RGB from GEAR decoder");
         }
 
         // view: embedded camera preview

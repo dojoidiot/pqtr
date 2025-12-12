@@ -119,7 +119,7 @@ enum ModuleId {
 
 enum class PipeView {
     BODY,   // Current pipeline output (default)
-    BASE,   // HEAD base: scene-linear from RAWS
+    BASE,   // HEAD base: scene-linear from GEAR
     VIEW    // HEAD view: embedded camera preview
 };
 
@@ -216,7 +216,7 @@ struct State {
 
     // Image textures
     Texture texture;           // Main rendered image (BODY output)
-    Texture base_texture;      // HEAD base: scene-linear from RAWS
+    Texture base_texture;      // HEAD base: scene-linear from GEAR
     Texture embedded_texture;  // HEAD view: embedded camera preview
     bool has_embedded = false; // True if RAW has embedded preview
 

@@ -4,7 +4,7 @@
 
 ## Overview
 
-LABS exposes a static library (`labs.a`) with public headers. The RAWS decoder is compiled into `labs.a`. OpenCV is dynamically linked at runtime, so consumers link against `labs.a` and set `LD_LIBRARY_PATH` for OpenCV.
+LABS exposes a static library (`labs.a`) with public headers. The GEAR decoder is compiled into `labs.a`. OpenCV is dynamically linked at runtime, so consumers link against `labs.a` and set `LD_LIBRARY_PATH` for OpenCV.
 
 ---
 
@@ -17,7 +17,7 @@ The static library containing all LABS functionality.
 | Aspect | Value |
 |--------|-------|
 | **Location** | `lib/labs.a` |
-| **Contents** | RAWS decoder, pipe modules, tune optimizer |
+| **Contents** | GEAR decoder, pipe modules, tune optimizer |
 | **OpenCV** | Runtime link via `LD_LIBRARY_PATH` |
 
 **Build:**
@@ -63,7 +63,7 @@ LIBS = $(LABS_DIR)/lib/labs.a
 | `diff.hpp` | `src/main/part/tune/` | Loss metric helpers |
 | `geos.hpp` | `src/main/part/tune/` | SPSA optimizer + 17³ LUT |
 | `edge.hpp` | `src/main/part/tune/` | Golden section for sharpness |
-| `sony.h` | `inc/RAWS/` | Sony ARW decoder |
+| `sony.h` | `inc/GEAR/` | Sony ARW decoder |
 
 ---
 
@@ -191,9 +191,9 @@ Runtime linked via `LD_LIBRARY_PATH`:
 
 Located at `lib/opencv/build/lib/`.
 
-### RAWS
+### GEAR
 
-Sony decoder compiled into `labs.a` from `lib/RAWS.a`.
+Sony decoder compiled into `labs.a` from `lib/GEAR.a`.
 
 ---
 

@@ -1,4 +1,4 @@
-# RAWS WGPU Shader Tests Makefile (using Dawn backend)
+# GEAR WGPU Shader Tests Makefile (using Dawn backend)
 #
 # Usage:
 #   make -f Makefile.dawn test    # Build and run tests

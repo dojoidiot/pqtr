@@ -48,7 +48,7 @@ The Pipe panel shows the processing tree with an inline image preview:
 
 | Node | Shows |
 |------|-------|
-| `HEAD > base` | Scene-linear RGB from RAWS (gamma-corrected for display) |
+| `HEAD > base` | Scene-linear RGB from GEAR (gamma-corrected for display) |
 | `HEAD > view` | Embedded camera JPEG preview |
 | `BODY` | Processed output after all Links |
 
@@ -57,7 +57,7 @@ The Pipe panel shows the processing tree with an inline image preview:
 When processing a RAW file, DESK produces these outputs:
 
 ```
-<name>.base.png      # HEAD base: scene-linear from RAWS (gamma for display)
+<name>.base.png      # HEAD base: scene-linear from GEAR (gamma for display)
 <name>.view.png      # HEAD view: embedded camera JPEG preview
 <name>.0.pipe.png    # BODY step 0: first link output
 <name>.1.pipe.png    # BODY step 1: second link output (if exists)
@@ -73,7 +73,7 @@ When processing a RAW file, DESK produces these outputs:
 |-----------|-------------|
 | Sidecar Files | `<name>.desk.json` (project), `<name>.pipe.json` (pipe config) |
 | UI Framework | ImGui + GLFW + OpenGL |
-| Input | Any format supported by RAWS (Sony ARW, etc.) |
+| Input | Any format supported by GEAR (Sony ARW, etc.) |
 | Output | PNG (lossless) |
 
 ## Project Structure

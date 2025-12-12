@@ -1,5 +1,5 @@
-# RAWS Library Makefile
-# Builds lib/RAWS.a static library
+# GEAR Library Makefile
+# Builds lib/GEAR.a static library
 #
 # Exposes:
 #   - sony::Decoder (Sony ARW RAW decoder)
@@ -8,7 +8,7 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 
-# OpenCV paths (RAWS depends on LABS for OpenCV)
+# OpenCV paths (GEAR depends on LABS for OpenCV)
 OPENCV_ROOT = ../LABS/lib/opencv
 OPENCV_INCLUDE = -I$(OPENCV_ROOT)/build \
                  -I$(OPENCV_ROOT)/modules/core/include \
@@ -41,8 +41,8 @@ SONY_SRCS = $(SRC_DIR)/part/sony.cpp \
             $(SRC_DIR)/part/sony/crop.cpp \
             $(SRC_DIR)/part/sony/gamma_oetf.cpp
 
-# RAWS API sources
-RAWS_SRCS = $(SRC_DIR)/raws.cpp
+# GEAR API sources
+GEAR_SRCS = $(SRC_DIR)/gear.cpp
 
 # Object files
 SONY_OBJS = $(OBJ_DIR)/sony/sony.o \
@@ -58,23 +58,23 @@ SONY_OBJS = $(OBJ_DIR)/sony/sony.o \
             $(OBJ_DIR)/sony/crop.o \
             $(OBJ_DIR)/sony/gamma_oetf.o
 
-RAWS_OBJS = $(OBJ_DIR)/raws.o
+GEAR_OBJS = $(OBJ_DIR)/gear.o
 
-ALL_OBJS = $(RAWS_OBJS) $(SONY_OBJS)
+ALL_OBJS = $(GEAR_OBJS) $(SONY_OBJS)
 
 # Target static library
-RAWS_A = $(LIB_DIR)/RAWS.a
+GEAR_A = $(LIB_DIR)/GEAR.a
 
 .PHONY: all clean info
 
-all: $(RAWS_A)
+all: $(GEAR_A)
 
-$(RAWS_A): $(ALL_OBJS) | $(LIB_DIR)
+$(GEAR_A): $(ALL_OBJS) | $(LIB_DIR)
 	ar rcs $@ $^
 	@echo "Built: $@"
 
-# RAWS API object
-$(OBJ_DIR)/raws.o: $(SRC_DIR)/raws.cpp | $(OBJ_DIR)
+# GEAR API object
+$(OBJ_DIR)/gear.o: $(SRC_DIR)/gear.cpp | $(OBJ_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 # Sony decoder object
@@ -96,9 +96,9 @@ $(OBJ_DIR)/sony:
 	mkdir -p $(OBJ_DIR)/sony
 
 clean:
-	rm -rf $(TMP_DIR) $(RAWS_A)
+	rm -rf $(TMP_DIR) $(GEAR_A)
 
 info:
-	@echo "Target: $(RAWS_A)"
+	@echo "Target: $(GEAR_A)"
 	@echo "Objects: $(ALL_OBJS)"
 	@echo "OpenCV: $(OPENCV_ROOT)"

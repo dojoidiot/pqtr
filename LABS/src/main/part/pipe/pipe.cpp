@@ -17,8 +17,8 @@
 #include <stdexcept>
 #include <sstream>
 
-// RAW decoder (from RAWS library)
-#include "raws.hpp"
+// RAW decoder (from GEAR library)
+#include "gear.hpp"
 
 namespace pipe
 {
@@ -308,7 +308,7 @@ public:
     LegacyData& data() override { return m_data; }
     LegacyData& view() override { return m_view; }
 
-    // Curve estimation now belongs in LABS, not RAWS
+    // Curve estimation now belongs in LABS, not GEAR
     // Return nullptr/false until LABS implements estimation
     const float* baseCurve() const override { return nullptr; }
     bool hasBaseCurve() const override { return false; }
@@ -384,7 +384,7 @@ public:
     // LEGACY: HEAD→BODY→TAIL interface
     pqtr::Hold<Head> open(pqtr::Hold<pqtr::Sink> sink) override
     {
-        raws::Result raw = raws::decode(*sink);
+        gear::Result raw = gear::decode(*sink);
         if (!raw.success)
             return pqtr::Hold<Head>(nullptr);
 

@@ -5,7 +5,7 @@
 #
 # Usage:
 #   make           # Build everything (wire + raws + labs + tune + desk)
-#   make raws      # Build RAWS library
+#   make raws      # Build GEAR library
 #   make labs      # Build LABS library + tune/labs binaries
 #   make tune      # Build LABS tune binary only
 #   make desk      # Build DESK app (builds LABS first)
@@ -23,7 +23,7 @@ help:
 	@echo ""
 	@echo "Build targets:"
 	@echo "  all       Build everything (default)"
-	@echo "  raws      Build RAWS library"
+	@echo "  raws      Build GEAR library"
 	@echo "  labs      Build LABS library + tune/labs binaries"
 	@echo "  tune      Build LABS tune binary only"
 	@echo "  desk      Build DESK application"
@@ -34,8 +34,8 @@ help:
 	@echo "  ./labs.sh ...   Run labs processor"
 	@echo ""
 	@echo "Test targets:"
-	@echo "  test      Run all tests (RAWS + LABS)"
-	@echo "  test-raws Run RAWS decoder test"
+	@echo "  test      Run all tests (GEAR + LABS)"
+	@echo "  test-raws Run GEAR decoder test"
 	@echo "  test-labs Run LABS test suite"
 	@echo ""
 	@echo "Other:"
@@ -55,13 +55,13 @@ rewire:
 # Build targets
 # ============================================================
 
-# RAWS: decoder library (no dependencies)
+# GEAR: decoder library (no dependencies)
 raws: wire
 	@echo ""
-	@echo "=== Building RAWS ==="
-	$(MAKE) -C RAWS lib
+	@echo "=== Building GEAR ==="
+	$(MAKE) -C GEAR lib
 
-# LABS: core library + binaries (depends on RAWS)
+# LABS: core library + binaries (depends on GEAR)
 labs: raws
 	@echo ""
 	@echo "=== Building LABS ==="
@@ -87,11 +87,11 @@ desk: labs
 # Run all tests
 test: test-raws test-labs
 
-# RAWS test
+# GEAR test
 test-raws: raws
 	@echo ""
-	@echo "=== Testing RAWS ==="
-	$(MAKE) -C RAWS test
+	@echo "=== Testing GEAR ==="
+	$(MAKE) -C GEAR test
 
 # LABS tests
 test-labs: labs
@@ -104,6 +104,6 @@ test-labs: labs
 # ============================================================
 
 clean:
-	$(MAKE) -C RAWS clean 2>/dev/null || true
+	$(MAKE) -C GEAR clean 2>/dev/null || true
 	$(MAKE) -C LABS clean 2>/dev/null || true
 	$(MAKE) -C DESK -f Makefile.desk clean 2>/dev/null || true

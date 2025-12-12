@@ -82,7 +82,7 @@ make tidy   # Clean
 VIBE is used by LABS as part of the processing pipeline:
 
 ```
-RAWS → LUTE → VIBE → output
+GEAR → LUTE → VIBE → output
 ```
 
 Wire into LABS:

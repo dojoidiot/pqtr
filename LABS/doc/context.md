@@ -50,7 +50,7 @@ The 45 dials then handle the **residual differences** - small adjustments that t
 
 ```
 tune <source.ARW> <target|preview> --save-area <dir>
-  Phase 0: Camera Math - apply polynomial from RAWS
+  Phase 0: Camera Math - apply polynomial from GEAR
   Phase 1: Camera Vibe - optimize dials to match preview
   Phase 2: User Vibe - optimize dials to match target (if not preview)
   Output: tune.json with poly_coeffs + dials
@@ -62,7 +62,7 @@ labs <source.ARW> --tune <tune.json> --output <out.png> [--debug]
 
 ## Key Files
 
-- `RAWS/src/main/raws.cpp` - estimates polyCoeffs[30] from flat→preview
+- `GEAR/src/main/raws.cpp` - estimates polyCoeffs[30] from flat→preview
 - `LABS/src/main/part/pipe/mods/poly_color.cpp` - applies polynomial transform
 - `LABS/src/main/part/geos/data.cpp` - serializes poly_coeffs to/from JSON
 - `LABS/src/main/tune.cpp` - three-phase optimizer

@@ -3,7 +3,7 @@
 // Applies darktable-equivalent scene-referred defaults to any camera's output
 //
 // These transforms are camera-agnostic - they work on scene-linear RGB from any decoder.
-// Camera-specific processing (WB, color matrix, etc.) happens in RAWS.
+// Camera-specific processing (WB, color matrix, etc.) happens in GEAR.
 
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>

@@ -6,7 +6,7 @@
 RAW sensor data
      │
      ▼
-   [RAWS] ─── camera decode ──► Scene-linear RGB (flat)
+   [GEAR] ─── camera decode ──► Scene-linear RGB (flat)
      │                          ├── Bayer decode
      │                          ├── White balance
      │                          └── Color matrix
@@ -23,7 +23,7 @@ RAW sensor data
      └── User Vibe: find dials that → photographer's edit
 ```
 
-**The insight:** RAWS handles camera-specific decoding. HEAD applies generic baseline (darktable-equivalent defaults). BODY optimizes style. The camera JPEG is ONE dial setting. A Lightroom edit is ANOTHER dial setting. Same 45 dials, different targets.
+**The insight:** GEAR handles camera-specific decoding. HEAD applies generic baseline (darktable-equivalent defaults). BODY optimizes style. The camera JPEG is ONE dial setting. A Lightroom edit is ANOTHER dial setting. Same 45 dials, different targets.
 
 **In DESK:** The Pipe panel shows this structure - click HEAD/base to see the baselined image, HEAD/view to see the camera preview, or any BODY link to see processed output.
 
@@ -250,7 +250,7 @@ See [hack.md](./hack.md) for full reverse-engineering analysis and foliage scene
 ## Architecture
 
 ```
-RAWS:
+GEAR:
   1. Decode RAW → scene-linear data
   2. Extract embedded JPEG → preview
   3. Estimate baseCurve[768] from flat→preview (neutral pixels only)
@@ -276,7 +276,7 @@ LABS Pipeline:
 | `src/main/part/geos/spsa.cpp` | SPSA gradient-free optimizer |
 | `src/main/part/geos/diff.cpp` | Loss functions (geodesicLoss, spectral features) |
 | `src/main/part/pipe/mods/lut_curve.cpp` | Per-channel LUT estimation |
-| `RAWS/src/main/raws.cpp` | RAW decoding + coefficient estimation |
+| `GEAR/src/main/raws.cpp` | RAW decoding + coefficient estimation |
 | `etc/jacob.json` | Jacobian matrix (45×23 dial→feature sensitivity) |
 
 ## Tools

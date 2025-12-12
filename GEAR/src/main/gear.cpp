@@ -1,12 +1,12 @@
-// raws.cpp
-// RAWS library implementation - loads RAW files to scene-linear RGB
+// gear.cpp
+// GEAR library implementation - handles RAW decoding, metadata, and scene-linear normalization
 // Auto-detects format and dispatches to appropriate loader (Sony, Canon, Nikon, etc.)
 //
-// RAWS provides:
+// GEAR provides:
 //   load() - decode RAW to flat scene-linear
 //   tune() - estimate camera LUT from flat/jpeg pairs
 
-#include "raws.hpp"
+#include "gear.hpp"
 #include "sony.h"
 #include <sstream>
 #include <fstream>
@@ -15,7 +15,7 @@
 #include <cctype>
 #include <opencv2/imgproc.hpp>
 
-namespace raws {
+namespace gear {
 
 // ============================================================
 // CameraLut implementation
@@ -476,7 +476,7 @@ static Result loadSony(pqtr::Sink& sink, const Options& opts)
     for (const auto& kv : sonyInfo)
         result.dataInfo[kv.first] = kv.second;
 
-    result.dataInfo["decoder"] = "raws_sony_arw2";
+    result.dataInfo["decoder"] = "gear_sony_arw2";
 
     // Camera group
     result.dataInfo["camera.make"] = meta.camera_make;
@@ -626,14 +626,14 @@ bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut)
 {
     if (flat.empty() || target.empty())
     {
-        std::cerr << "[raws::tune] Error: Empty input\n";
+        std::cerr << "[gear::tune] Error: Empty input\n";
         return false;
     }
 
     // Skip if already converged
     if (lut.frozen)
     {
-        std::cerr << "[raws::tune] Profile frozen, skipping training\n";
+        std::cerr << "[gear::tune] Profile frozen, skipping training\n";
         return true;
     }
 
@@ -740,7 +740,7 @@ bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut)
             just_converged = true;
         }
 
-        std::cerr << "[raws::tune] Accumulated " << (pixels_added/1000) << "k pixels"
+        std::cerr << "[gear::tune] Accumulated " << (pixels_added/1000) << "k pixels"
                   << ", coverage " << (lut.coverage() * 100.0f) << "%"
                   << ", delta " << (lut.last_delta * 100.0f) << "%"
                   << ", sample #" << lut.sample_count
@@ -751,9 +751,9 @@ bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut)
     }
     catch (const std::exception& e)
     {
-        std::cerr << "[raws::tune] Error: " << e.what() << "\n";
+        std::cerr << "[gear::tune] Error: " << e.what() << "\n";
         return false;
     }
 }
 
-} // namespace raws
+} // namespace gear

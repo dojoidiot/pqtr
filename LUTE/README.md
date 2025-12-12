@@ -20,7 +20,7 @@ LUTE manages four transform types, all learned from camera behavior:
 ## Learning Process
 
 ```
-1. RAWS decodes RAW → scene-linear RGB
+1. GEAR decodes RAW → scene-linear RGB
 2. Extract embedded preview JPEG
 3. LUTE compares flat vs preview
 4. Accumulate RGB→RGB mappings into transforms

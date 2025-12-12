@@ -27,7 +27,7 @@ Two-phase processing that mirrors professional workflow:
 
 | Project | Status | Purpose |
 |---------|--------|---------|
-| RAWS | Active | RAW decoder |
+| GEAR | Active | RAW decoder |
 | LUTE | Active | Camera profiles |
 | VIBE | Active | Creative styles (51 dials) |
 | TUNE | Active | Style optimizer |
@@ -40,7 +40,7 @@ Two-phase processing that mirrors professional workflow:
 
 - VIBE: 13 WGSL shaders (creative dials)
 - LUTE: 4 WGSL shaders (camera transforms)
-- RAWS: 5 WGSL shaders (RAW decode)
+- GEAR: 5 WGSL shaders (RAW decode)
 - TUNE: Style optimizer (GeoS algorithm)
 
 ## Next
@@ -58,5 +58,5 @@ Two-phase processing that mirrors professional workflow:
 # GPU shader tests
 cd VIBE && make test-dawn
 cd LUTE && make test-dawn
-cd RAWS && make test-dawn
+cd GEAR && make test-dawn
 ```

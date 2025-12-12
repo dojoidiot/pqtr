@@ -1,5 +1,5 @@
 // base_curve.cpp
-// Base Curve Module - Applies per-channel tone curves derived by RAWS
+// Base Curve Module - Applies per-channel tone curves derived by GEAR
 // Bridges the gap between flat RAW decode and camera JPEG appearance
 
 #include <opencv2/core.hpp>

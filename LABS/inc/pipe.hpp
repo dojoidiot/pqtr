@@ -6,7 +6,7 @@
 //   tune - learn + render (optimize transforms)
 //
 // Modules contribute Tasks to the pipe:
-//   RAWS - decode RAW to flat
+//   GEAR - decode RAW to flat
 //   LUTE - camera profile LUT
 //   DROP - DRO correction (deferred)
 //   VIBE - 45 style dials
@@ -259,7 +259,7 @@ namespace pipe
             };
 
             // Module 2.5: Base Curve (from RAW decoder) - LINEAR_RGB
-            // NOT a dial-based module - curve derived by RAWS from RAW→preview
+            // NOT a dial-based module - curve derived by GEAR from RAW→preview
             // Applied early to bridge flat RAW → camera JPEG appearance gap
             class BaseCurve
             {
@@ -284,7 +284,7 @@ namespace pipe
             };
 
             // Module 2.6: Polynomial Color (Camera Math) - LINEAR_RGB
-            // NOT a dial-based module - coefficients derived by RAWS from RAW→preview
+            // NOT a dial-based module - coefficients derived by GEAR from RAW→preview
             // Captures camera's global RGB→RGB transform via quadratic polynomial
             class PolyColor
             {
@@ -666,7 +666,7 @@ namespace pipe
     //
     // Example:
     //   auto pipe = pipe::make();
-    //   pipe->add(raws::task());   // decode
+    //   pipe->add(gear::task());   // decode
     //   pipe->add(lute::task());   // camera profile
     //   pipe->add(vibe::task());   // 45 dials
     //   Data out = pipe->view(in);
