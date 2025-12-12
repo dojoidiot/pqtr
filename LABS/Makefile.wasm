@@ -1,0 +1,56 @@
+# Makefile.wasm - Build LABS login for WebAssembly
+#
+# Requires: Emscripten SDK
+#   git clone https://github.com/emscripten-core/emsdk.git
+#   cd emsdk && ./emsdk install latest && ./emsdk activate latest
+#   source emsdk_env.sh
+#
+# Build: make -f Makefile.wasm
+# Output: tmp/wasm/labs.html, labs.js, labs.wasm
+
+IMGUI = lib/imgui
+
+SRC = src/wasm/login.cpp \
+      $(IMGUI)/imgui.cpp \
+      $(IMGUI)/imgui_draw.cpp \
+      $(IMGUI)/imgui_tables.cpp \
+      $(IMGUI)/imgui_widgets.cpp \
+      $(IMGUI)/backends/imgui_impl_glfw.cpp \
+      $(IMGUI)/backends/imgui_impl_opengl3.cpp
+
+INC = -I$(IMGUI) -I$(IMGUI)/backends
+
+# Emscripten flags
+EMFLAGS = -s USE_GLFW=3 \
+          -s USE_WEBGL2=1 \
+          -s FULL_ES3=1 \
+          -s WASM=1 \
+          -s ALLOW_MEMORY_GROWTH=1 \
+          -s NO_EXIT_RUNTIME=1 \
+          -s ASSERTIONS=1
+
+# Shell template (custom HTML)
+SHELL_TPL = --shell-file src/wasm/shell.html
+
+OUT = tmp/wasm
+
+.PHONY: all clean deploy
+
+all: $(OUT)/labs.js $(OUT)/labs.html
+
+$(OUT)/labs.js: $(SRC) | $(OUT)
+	emcc $(SRC) $(INC) $(EMFLAGS) -O2 -o $@
+
+$(OUT)/labs.html: src/wasm/shell.html $(OUT)/labs.js
+	sed 's|{{{ SCRIPT }}}|<script src="labs.js"></script>|' $< > $@
+
+$(OUT):
+	mkdir -p $(OUT)
+
+clean:
+	rm -rf $(OUT)
+
+# Deploy to BASE/www
+deploy: all
+	cp $(OUT)/labs.html $(OUT)/labs.js $(OUT)/labs.wasm ../BASE/www/
+	@echo "Deployed to BASE/www/"

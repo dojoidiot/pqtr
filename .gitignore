@@ -20,3 +20,8 @@ LABS/var/*
 /LABS/inc/RAWS
 /LABS/lib/RAWS.a
 /DESK/lib/LABS.a
+/PIPE/inc/GEAR
+/PIPE/lib/GEAR.a
+/LABS/lib/PIPE.a
+tmp/
+LABS/lib/

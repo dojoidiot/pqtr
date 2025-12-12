@@ -152,21 +152,16 @@ All metadata is indexed from JSON sidecars and camera EXIF data. You can downloa
 
 Reference documentation is in [docs/](docs/).
 
-## Building
+## Development
 
+**Test locally:**
 ```bash
-./wire.sh && make    # Build all projects
-make clean           # Clean everything
+bash test.sh
+# Open http://127.0.0.1:8080/main.html
+# OTP codes print to console
 ```
 
-## Testing
-
+**Deploy to production:**
 ```bash
-# GPU shader tests
-cd VIBE && make test-dawn
-cd GEAR && make test-dawn
-
-# Module tests
-cd LUTE && make test
-cd PIPE && make test
+bash send.sh
 ```

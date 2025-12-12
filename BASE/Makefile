@@ -28,7 +28,7 @@ HTTPLIB_INC = $(LIB_DIR)/cpp-httplib
 INCLUDES = -I$(INC_DIR) -I$(SODIUM_INC) -I$(SQLITE_DIR) -I$(HTTPLIB_INC)
 
 # Objects
-LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o
+LIB_OBJS = $(TMP_DIR)/jwta.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o $(TMP_DIR)/console.o
 
 # Output
 LIB_TARGET = $(TMP_DIR)/jwta.a
@@ -60,6 +60,9 @@ $(TMP_DIR)/sqlite.o: $(SRC_DIR)/plug/sqlite.cpp $(INC_DIR)/data.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 $(TMP_DIR)/mailgun.o: $(SRC_DIR)/plug/mailgun.cpp $(INC_DIR)/mail.hpp | $(TMP_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(TMP_DIR)/console.o: $(SRC_DIR)/plug/console.cpp $(INC_DIR)/mail.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:

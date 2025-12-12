@@ -46,12 +46,34 @@
             font-family: 'Roboto', sans-serif;
             line-height: 1.2;
         }
+
+        .login-btn {
+            display: inline-block;
+            margin-top: 2rem;
+            padding: 0.8rem 2.5rem;
+            font-size: 1.1rem;
+            font-weight: 500;
+            color: #fff;
+            background: rgba(100, 160, 255, 0.8);
+            border: none;
+            border-radius: 8px;
+            text-decoration: none;
+            cursor: pointer;
+            transition: background 0.2s, transform 0.1s;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .login-btn:hover {
+            background: rgba(100, 160, 255, 1.0);
+            transform: translateY(-2px);
+        }
     </style>
 </head>
 <body>
     <div class="hero">
         <h1 class="hero-title">PQTR</h1>
         <p class="hero-subtitle">/picture/</p>
+        <a href="labs.html" class="login-btn">Open LABS</a>
     </div>
 </body>
 </html>

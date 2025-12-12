@@ -22,4 +22,7 @@ std::unique_ptr<Mailer> createMailer(
     const std::string& region
 );
 
+// Console mailer for local testing (prints OTP to stdout)
+std::unique_ptr<Mailer> createConsoleMailer();
+
 } // namespace jwta

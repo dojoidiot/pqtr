@@ -187,15 +187,17 @@ std::string jrpcError(const std::string& id, int code, const std::string& messag
 int main(int argc, char* argv[]) {
     std::string config_path;
     std::string data_area;
+    bool test_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::cout << "BASE Server - Static site + JWT Auth\n\n"
-                      << "Usage: base --info-file <config.json> --data-area <path>\n\n"
+                      << "Usage: base --info-file <config.json> --data-area <path> [--test]\n\n"
                       << "Options:\n"
                       << "  --info-file <path>   Config file (required)\n"
                       << "  --data-area <path>   Data directory (required)\n"
+                      << "  --test               Test mode: print OTP to console (no email)\n"
                       << "  -h, --help           Show this help\n";
             return 0;
         } else if (arg == "--info-file" && i + 1 < argc) {
@@ -203,6 +205,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--data-area" && i + 1 < argc) {
             data_area = argv[++i];
             if (!data_area.empty() && data_area.back() != '/') data_area += '/';
+        } else if (arg == "--test") {
+            test_mode = true;
         }
     }
 
@@ -252,29 +256,32 @@ int main(int argc, char* argv[]) {
         std::cerr << "[BASE] Error: sqlite.file required in config" << std::endl;
         return 1;
     }
-    if (cfg.mailgun_otp_skey.empty()) {
-        std::cerr << "[BASE] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
-        return 1;
-    }
-    if (cfg.mailgun_secret.empty()) {
-        std::cerr << "[BASE] Error: failed to load secret from: " << cfg.mailgun_otp_skey << std::endl;
-        return 1;
-    }
-    if (cfg.mailgun_domain.empty()) {
-        std::cerr << "[BASE] Error: mailgun.domain required in config" << std::endl;
-        return 1;
-    }
-    if (cfg.mailgun_region.empty()) {
-        std::cerr << "[BASE] Error: mailgun.region required in config" << std::endl;
-        return 1;
-    }
-    if (cfg.otp_from.empty()) {
-        std::cerr << "[BASE] Error: otp_from required in config" << std::endl;
-        return 1;
-    }
-    if (cfg.otp_text.empty()) {
-        std::cerr << "[BASE] Error: otp_text required in config" << std::endl;
-        return 1;
+    // Mailgun config only required if not in test mode
+    if (!test_mode) {
+        if (cfg.mailgun_otp_skey.empty()) {
+            std::cerr << "[BASE] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
+            return 1;
+        }
+        if (cfg.mailgun_secret.empty()) {
+            std::cerr << "[BASE] Error: failed to load secret from: " << cfg.mailgun_otp_skey << std::endl;
+            return 1;
+        }
+        if (cfg.mailgun_domain.empty()) {
+            std::cerr << "[BASE] Error: mailgun.domain required in config" << std::endl;
+            return 1;
+        }
+        if (cfg.mailgun_region.empty()) {
+            std::cerr << "[BASE] Error: mailgun.region required in config" << std::endl;
+            return 1;
+        }
+        if (cfg.otp_from.empty()) {
+            std::cerr << "[BASE] Error: otp_from required in config" << std::endl;
+            return 1;
+        }
+        if (cfg.otp_text.empty()) {
+            std::cerr << "[BASE] Error: otp_text required in config" << std::endl;
+            return 1;
+        }
     }
 
     std::string db_path = data_area + cfg.sqlite_file;
@@ -285,8 +292,14 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "[BASE] Database: " << db_path << std::endl;
 
-    auto mailer = jwta::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
-    std::cout << "[BASE] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
+    std::unique_ptr<jwta::Mailer> mailer;
+    if (test_mode) {
+        mailer = jwta::createConsoleMailer();
+        std::cout << "[BASE] Mailer: CONSOLE (test mode)" << std::endl;
+    } else {
+        mailer = jwta::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
+        std::cout << "[BASE] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
+    }
 
     jwta::Service service(*store, *mailer);
     if (!service.init()) {
