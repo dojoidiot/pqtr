@@ -1,14 +1,14 @@
 [submodule "PIPE/lib/opencv"]
 	path = PIPE/lib/opencv
 	url = https://github.com/opencv/opencv.git
-[submodule "DESK/lib/imgui"]
-	path = DESK/lib/imgui
+[submodule "LABS/lib/imgui"]
+	path = LABS/lib/imgui
 	url = https://github.com/ocornut/imgui.git
-[submodule "DESK/lib/glfw"]
-	path = DESK/lib/glfw
+[submodule "LABS/lib/glfw"]
+	path = LABS/lib/glfw
 	url = https://github.com/glfw/glfw.git
-[submodule "DESK/lib/ImGuiFileDialog"]
-	path = DESK/lib/ImGuiFileDialog
+[submodule "LABS/lib/ImGuiFileDialog"]
+	path = LABS/lib/ImGuiFileDialog
 	url = https://github.com/aiekick/ImGuiFileDialog.git
 [submodule "WGPU/lib/dawn"]
 	path = WGPU/lib/dawn

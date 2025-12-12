@@ -33,7 +33,7 @@ Two-phase processing that mirrors professional workflow:
 | TUNE | Active | Style optimizer |
 | PIPE | Active | Pipeline orchestrator |
 | WGPU | Active | GPU compute |
-| DESK | In Dev | Desktop GUI |
+| LABS | In Dev | Desktop GUI |
 | BASE | Active | Web server |
 
 ## What's Working
@@ -47,7 +47,7 @@ Two-phase processing that mirrors professional workflow:
 
 - [ ] Wire LUTE into PIPE pipeline
 - [ ] Wire VIBE into PIPE pipeline
-- [ ] DESK UI for vibe creation
+- [ ] LABS UI for vibe creation
 - [ ] Profile convergence testing
 
 ## Build & Test

@@ -1,0 +1,171 @@
+# LABS Makefile
+# Builds bin/labs executable
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# Library paths
+IMGUI_DIR = ./lib/imgui
+GLFW_DIR = ./lib/glfw
+GLFW_BUILD = $(GLFW_DIR)/build
+FILEDIALOG_DIR = ./lib/ImGuiFileDialog
+STB_DIR = $(FILEDIALOG_DIR)/stb
+LABS_DIR = ../LABS
+LABS_INC = $(LABS_DIR)/inc
+LABS_LIB = $(LABS_DIR)/lib
+OPENCV_ROOT = $(LABS_DIR)/lib/opencv
+OPENCV_INC = -I$(OPENCV_ROOT)/build \
+             -I$(OPENCV_ROOT)/modules/core/include \
+             -I$(OPENCV_ROOT)/modules/imgproc/include \
+             -I$(OPENCV_ROOT)/modules/imgcodecs/include
+
+# Include paths
+INCLUDES = -I$(IMGUI_DIR) \
+           -I$(IMGUI_DIR)/backends \
+           -I$(GLFW_DIR)/include \
+           -I$(FILEDIALOG_DIR) \
+           -I$(STB_DIR) \
+           -I$(LABS_INC) \
+           $(OPENCV_INC) \
+           -I./src/main
+
+# OpenCV library path (for linking)
+OPENCV_LIB = $(OPENCV_ROOT)/build/lib
+
+# Library flags - static OpenCV linking
+LDFLAGS = -L$(GLFW_BUILD)/src
+OPENCV_STATIC = $(OPENCV_LIB)/libopencv_imgcodecs.a \
+                $(OPENCV_LIB)/libopencv_imgproc.a \
+                $(OPENCV_LIB)/libopencv_core.a
+LIBS = -lglfw3 $(LABS_LIB)/labs.a $(OPENCV_STATIC) -lpng -ljpeg -lz -lGL -ldl -lpthread -lX11 -lXrandr -lXi -lXcursor -lXinerama
+
+# Directories
+SRC_DIR = src/main
+PART_DIR = $(SRC_DIR)/part
+TMP_DIR = tmp/labs
+BIN_DIR = bin
+OBJ_DIR = $(TMP_DIR)/obj
+
+# ImGui sources
+IMGUI_SRCS = $(IMGUI_DIR)/imgui.cpp \
+             $(IMGUI_DIR)/imgui_draw.cpp \
+             $(IMGUI_DIR)/imgui_tables.cpp \
+             $(IMGUI_DIR)/imgui_widgets.cpp \
+             $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp \
+             $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp
+
+# ImGuiFileDialog source
+FILEDIALOG_SRC = $(FILEDIALOG_DIR)/ImGuiFileDialog.cpp
+
+# Application sources
+LABS_SRC = $(SRC_DIR)/labs.cpp
+PART_SRCS = $(PART_DIR)/state.cpp \
+            $(PART_DIR)/theme.cpp \
+            $(PART_DIR)/files.cpp \
+            $(PART_DIR)/projects.cpp \
+            $(PART_DIR)/workarea.cpp \
+            $(PART_DIR)/linkeditor.cpp \
+            $(PART_DIR)/chat.cpp
+
+# Object files
+IMGUI_OBJS = $(OBJ_DIR)/imgui.o \
+             $(OBJ_DIR)/imgui_draw.o \
+             $(OBJ_DIR)/imgui_tables.o \
+             $(OBJ_DIR)/imgui_widgets.o \
+             $(OBJ_DIR)/imgui_impl_glfw.o \
+             $(OBJ_DIR)/imgui_impl_opengl3.o
+
+FILEDIALOG_OBJ = $(OBJ_DIR)/ImGuiFileDialog.o
+
+LABS_OBJ = $(OBJ_DIR)/labs.o
+PART_OBJS = $(OBJ_DIR)/part/state.o \
+            $(OBJ_DIR)/part/theme.o \
+            $(OBJ_DIR)/part/files.o \
+            $(OBJ_DIR)/part/projects.o \
+            $(OBJ_DIR)/part/workarea.o \
+            $(OBJ_DIR)/part/linkeditor.o \
+            $(OBJ_DIR)/part/chat.o
+
+# Target
+LABS_BIN = $(BIN_DIR)/labs
+
+.PHONY: all clean glfw
+
+all: glfw $(LABS_BIN)
+
+# Build GLFW if not present
+glfw:
+	@if [ ! -f $(GLFW_BUILD)/src/libglfw3.a ]; then \
+		echo "Building GLFW..."; \
+		mkdir -p $(GLFW_BUILD); \
+		cd $(GLFW_BUILD) && cmake .. -DGLFW_BUILD_EXAMPLES=OFF -DGLFW_BUILD_TESTS=OFF -DGLFW_BUILD_DOCS=OFF && make -j$$(nproc); \
+	fi
+
+$(LABS_BIN): $(IMGUI_OBJS) $(FILEDIALOG_OBJ) $(PART_OBJS) $(LABS_OBJ) $(LABS_LIB)/labs.a | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $^ $(LIBS)
+
+# ImGui core
+$(OBJ_DIR)/imgui.o: $(IMGUI_DIR)/imgui.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_draw.o: $(IMGUI_DIR)/imgui_draw.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_tables.o: $(IMGUI_DIR)/imgui_tables.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_widgets.o: $(IMGUI_DIR)/imgui_widgets.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# ImGui backends
+$(OBJ_DIR)/imgui_impl_glfw.o: $(IMGUI_DIR)/backends/imgui_impl_glfw.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/imgui_impl_opengl3.o: $(IMGUI_DIR)/backends/imgui_impl_opengl3.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# ImGuiFileDialog
+$(OBJ_DIR)/ImGuiFileDialog.o: $(FILEDIALOG_SRC) | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Application parts
+$(OBJ_DIR)/part/state.o: $(PART_DIR)/state.cpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/theme.o: $(PART_DIR)/theme.cpp $(PART_DIR)/theme.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/files.o: $(PART_DIR)/files.cpp $(PART_DIR)/files.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/projects.o: $(PART_DIR)/projects.cpp $(PART_DIR)/projects.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/workarea.o: $(PART_DIR)/workarea.cpp $(PART_DIR)/workarea.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/linkeditor.o: $(PART_DIR)/linkeditor.cpp $(PART_DIR)/linkeditor.hpp $(PART_DIR)/state.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(OBJ_DIR)/part/chat.o: $(PART_DIR)/chat.cpp $(PART_DIR)/chat.hpp | $(OBJ_DIR)/part
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Main application
+$(OBJ_DIR)/labs.o: $(SRC_DIR)/labs.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+$(BIN_DIR):
+	mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+$(OBJ_DIR)/part:
+	mkdir -p $(OBJ_DIR)/part
+
+clean:
+	rm -rf $(TMP_DIR) $(BIN_DIR)/labs
+
+clean-all: clean
+	rm -rf $(GLFW_BUILD)

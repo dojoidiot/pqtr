@@ -37,7 +37,7 @@ LD_LIBRARY_PATH=lib/opencv/build/lib ./bin/tune \
 ```
 
 ## Project Structure
-- MAINs: GEAR, PIPE, DESK, FAST, PLAY, SITE
+- MAINs: GEAR, PIPE, LABS, FAST, PLAY, SITE
 - Each MAIN is self-contained with `src/`, `inc/`, `lib/`, `bin/`
 - Dependencies via `wire.sh` symlinks
 

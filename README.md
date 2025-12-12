@@ -129,7 +129,7 @@ BASE is your PQTR home base. It is the web server, authentication system, and ho
 | **TUNE** | Style optimizer — finds dial values to match a reference |
 | **PIPE** | Pipeline orchestrator — coordinates GEAR → LUTE → VIBE |
 | **WGPU** | GPU compute — WebGPU/WGSL shaders for fast processing |
-| **DESK** | Desktop app — GUI for creating and editing vibes |
+| **LABS** | Desktop app — GUI for creating and editing vibes |
 | **BASE** | Web server — JWT auth + static site for pqtr.ai |
 
 ## Building

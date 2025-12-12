@@ -13,7 +13,7 @@
 #   - INTO: target project (consumes the artifact)
 #
 # Assumptions:
-#   - Projects use UPPERCASE names (PIPE, DESK, GEAR)
+#   - Projects use UPPERCASE names (PIPE, LABS, GEAR)
 #   - Each project has standard subdirs: inc/, src/, lib/
 #   - Libraries are static archives named <project>.a (lowercase)
 #   - Script runs from repository root
@@ -132,7 +132,7 @@ run_wires() {
 
     $cmd GEAR inc PIPE   # PIPE includes GEAR headers (API)
     $cmd GEAR lib PIPE   # PIPE links GEAR library
-    $cmd PIPE lib DESK   # DESK links PIPE library
+    $cmd PIPE lib LABS   # LABS links PIPE library
 }
 
 # --- Main ---

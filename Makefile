@@ -8,7 +8,7 @@
 #   make raws      # Build GEAR library
 #   make labs      # Build PIPE library + tune/labs binaries
 #   make tune      # Build PIPE tune binary only
-#   make desk      # Build DESK app (builds PIPE first)
+#   make desk      # Build LABS app (builds PIPE first)
 #   make test      # Run all tests
 #   make clean     # Clean all projects
 #   make rewire    # Remove and recreate all symlinks
@@ -26,10 +26,10 @@ help:
 	@echo "  raws      Build GEAR library"
 	@echo "  labs      Build PIPE library + tune/labs binaries"
 	@echo "  tune      Build PIPE tune binary only"
-	@echo "  desk      Build DESK application"
+	@echo "  desk      Build LABS application"
 	@echo ""
 	@echo "Run targets:"
-	@echo "  ./desk.sh       Launch DESK GUI"
+	@echo "  ./desk.sh       Launch LABS GUI"
 	@echo "  ./tune.sh ...   Run tune optimizer"
 	@echo "  ./labs.sh ...   Run labs processor"
 	@echo ""
@@ -74,11 +74,11 @@ tune: labs
 	@echo "=== Building TUNE ==="
 	$(MAKE) -C PIPE -f Makefile.tune tune
 
-# DESK: GUI application (depends on PIPE)
+# LABS: GUI application (depends on PIPE)
 desk: labs
 	@echo ""
-	@echo "=== Building DESK ==="
-	$(MAKE) -C DESK -f Makefile.desk
+	@echo "=== Building LABS ==="
+	$(MAKE) -C LABS -f Makefile.desk
 
 # ============================================================
 # Test targets
@@ -106,4 +106,4 @@ test-labs: labs
 clean:
 	$(MAKE) -C GEAR clean 2>/dev/null || true
 	$(MAKE) -C PIPE clean 2>/dev/null || true
-	$(MAKE) -C DESK -f Makefile.desk clean 2>/dev/null || true
+	$(MAKE) -C LABS -f Makefile.desk clean 2>/dev/null || true
