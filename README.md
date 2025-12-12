@@ -117,7 +117,24 @@ LABS is the PQTR application — available anywhere, any time. It provides a GUI
 
 ### BASE
 
-BASE is your PQTR home base. It is the web server, authentication system, and home of your PQTR data — your RAWs, camera settings, Lightroom/Darktable vibe images, and your PQTR-processed images that you have posted. It also has a FIND function that allows you to search for any image using natural language queries.
+BASE is your PQTR home base — the web server, authentication system, and home of your PQTR data. It stores your RAWs, camera settings, Lightroom/Darktable vibe images, and your PQTR-processed images. BASE includes a FIND function for searching any image using natural language queries.
+
+BASE uses the industry-standard sidecar model:
+
+```
+BASE/
+├── GEAR/                           # Camera data by type
+│   └── Sony_ILCE-7M4/
+├── PIPE/                           # Image data by RAW filename
+│   └── DSC00144/
+│       ├── DSC00144.ARW            # Original RAW file
+│       ├── DSC00144.png            # Embedded preview
+│       ├── DSC00144.lute.json      # LUTE sidecar
+│       ├── DSC00144.vibe.json      # VIBE sidecar
+│       └── DSC00144.pipe.json      # Pipeline sidecar
+```
+
+All metadata is indexed from JSON sidecars and camera EXIF data. You can download part or all of your BASE data at any time.
 
 ## Projects
 
