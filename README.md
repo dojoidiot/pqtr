@@ -140,15 +140,17 @@ All metadata is indexed from JSON sidecars and camera EXIF data. You can downloa
 
 | Project | Purpose |
 |---------|---------|
-| **GEAR** | Camera gear — RAW decoding, metadata, scene-linear normalization |
-| **LUTE** | Camera profiles — learns gear manufacturer's color science |
-| **DROP** | Dynamic range — optimization for high-contrast scenes |
-| **VIBE** | Creative styles — 51 adjustable dials for photographer expression |
-| **PIPE** | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DROP,VIBE] -> TAIL [POST] |
-| **POST** | Distribution — platform plugins for Instagram, Email, SMS, etc. |
-| **WGPU** | GPU compute — WebGPU/WGSL shaders for fast processing |
-| **LABS** | WASM app — Anywhere, any time, creating and editing vibes |
-| **BASE** | Web server — JWT auth + static site for pqtr.ai |
+| [GEAR](GEAR/README.md) | Camera gear — RAW decoding, metadata, scene-linear normalization |
+| [LUTE](LUTE/README.md) | Camera profiles — learns gear manufacturer's color science |
+| [DROP](DROP/README.md) | Dynamic range — optimization for high-contrast scenes |
+| [VIBE](VIBE/README.md) | Creative styles — 51 adjustable dials for photographer expression |
+| [PIPE](PIPE/README.md) | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DROP,VIBE] -> TAIL [POST] |
+| [POST](POST/README.md) | Distribution — platform plugins for Instagram, Email, SMS, etc. |
+| [WGPU](WGPU/README.md) | GPU compute — WebGPU/WGSL shaders for fast processing |
+| [LABS](LABS/README.md) | WASM app — Anywhere, any time, creating and editing vibes |
+| [BASE](BASE/README.md) | Web server — JWT auth + static site for pqtr.ai |
+
+Reference documentation is in [docs/](docs/).
 
 ## Building
 

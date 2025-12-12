@@ -1,16 +1,14 @@
 # PQTR Project Rules
 
 ## Session Restart
-When starting a new session, read these files to get up to speed:
-1. `README.md` - Project overview and architecture
-2. `next.md` - Current state and next steps
+When starting a new session, read `README.md` for project overview and architecture.
 
 ## Hard Shut
 When the user says **"hard shut"**, immediately:
-1. Read `PIPE/doc/docs.md` for documentation standards
+1. Read `docs/PIPE/docs.md` for documentation standards
 2. Update all affected docs to reflect current implementation:
-   - `PIPE/doc/tldr.md` - current status summary
-   - `PIPE/doc/todo.md` - remaining work
+   - `docs/PIPE/tldr.md` - current status summary
+   - `docs/PIPE/todo.md` - remaining work
    - `PIPE/README.md` - if architecture changed
    - Module docs if dials/features changed
 3. Apply docs.md rules: present tense, correct terminology, accurate counts
