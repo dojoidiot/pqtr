@@ -1,13 +1,13 @@
 // test_sqlite.cpp
-// Test JWTA with SQLite store
+// Test BASE with SQLite store
 
-#include "jwta.hpp"
+#include "base.hpp"
 #include "sqlite_store.hpp"
 #include <iostream>
 #include <cstdio>
 
 // Console mailer for testing
-class ConsoleMailer : public jwta::Mailer {
+class ConsoleMailer : public base::Mailer {
 public:
     bool sendOtp(const std::string& email, const std::string& otp) override {
         std::cout << "[MAIL] OTP " << otp << " -> " << email << std::endl;
@@ -18,14 +18,14 @@ public:
 };
 
 int main() {
-    std::cout << "=== JWTA SQLite Test ===" << std::endl;
+    std::cout << "=== BASE SQLite Test ===" << std::endl;
 
     // Use temp database
-    const char* db_path = "/tmp/jwta_test.db";
+    const char* db_path = "/tmp/base_test.db";
     std::remove(db_path);  // Clean up any previous test
 
     // Initialize store
-    jwta::SqliteStore store;
+    base::SqliteStore store;
     if (!store.open(db_path)) {
         std::cerr << "Failed to open database" << std::endl;
         return 1;
@@ -34,7 +34,7 @@ int main() {
 
     // Initialize service
     ConsoleMailer mailer;
-    jwta::Service service(store, mailer);
+    base::Service service(store, mailer);
 
     if (!service.init()) {
         std::cerr << "Failed to initialize service" << std::endl;
@@ -46,7 +46,7 @@ int main() {
     // Test registration
     std::cout << "\n--- Registration ---" << std::endl;
 
-    jwta::rpc::RegisterRequest reg_req;
+    base::rpc::RegisterRequest reg_req;
     reg_req.email = "alice@example.com";
     auto reg_resp = service.handleRegister(reg_req);
 
@@ -57,7 +57,7 @@ int main() {
     std::cout << "[OK] Registration initiated" << std::endl;
 
     // Verify OTP
-    jwta::rpc::VerifyRequest verify_req;
+    base::rpc::VerifyRequest verify_req;
     verify_req.email = "alice@example.com";
     verify_req.otp = mailer.last_otp;
     auto verify_resp = service.handleVerify(verify_req);
@@ -83,7 +83,7 @@ int main() {
     // Test login
     std::cout << "\n--- Login ---" << std::endl;
 
-    jwta::rpc::LoginRequest login_req;
+    base::rpc::LoginRequest login_req;
     login_req.email = "alice@example.com";
     auto login_resp = service.handleLogin(login_req);
 
@@ -93,7 +93,7 @@ int main() {
     }
     std::cout << "[OK] Login OTP sent" << std::endl;
 
-    jwta::rpc::VerifyRequest login_verify;
+    base::rpc::VerifyRequest login_verify;
     login_verify.email = "alice@example.com";
     login_verify.otp = mailer.last_otp;
     auto login_verify_resp = service.handleVerify(login_verify);
@@ -105,7 +105,7 @@ int main() {
     std::cout << "[OK] Login successful" << std::endl;
 
     // Verify JWT
-    auto claims = jwta::jwt::decode(login_verify_resp.jwt, service.getSigningPubkey());
+    auto claims = base::jwt::decode(login_verify_resp.jwt, service.getSigningPubkey());
     if (!claims) {
         std::cerr << "JWT decode failed" << std::endl;
         return 1;
@@ -115,7 +115,7 @@ int main() {
     // Test pubkey lookup
     std::cout << "\n--- Pubkey Lookup ---" << std::endl;
 
-    jwta::rpc::PubkeyRequest pk_req;
+    base::rpc::PubkeyRequest pk_req;
     pk_req.user_id = verify_resp.user_id;
     auto pk_resp = service.handlePubkey(pk_req);
 
@@ -129,7 +129,7 @@ int main() {
     std::cout << "\n--- Persistence Test ---" << std::endl;
     store.close();
 
-    jwta::SqliteStore store2;
+    base::SqliteStore store2;
     if (!store2.open(db_path)) {
         std::cerr << "Failed to reopen database" << std::endl;
         return 1;

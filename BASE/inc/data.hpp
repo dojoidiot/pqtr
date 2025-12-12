@@ -48,6 +48,15 @@ public:
     virtual bool storeRefreshToken(const std::string& user_id, const std::string& token_hash) = 0;
     virtual bool validateRefreshToken(const std::string& user_id, const std::string& token_hash) = 0;
     virtual bool revokeRefreshToken(const std::string& user_id) = 0;
+
+    // Rate limiting - returns true if action is allowed
+    // OTP: max 3 requests per 10 minutes per email
+    // Verify: max 5 attempts per OTP (to prevent brute force)
+    virtual bool checkOtpRateLimit(const std::string& email) = 0;
+    virtual void recordOtpRequest(const std::string& email) = 0;
+    virtual bool checkVerifyRateLimit(const std::string& email) = 0;
+    virtual void recordVerifyAttempt(const std::string& email) = 0;
+    virtual void clearVerifyAttempts(const std::string& email) = 0;
 };
 
 std::unique_ptr<Store> createStore(const std::string& db_path);

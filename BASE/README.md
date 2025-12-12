@@ -34,3 +34,12 @@ BASE/
 - User roles: NONE, PLAY, HERO, PQTR
 - Binary file upload (`/push` endpoint)
 - JRPC API for auth and file management
+
+## Security
+
+- Path traversal prevention (validated path components)
+- Rate limiting: 3 OTP requests / 10 min, 5 verify attempts / OTP
+- Constant-time OTP comparison (sodium_memcmp)
+- No shell commands with user input (httplib for mail)
+- JWT claims escaped, itag validated before file ops
+- Bootstrap token one-time use only

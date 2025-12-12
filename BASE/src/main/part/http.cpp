@@ -1,13 +1,31 @@
 // http.cpp - HTTP service handlers
 
 #include "base.hpp"
+#include "itag.hpp"
 #include <sodium.h>
 #include <ctime>
 #include <cstdio>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <cerrno>
 
 namespace base {
+
+// Validate a path component (name or filename) - prevent directory traversal
+// Allows: alphanumeric, dash, underscore, dot (but not leading dot or ..)
+static bool validPathComponent(const std::string& s) {
+    if (s.empty() || s.size() > 255) return false;
+    if (s[0] == '.') return false;  // No hidden files or ..
+    if (s.find("..") != std::string::npos) return false;
+    for (char c : s) {
+        if (c >= 'a' && c <= 'z') continue;
+        if (c >= 'A' && c <= 'Z') continue;
+        if (c >= '0' && c <= '9') continue;
+        if (c == '-' || c == '_' || c == '.') continue;
+        return false;  // Invalid character (including / and null)
+    }
+    return true;
+}
 
 Service::Service(Store& store, Mailer& mailer)
     : m_store(store), m_mailer(mailer) {
@@ -31,6 +49,12 @@ bool Service::init() {
 rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     rpc::RegisterResponse resp{};
 
+    // Rate limit check
+    if (!m_store.checkOtpRateLimit(req.email)) {
+        resp.ok = false;
+        return resp;  // Too many requests
+    }
+
     // Check if user already exists - if so, send login OTP instead
     auto existing = m_store.getUserByEmail(req.email);
     if (existing) {
@@ -44,6 +68,9 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
         resp.expires = login_resp.expires;
         return resp;
     }
+
+    // Record this OTP request for rate limiting
+    m_store.recordOtpRequest(req.email);
 
     // Generate OTP
     std::string otp_code = crypto::generateOtp();
@@ -80,6 +107,11 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
 rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     rpc::VerifyResponse resp{};
 
+    // Rate limit check - prevent brute force OTP guessing
+    if (!m_store.checkVerifyRateLimit(req.email)) {
+        return resp;  // Too many attempts
+    }
+
     // Get OTP
     auto otp = m_store.getOtp(req.email);
     if (!otp) {
@@ -93,10 +125,17 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
         return resp;  // Expired
     }
 
-    // Verify OTP code
-    if (otp->code != req.otp) {
+    // Record this verify attempt before checking (prevents timing attacks)
+    m_store.recordVerifyAttempt(req.email);
+
+    // Verify OTP code (constant-time comparison)
+    if (otp->code.size() != req.otp.size() ||
+        sodium_memcmp(otp->code.c_str(), req.otp.c_str(), otp->code.size()) != 0) {
         return resp;  // Wrong code
     }
+
+    // Clear rate limit on successful verification
+    m_store.clearVerifyAttempts(req.email);
 
     // OTP verified - delete it
     m_store.deleteOtp(req.email);
@@ -166,6 +205,12 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
 rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     rpc::LoginResponse resp{};
 
+    // Rate limit check
+    if (!m_store.checkOtpRateLimit(req.email)) {
+        resp.ok = false;
+        return resp;  // Too many requests
+    }
+
     // Check if user exists
     auto existing = m_store.getUserByEmail(req.email);
     if (!existing) {
@@ -178,6 +223,9 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
         resp.ok = false;
         return resp;
     }
+
+    // Record this OTP request for rate limiting
+    m_store.recordOtpRequest(req.email);
 
     // Generate OTP
     std::string otp_code = crypto::generateOtp();
@@ -370,7 +418,7 @@ rpc::ListResponse Service::handleList(const rpc::ListRequest& req) {
 
     // Verify JWT and extract itag
     auto claims = jwt::decode(req.jwt, m_signing_pubkey);
-    if (!claims || claims->itag.empty()) {
+    if (!claims || !itag::valid(claims->itag)) {
         return resp;
     }
 
@@ -407,11 +455,12 @@ rpc::TestResponse Service::handleTest(const rpc::TestRequest& req) {
 
     // Verify JWT and extract itag
     auto claims = jwt::decode(req.jwt, m_signing_pubkey);
-    if (!claims || claims->itag.empty()) {
+    if (!claims || !itag::valid(claims->itag)) {
         return resp;
     }
 
-    if (m_data_area.empty() || req.name.empty()) {
+    // Validate name to prevent path traversal
+    if (m_data_area.empty() || !validPathComponent(req.name)) {
         resp.ok = true;
         resp.exists = false;
         return resp;
@@ -430,7 +479,7 @@ rpc::PushResponse Service::handlePush(const rpc::PushRequest& req) {
 
     // Verify JWT and extract itag
     auto claims = jwt::decode(req.jwt, m_signing_pubkey);
-    if (!claims || claims->itag.empty()) {
+    if (!claims || !itag::valid(claims->itag)) {
         resp.error = "Unauthorized";
         return resp;
     }
@@ -440,8 +489,17 @@ rpc::PushResponse Service::handlePush(const rpc::PushRequest& req) {
         return resp;
     }
 
-    if (req.name.empty() || req.file.empty() || req.data.empty()) {
-        resp.error = "Missing parameters";
+    // Validate path components to prevent directory traversal
+    if (!validPathComponent(req.name)) {
+        resp.error = "Invalid name";
+        return resp;
+    }
+    if (!validPathComponent(req.file)) {
+        resp.error = "Invalid filename";
+        return resp;
+    }
+    if (req.data.empty()) {
+        resp.error = "Empty data";
         return resp;
     }
 

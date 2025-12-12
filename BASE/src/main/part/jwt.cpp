@@ -3,6 +3,7 @@
 #include "base.hpp"
 #include <sstream>
 #include <ctime>
+#include <cstdio>
 
 namespace base {
 
@@ -64,6 +65,33 @@ std::vector<uint8_t> base64url_decode(const std::string& str) {
     return result;
 }
 
+// Escape a string for JSON (handles quotes, backslashes, control chars)
+std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (unsigned char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\b': out += "\\b"; break;
+            case '\f': out += "\\f"; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default:
+                if (c < 0x20) {
+                    // Control character - use \u00XX
+                    char buf[8];
+                    snprintf(buf, sizeof(buf), "\\u%04x", c);
+                    out += buf;
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
 } // anonymous namespace
 
 namespace jwt {
@@ -72,15 +100,15 @@ std::string encode(const Claims& claims, const std::vector<uint8_t>& signing_key
     // Header: {"alg":"EdDSA","typ":"JWT"}
     std::string header = R"({"alg":"EdDSA","typ":"JWT"})";
 
-    // Payload
+    // Payload (with proper JSON escaping)
     std::ostringstream payload;
     payload << "{";
-    payload << R"("iss":")" << claims.iss << R"(",)";
-    payload << R"("sub":")" << claims.sub << R"(",)";
-    payload << R"("itag":")" << claims.itag << R"(",)";
-    payload << R"("email":")" << claims.email << R"(",)";
-    payload << R"("tier":")" << claims.tier << R"(",)";
-    payload << R"("role":")" << claims.role << R"(",)";
+    payload << R"("iss":")" << jsonEscape(claims.iss) << R"(",)";
+    payload << R"("sub":")" << jsonEscape(claims.sub) << R"(",)";
+    payload << R"("itag":")" << jsonEscape(claims.itag) << R"(",)";
+    payload << R"("email":")" << jsonEscape(claims.email) << R"(",)";
+    payload << R"("tier":")" << jsonEscape(claims.tier) << R"(",)";
+    payload << R"("role":")" << jsonEscape(claims.role) << R"(",)";
     payload << R"("iat":)" << claims.iat << ",";
     payload << R"("exp":)" << claims.exp;
     payload << "}";

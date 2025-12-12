@@ -114,7 +114,6 @@ public:
 
     bool sendBootstrapEmail(const std::string& boot_email);
     bool verifyBootstrapToken(const std::string& token);
-    std::string getBootstrapToken() const { return m_bootstrap_token; }
 
 private:
     Store& m_store;

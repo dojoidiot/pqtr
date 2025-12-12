@@ -1,9 +1,9 @@
-// sqlite.cpp
-// SQLite implementation of JWTA Store interface
+// sqlite.cpp - SQLite implementation of Store interface
 
 #include "data.hpp"
 #include <sqlite3.h>
 #include <cstring>
+#include <ctime>
 
 namespace base {
 
@@ -47,7 +47,14 @@ public:
                 token_hash TEXT NOT NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS rate_limits (
+                email TEXT NOT NULL,
+                action TEXT NOT NULL,
+                timestamp INTEGER NOT NULL,
+                PRIMARY KEY (email, action, timestamp)
+            );
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+            CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(email, action, timestamp);
         )";
 
         char* err = nullptr;
@@ -280,6 +287,87 @@ public:
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
         return rc == SQLITE_DONE;
+    }
+
+    // Rate limiting: max 3 OTP requests per 10 minutes
+    bool checkOtpRateLimit(const std::string& email) override {
+        int64_t cutoff = static_cast<int64_t>(std::time(nullptr)) - 600;  // 10 min window
+        const char* sql = "SELECT COUNT(*) FROM rate_limits WHERE email = ? AND action = 'otp' AND timestamp > ?;";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+        sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, cutoff);
+
+        int count = 0;
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+
+        // Clean up old records
+        const char* cleanup = "DELETE FROM rate_limits WHERE timestamp < ?;";
+        sqlite3_stmt* cstmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, cleanup, -1, &cstmt, nullptr) == SQLITE_OK) {
+            sqlite3_bind_int64(cstmt, 1, cutoff - 3600);  // Keep 1 hour of history
+            sqlite3_step(cstmt);
+            sqlite3_finalize(cstmt);
+        }
+
+        return count < 3;  // Allow if less than 3 requests
+    }
+
+    void recordOtpRequest(const std::string& email) override {
+        const char* sql = "INSERT INTO rate_limits (email, action, timestamp) VALUES (?, 'otp', ?);";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+
+        sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, static_cast<int64_t>(std::time(nullptr)));
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    // Rate limiting: max 5 verify attempts per OTP
+    bool checkVerifyRateLimit(const std::string& email) override {
+        int64_t cutoff = static_cast<int64_t>(std::time(nullptr)) - 600;  // 10 min window
+        const char* sql = "SELECT COUNT(*) FROM rate_limits WHERE email = ? AND action = 'verify' AND timestamp > ?;";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+        sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, cutoff);
+
+        int count = 0;
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            count = sqlite3_column_int(stmt, 0);
+        }
+        sqlite3_finalize(stmt);
+        return count < 5;  // Allow if less than 5 attempts
+    }
+
+    void recordVerifyAttempt(const std::string& email) override {
+        const char* sql = "INSERT INTO rate_limits (email, action, timestamp) VALUES (?, 'verify', ?);";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+
+        sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int64(stmt, 2, static_cast<int64_t>(std::time(nullptr)));
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+    }
+
+    void clearVerifyAttempts(const std::string& email) override {
+        const char* sql = "DELETE FROM rate_limits WHERE email = ? AND action = 'verify';";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return;
+
+        sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
+
+        sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
     }
 
 private:
