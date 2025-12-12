@@ -4,7 +4,7 @@
 #include "mail.hpp"
 #include <iostream>
 
-namespace jwta {
+namespace base {
 
 class ConsoleMailer : public Mailer {
 public:
@@ -25,4 +25,4 @@ std::unique_ptr<Mailer> createConsoleMailer() {
     return std::make_unique<ConsoleMailer>();
 }
 
-} // namespace jwta
+} // namespace base

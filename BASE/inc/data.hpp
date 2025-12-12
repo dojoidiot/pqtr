@@ -8,10 +8,11 @@
 #include <cstdint>
 #include <memory>
 
-namespace jwta {
+namespace base {
 
 struct User {
     std::string id;
+    std::string itag;  // Base-36 user code (8 chars)
     std::string email;
     std::string tier;
     std::string role;
@@ -51,4 +52,4 @@ public:
 
 std::unique_ptr<Store> createStore(const std::string& db_path);
 
-} // namespace jwta
+} // namespace base

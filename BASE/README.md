@@ -1,25 +1,36 @@
 # BASE
 
-Base web operations - static site serving + JWT authentication.
+Web server for PQTR - static site serving + JWT authentication + file storage.
 
 ## Structure
 
 ```
 BASE/
-├── bin/      # Built executables
-├── doc/      # Documentation
-├── inc/      # Headers
-├── lib/      # Libraries
-├── src/      # Source code
-├── www/      # Static site files
-└── tmp/      # Build artifacts (gitignored)
+├── bin/base              # Server executable
+├── inc/                  # Headers
+│   ├── base.hpp          # Service API
+│   ├── data.hpp          # Store interface
+│   ├── mail.hpp          # Mailer interface
+│   └── itag.hpp          # User ID generation
+├── src/main/
+│   ├── base.cpp          # Entry point (main, config, httplib)
+│   └── part/
+│       ├── http.cpp      # Service handlers
+│       ├── crypto.cpp    # libsodium wrapper
+│       └── jwt.cpp       # JWT encode/decode
+├── src/main/plug/
+│   ├── sqlite.cpp        # Store implementation
+│   ├── mailgun.cpp       # Mailer (production)
+│   └── console.cpp       # Mailer (test mode)
+├── www/                  # Static site + WASM app
+└── var/                  # Runtime data (gitignored)
 ```
 
-## Purpose
+## Features
 
-Unified web server for pqtr ecosystem:
-
-- Static file serving (www/)
-- JWT authentication service (JRPC endpoints)
-- OAuth 2.0 integration (Google, GitHub)
-- User management and roles
+- Static file serving
+- OTP email authentication (Mailgun)
+- JWT tokens (EdDSA signed)
+- User roles: NONE, PLAY, HERO, PQTR
+- Binary file upload (`/push` endpoint)
+- JRPC API for auth and file management

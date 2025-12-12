@@ -1,12 +1,12 @@
 // mail.hpp
-// JWTA mailer interface
+// BASE mailer interface
 
 #pragma once
 
 #include <string>
 #include <memory>
 
-namespace jwta {
+namespace base {
 
 class Mailer {
 public:
@@ -25,4 +25,4 @@ std::unique_ptr<Mailer> createMailer(
 // Console mailer for local testing (prints OTP to stdout)
 std::unique_ptr<Mailer> createConsoleMailer();
 
-} // namespace jwta
+} // namespace base

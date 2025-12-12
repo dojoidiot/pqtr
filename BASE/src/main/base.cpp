@@ -1,7 +1,6 @@
-// host.cpp
-// BASE HTTP server - static site + JRPC auth endpoints
+// base.cpp - BASE server entry point
 
-#include "jwta.hpp"
+#include "base.hpp"
 #include "httplib.h"
 #include <iostream>
 #include <fstream>
@@ -285,27 +284,28 @@ int main(int argc, char* argv[]) {
     }
 
     std::string db_path = data_area + cfg.sqlite_file;
-    auto store = jwta::createStore(db_path);
+    auto store = base::createStore(db_path);
     if (!store) {
         std::cerr << "[BASE] Error: Failed to open database: " << db_path << std::endl;
         return 1;
     }
     std::cout << "[BASE] Database: " << db_path << std::endl;
 
-    std::unique_ptr<jwta::Mailer> mailer;
+    std::unique_ptr<base::Mailer> mailer;
     if (test_mode) {
-        mailer = jwta::createConsoleMailer();
+        mailer = base::createConsoleMailer();
         std::cout << "[BASE] Mailer: CONSOLE (test mode)" << std::endl;
     } else {
-        mailer = jwta::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
+        mailer = base::createMailer(cfg.mailgun_secret, cfg.mailgun_domain, cfg.otp_from, cfg.otp_text, cfg.mailgun_region);
         std::cout << "[BASE] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
     }
 
-    jwta::Service service(*store, *mailer);
+    base::Service service(*store, *mailer);
     if (!service.init()) {
         std::cerr << "[BASE] Error: Failed to initialize service" << std::endl;
         return 1;
     }
+    service.setDataArea(data_area);
 
     if (!cfg.admin_email.empty()) {
         service.setAdminEmail(cfg.admin_email);
@@ -359,7 +359,8 @@ int main(int argc, char* argv[]) {
             if (resp.jwt.empty()) { res.set_content(jrpcError(id, -32001, "Verification failed"), "application/json"); return; }
             std::ostringstream r;
             r << "{\"jwt\":" << jsonString(resp.jwt) << ",\"refresh_token\":" << jsonString(resp.refresh_token)
-              << ",\"user_id\":" << jsonString(resp.user_id) << ",\"role\":" << jsonString(resp.role) << "}";
+              << ",\"user_id\":" << jsonString(resp.user_id) << ",\"itag\":" << jsonString(resp.itag)
+              << ",\"role\":" << jsonString(resp.role) << "}";
             res.set_content(jrpcResult(id, r.str()), "application/json");
 
         } else if (method == "login") {
@@ -421,6 +422,26 @@ int main(int argc, char* argv[]) {
               << ",\"users_pqtr\":" << resp.users_pqtr << "}";
             res.set_content(jrpcResult(id, r.str()), "application/json");
 
+        } else if (method == "list") {
+            if (p_jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
+            auto resp = service.handleList({p_jwt});
+            if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
+            std::ostringstream r;
+            r << "{\"pipes\":[";
+            for (size_t i = 0; i < resp.pipes.size(); i++) {
+                if (i > 0) r << ",";
+                r << "\"" << resp.pipes[i] << "\"";
+            }
+            r << "]}";
+            res.set_content(jrpcResult(id, r.str()), "application/json");
+
+        } else if (method == "test") {
+            std::string p_name = extractString(body, "name");
+            if (p_jwt.empty() || p_name.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or name"), "application/json"); return; }
+            auto resp = service.handleTest({p_jwt, p_name});
+            if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
+            res.set_content(jrpcResult(id, std::string("{\"exists\":") + (resp.exists ? "true" : "false") + "}"), "application/json");
+
         } else {
             res.set_content(jrpcError(id, -32601, "Method not found"), "application/json");
         }
@@ -463,6 +484,44 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "[BASE] JRPC: " << cfg.jrpc_path << std::endl;
+
+    // Binary push endpoint: POST /push?name=xxx&file=xxx with Authorization header
+    svr.Post("/push", [&service](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Content-Type", "application/json");
+
+        // Get JWT from Authorization header
+        std::string auth = req.get_header_value("Authorization");
+        std::string jwt;
+        if (auth.substr(0, 7) == "Bearer ") {
+            jwt = auth.substr(7);
+        }
+        if (jwt.empty()) {
+            res.set_content("{\"ok\":false,\"error\":\"Missing authorization\"}", "application/json");
+            return;
+        }
+
+        // Get params from query string
+        std::string name = req.get_param_value("name");
+        std::string file = req.get_param_value("file");
+        if (name.empty() || file.empty()) {
+            res.set_content("{\"ok\":false,\"error\":\"Missing name or file param\"}", "application/json");
+            return;
+        }
+
+        // Binary body
+        if (req.body.empty()) {
+            res.set_content("{\"ok\":false,\"error\":\"Empty body\"}", "application/json");
+            return;
+        }
+
+        auto resp = service.handlePush({jwt, name, file, req.body});
+        if (!resp.ok) {
+            res.set_content("{\"ok\":false,\"error\":\"" + resp.error + "\"}", "application/json");
+            return;
+        }
+        res.set_content("{\"ok\":true}", "application/json");
+    });
+    std::cout << "[BASE] Push: /push" << std::endl;
 
     // Redirect root to main.html
     svr.Get("/", [](const httplib::Request&, httplib::Response& res) {

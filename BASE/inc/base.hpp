@@ -1,5 +1,5 @@
-// jwta.hpp
-// JWTA - JWT operations, crypto, and service
+// base.hpp
+// BASE - JWT operations, crypto, and service
 
 #pragma once
 
@@ -10,11 +10,12 @@
 #include <optional>
 #include <cstdint>
 
-namespace jwta {
+namespace base {
 
 struct Claims {
     std::string iss;
     std::string sub;
+    std::string itag;  // Base-36 user code
     std::string email;
     std::string tier;
     std::string role;
@@ -29,6 +30,7 @@ namespace crypto {
     bool verify(const std::vector<uint8_t>& message, const std::vector<uint8_t>& signature, const std::vector<uint8_t>& pubkey);
     std::string generateOtp();
     std::string generateUuid();
+    std::string generateItag();
     std::string hashToken(const std::string& token);
     std::string generateRefreshToken();
     std::string generateBootstrapToken();
@@ -44,7 +46,7 @@ namespace rpc {
     struct RegisterResponse { bool ok; int expires; };
 
     struct VerifyRequest { std::string email; std::string otp; };
-    struct VerifyResponse { std::string jwt; std::string refresh_token; std::string user_id; std::string role; };
+    struct VerifyResponse { std::string jwt; std::string refresh_token; std::string user_id; std::string itag; std::string role; };
 
     struct LoginRequest { std::string email; };
     struct LoginResponse { bool ok; int expires; };
@@ -72,6 +74,15 @@ namespace rpc {
 
     struct InfoRequest { std::string jwt; };
     struct InfoResponse { int total_users; int users_none; int users_play; int users_hero; int users_pqtr; };
+
+    struct ListRequest { std::string jwt; };
+    struct ListResponse { bool ok; std::vector<std::string> pipes; };
+
+    struct TestRequest { std::string jwt; std::string name; };
+    struct TestResponse { bool ok; bool exists; };
+
+    struct PushRequest { std::string jwt; std::string name; std::string file; std::string data; };
+    struct PushResponse { bool ok; std::string error; };
 }
 
 class Service {
@@ -93,9 +104,13 @@ public:
     rpc::FreeResponse handleFree(const rpc::FreeRequest& req);
     rpc::DropResponse handleDrop(const rpc::DropRequest& req);
     rpc::InfoResponse handleInfo(const rpc::InfoRequest& req);
+    rpc::ListResponse handleList(const rpc::ListRequest& req);
+    rpc::TestResponse handleTest(const rpc::TestRequest& req);
+    rpc::PushResponse handlePush(const rpc::PushRequest& req);
 
     std::vector<uint8_t> getSigningPubkey() const;
     void setAdminEmail(const std::string& email) { m_admin_email = email; }
+    void setDataArea(const std::string& path) { m_data_area = path; }
 
     bool sendBootstrapEmail(const std::string& boot_email);
     bool verifyBootstrapToken(const std::string& token);
@@ -108,6 +123,7 @@ private:
     std::vector<uint8_t> m_signing_privkey;
     std::string m_admin_email;
     std::string m_bootstrap_token;
+    std::string m_data_area;
 };
 
-} // namespace jwta
+} // namespace base

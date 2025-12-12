@@ -5,7 +5,7 @@
 #include <sqlite3.h>
 #include <cstring>
 
-namespace jwta {
+namespace base {
 
 class SqliteStore : public Store {
 public:
@@ -29,6 +29,7 @@ public:
         const char* schema = R"(
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
+                itag TEXT UNIQUE NOT NULL,
                 email TEXT UNIQUE NOT NULL,
                 tier TEXT NOT NULL,
                 role TEXT NOT NULL DEFAULT 'NONE',
@@ -68,16 +69,17 @@ public:
     }
 
     bool createUser(const User& user) override {
-        const char* sql = "INSERT INTO users (id, email, tier, role, locked, created_at) VALUES (?, ?, ?, ?, ?, ?);";
+        const char* sql = "INSERT INTO users (id, itag, email, tier, role, locked, created_at) VALUES (?, ?, ?, ?, ?, ?, ?);";
         sqlite3_stmt* stmt = nullptr;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
 
         sqlite3_bind_text(stmt, 1, user.id.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 2, user.email.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 3, user.tier.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_text(stmt, 4, user.role.empty() ? "NONE" : user.role.c_str(), -1, SQLITE_TRANSIENT);
-        sqlite3_bind_int(stmt, 5, user.locked ? 1 : 0);
-        sqlite3_bind_int64(stmt, 6, user.created_at);
+        sqlite3_bind_text(stmt, 2, user.itag.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 3, user.email.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 4, user.tier.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_text(stmt, 5, user.role.empty() ? "NONE" : user.role.c_str(), -1, SQLITE_TRANSIENT);
+        sqlite3_bind_int(stmt, 6, user.locked ? 1 : 0);
+        sqlite3_bind_int64(stmt, 7, user.created_at);
 
         int rc = sqlite3_step(stmt);
         sqlite3_finalize(stmt);
@@ -85,7 +87,7 @@ public:
     }
 
     std::optional<User> getUser(const std::string& id) override {
-        const char* sql = "SELECT id, email, tier, role, locked, created_at FROM users WHERE id = ?;";
+        const char* sql = "SELECT id, itag, email, tier, role, locked, created_at FROM users WHERE id = ?;";
         sqlite3_stmt* stmt = nullptr;
         if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return std::nullopt;
 
@@ -98,12 +100,13 @@ public:
 
         User user;
         user.id = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 0));
-        user.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
-        user.tier = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
-        const char* role = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        user.itag = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1));
+        user.email = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2));
+        user.tier = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3));
+        const char* role = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4));
         user.role = role ? role : "NONE";
-        user.locked = sqlite3_column_int(stmt, 4) != 0;
-        user.created_at = sqlite3_column_int64(stmt, 5);
+        user.locked = sqlite3_column_int(stmt, 5) != 0;
+        user.created_at = sqlite3_column_int64(stmt, 6);
 
         sqlite3_finalize(stmt);
         return user;
@@ -289,4 +292,4 @@ std::unique_ptr<Store> createStore(const std::string& db_path) {
     return store;
 }
 
-} // namespace jwta
+} // namespace base

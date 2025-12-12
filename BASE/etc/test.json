@@ -4,6 +4,6 @@
     "www_path": "../../BASE/www",
     "jrpc_path": "/jrpc",
     "sqlite": {
-        "file": "test.db"
+        "file": "BASE/base.db"
     }
 }

@@ -23,10 +23,12 @@ make -s -C BASE
 echo "done"
 
 cp LABS/tmp/wasm/labs.* BASE/www/
-mkdir -p tmp/test
+mkdir -p BASE/var/BASE BASE/var/LABS
 
 echo ""
 echo "http://127.0.0.1:4040"
 echo ""
+echo "Test mode: Enter any email, OTP prints to console"
+echo ""
 
-BASE/bin/base --info-file BASE/etc/test.json --data-area tmp/test --test
+BASE/bin/base --info-file BASE/etc/test.json --data-area BASE/var --test

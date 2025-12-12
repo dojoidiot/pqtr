@@ -22,12 +22,13 @@ INC = -I$(IMGUI) -I$(IMGUI)/backends
 
 # Emscripten flags (requires emsdk 4.x - run: source env.sh)
 EMFLAGS = --use-port=contrib.glfw3 \
-          -s USE_WEBGL2=1 \
-          -s FULL_ES3=1 \
-          -s WASM=1 \
-          -s ALLOW_MEMORY_GROWTH=1 \
-          -s NO_EXIT_RUNTIME=0 \
-          -s ASSERTIONS=1
+          -sUSE_WEBGL2=1 \
+          -sFULL_ES3=1 \
+          -sWASM=1 \
+          -sALLOW_MEMORY_GROWTH=1 \
+          -sNO_EXIT_RUNTIME=0 \
+          -sASSERTIONS=1 \
+          -sFETCH
 
 # Shell template (custom HTML)
 SHELL_TPL = --shell-file src/wasm/shell.html

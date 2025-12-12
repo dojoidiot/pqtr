@@ -1,12 +1,12 @@
 // mailgun.cpp
-// Mailgun implementation of JWTA Mailer interface
+// Mailgun implementation of BASE Mailer interface
 
 #include "mail.hpp"
 #include <iostream>
 #include <sstream>
 #include <cstdio>
 
-namespace jwta {
+namespace base {
 
 namespace {
 bool validEmail(const std::string& s) {
@@ -79,4 +79,4 @@ std::unique_ptr<Mailer> createMailer(const std::string& secret, const std::strin
     return std::make_unique<MailgunMailer>(secret, domain, from, otp_text, region);
 }
 
-} // namespace jwta
+} // namespace base
