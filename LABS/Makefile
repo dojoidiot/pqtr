@@ -3,11 +3,11 @@
 # Usage:
 #   make           # Build library (labs.a)
 #   make test      # Run tests (mods)
-#   make test-dawn # Run DAWN GPU shader tests
+#   make test-wgpu # Run WGPU GPU shader tests
 #   make all       # Build everything
 #   make clean     # Clean all build artifacts
 
-.PHONY: all lib test test-dawn clean help
+.PHONY: all lib test test-wgpu clean help
 
 help:
 	@echo "LABS Build System"
@@ -15,7 +15,7 @@ help:
 	@echo "Targets:"
 	@echo "  lib        Build labs.a library"
 	@echo "  test       Run mods tests"
-	@echo "  test-dawn  Run DAWN GPU shader tests (in VIBE)"
+	@echo "  test-wgpu  Run WGPU GPU shader tests (in VIBE)"
 	@echo "  all        Build everything"
 	@echo "  clean      Remove all build artifacts"
 	@echo ""
@@ -29,8 +29,8 @@ lib:
 test: lib
 	$(MAKE) -f Makefile.mods test
 
-# DAWN tests (delegate to VIBE)
-test-dawn:
+# WGPU tests (delegate to VIBE)
+test-wgpu:
 	$(MAKE) -C ../VIBE test-dawn
 
 # All: library + test binaries

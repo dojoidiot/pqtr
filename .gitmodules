@@ -10,8 +10,8 @@
 [submodule "DESK/lib/ImGuiFileDialog"]
 	path = DESK/lib/ImGuiFileDialog
 	url = https://github.com/aiekick/ImGuiFileDialog.git
-[submodule "DAWN/lib/dawn"]
-	path = DAWN/lib/dawn
+[submodule "WGPU/lib/dawn"]
+	path = WGPU/lib/dawn
 	url = https://dawn.googlesource.com/dawn
 [submodule "BASE/lib/cpp-httplib"]
 	path = BASE/lib/cpp-httplib

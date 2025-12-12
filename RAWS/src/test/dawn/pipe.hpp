@@ -5,7 +5,7 @@
 
 #pragma once
 
-#include <dawn.hpp>
+#include <wgpu.hpp>
 #include <vector>
 #include <string>
 #include <cstdint>

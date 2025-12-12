@@ -1,13 +1,15 @@
-# DAWN
+# WGPU
 
-WebGPU implementation for GPU compute in PQTR.
+WebGPU compute library for PQTR (using Dawn backend).
 
 ## What
 
-Dawn is Google's WebGPU implementation. It provides:
+WGPU provides GPU compute via WebGPU API:
 - Native GPU access (Vulkan, Metal, D3D12)
 - WASM target for browser deployment
 - WGSL shader language
+
+Currently uses Google's Dawn as the backend implementation.
 
 ## Prerequisites
 
@@ -31,17 +33,17 @@ make tidy   # Clean
 ## Usage
 
 ```cpp
-#include <dawn.hpp>
+#include <wgpu.hpp>
 
-auto inst = dawn::instance();
-auto adapt = dawn::adapter(inst);
-auto dev = dawn::device(adapt);
-auto pipe = dawn::pipeline(dev, wgslShaderCode);
+auto inst = wgpu::instance();
+auto adapt = wgpu::adapter(inst);
+auto dev = wgpu::device(adapt);
+auto pipe = wgpu::pipeline(dev, wgslShaderCode);
 ```
 
 ## Include
 
 ```makefile
-INCLUDES = -I./inc/DAWN -I./lib/DAWN/lib/dawn/include
-LIBS = ./lib/DAWN/dawn.a
+INCLUDES = -I./inc/WGPU -I./lib/WGPU/lib/dawn/include
+LIBS = ./lib/WGPU/wgpu.a
 ```

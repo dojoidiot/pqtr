@@ -111,43 +111,43 @@ $(GOLD_GEN): $(GOLD_SRC) $(TEST_DIR)/theory.h
 		-lGL -lGLX \
 		-o $@
 
-# DAWN shader tests
-DAWN_DIR = ../DAWN
-DAWN_SRC = $(DAWN_DIR)/lib/dawn
-DAWN_BUILD = $(DAWN_SRC)/out/Release
+# WGPU shader tests (using Dawn backend)
+WGPU_DIR = ../WGPU
+WGPU_SRC = $(WGPU_DIR)/lib/dawn
+WGPU_BUILD = $(WGPU_SRC)/out/Release
 
-DAWN_INC = -I$(DAWN_DIR)/inc \
-           -I$(DAWN_SRC)/include \
-           -I$(DAWN_BUILD)/gen/include
+WGPU_INC = -I$(WGPU_DIR)/inc \
+           -I$(WGPU_SRC)/include \
+           -I$(WGPU_BUILD)/gen/include
 
-DAWN_TEST_DIR = src/test/dawn
-DAWN_TEST_BIN = tmp/test/test_dawn
-DAWN_TEST_OBJ_DIR = tmp/obj/test/dawn
+WGPU_TEST_DIR = src/test/dawn
+WGPU_TEST_BIN = tmp/test/test_dawn
+WGPU_TEST_OBJ_DIR = tmp/obj/test/dawn
 
-DAWN_TEST_SRCS = $(wildcard $(DAWN_TEST_DIR)/*.cpp)
-DAWN_TEST_OBJS = $(DAWN_TEST_SRCS:$(DAWN_TEST_DIR)/%.cpp=$(DAWN_TEST_OBJ_DIR)/%.o)
+WGPU_TEST_SRCS = $(wildcard $(WGPU_TEST_DIR)/*.cpp)
+WGPU_TEST_OBJS = $(WGPU_TEST_SRCS:$(WGPU_TEST_DIR)/%.cpp=$(WGPU_TEST_OBJ_DIR)/%.o)
 
 # Dawn static libs (all of them)
-DAWN_WRAPPER = $(DAWN_DIR)/tmp/dawn.o
-DAWN_ALL_LIBS = $(shell find $(DAWN_BUILD) -name "*.a" 2>/dev/null)
+WGPU_WRAPPER = $(WGPU_DIR)/tmp/dawn.o
+WGPU_ALL_LIBS = $(shell find $(WGPU_BUILD) -name "*.a" 2>/dev/null)
 
 # Dawn requires these system libs
-DAWN_SYS_LIBS = -lvulkan -ldl -lpthread -lX11
+WGPU_SYS_LIBS = -lvulkan -ldl -lpthread -lX11
 
-test-dawn: $(DAWN_TEST_BIN)
-	$(DAWN_TEST_BIN)
+test-dawn: $(WGPU_TEST_BIN)
+	$(WGPU_TEST_BIN)
 
-$(DAWN_TEST_BIN): $(DAWN_TEST_OBJS)
+$(WGPU_TEST_BIN): $(WGPU_TEST_OBJS)
 	@mkdir -p tmp/test
-	$(CXX) $(CXXFLAGS) $(DAWN_TEST_OBJS) \
-		$(DAWN_WRAPPER) \
-		-Wl,--start-group $(DAWN_ALL_LIBS) -Wl,--end-group \
-		$(DAWN_SYS_LIBS) \
+	$(CXX) $(CXXFLAGS) $(WGPU_TEST_OBJS) \
+		$(WGPU_WRAPPER) \
+		-Wl,--start-group $(WGPU_ALL_LIBS) -Wl,--end-group \
+		$(WGPU_SYS_LIBS) \
 		-o $@
 
-$(DAWN_TEST_OBJ_DIR)/%.o: $(DAWN_TEST_DIR)/%.cpp
-	@mkdir -p $(DAWN_TEST_OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(DAWN_INC) -I$(DAWN_TEST_DIR) -I$(TEST_DIR) -c $< -o $@
+$(WGPU_TEST_OBJ_DIR)/%.o: $(WGPU_TEST_DIR)/%.cpp
+	@mkdir -p $(WGPU_TEST_OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(WGPU_INC) -I$(WGPU_TEST_DIR) -I$(TEST_DIR) -c $< -o $@
 
 info:
 	@echo "Output: $(VIBE_A)"

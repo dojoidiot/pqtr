@@ -1,4 +1,4 @@
-# RAWS DAWN Shader Tests Makefile
+# RAWS WGPU Shader Tests Makefile (using Dawn backend)
 #
 # Usage:
 #   make -f Makefile.dawn test    # Build and run tests
@@ -7,14 +7,14 @@
 CXX = g++
 CXXFLAGS = -std=c++17 -O2 -Wall -Wno-strict-aliasing
 
-# Dawn paths
-DAWN_DIR = ../DAWN
-DAWN_SRC = $(DAWN_DIR)/lib/dawn
-DAWN_BUILD = $(DAWN_SRC)/out/Release
+# WGPU paths (Dawn backend)
+WGPU_DIR = ../WGPU
+WGPU_SRC = $(WGPU_DIR)/lib/dawn
+WGPU_BUILD = $(WGPU_SRC)/out/Release
 
-DAWN_INC = -I$(DAWN_DIR)/inc \
-           -I$(DAWN_SRC)/include \
-           -I$(DAWN_BUILD)/gen/include
+WGPU_INC = -I$(WGPU_DIR)/inc \
+           -I$(WGPU_SRC)/include \
+           -I$(WGPU_BUILD)/gen/include
 
 # Test paths
 TEST_DIR = src/test/dawn
@@ -26,9 +26,9 @@ TEST_SRCS = $(wildcard $(TEST_DIR)/*.cpp)
 TEST_OBJS = $(TEST_SRCS:$(TEST_DIR)/%.cpp=$(OBJ_DIR)/%.o)
 
 # Dawn libs
-DAWN_WRAPPER = $(DAWN_DIR)/tmp/dawn.o
-DAWN_ALL_LIBS = $(shell find $(DAWN_BUILD) -name "*.a" 2>/dev/null)
-DAWN_SYS_LIBS = -lvulkan -ldl -lpthread -lX11
+WGPU_WRAPPER = $(WGPU_DIR)/tmp/dawn.o
+WGPU_ALL_LIBS = $(shell find $(WGPU_BUILD) -name "*.a" 2>/dev/null)
+WGPU_SYS_LIBS = -lvulkan -ldl -lpthread -lX11
 
 .PHONY: test clean
 
@@ -38,14 +38,14 @@ test: $(TEST_BIN)
 $(TEST_BIN): $(TEST_OBJS)
 	@mkdir -p tmp/test
 	$(CXX) $(CXXFLAGS) $(TEST_OBJS) \
-		$(DAWN_WRAPPER) \
-		-Wl,--start-group $(DAWN_ALL_LIBS) -Wl,--end-group \
-		$(DAWN_SYS_LIBS) \
+		$(WGPU_WRAPPER) \
+		-Wl,--start-group $(WGPU_ALL_LIBS) -Wl,--end-group \
+		$(WGPU_SYS_LIBS) \
 		-o $@
 
 $(OBJ_DIR)/%.o: $(TEST_DIR)/%.cpp
 	@mkdir -p $(OBJ_DIR)
-	$(CXX) $(CXXFLAGS) $(DAWN_INC) -I$(TEST_DIR) -c $< -o $@
+	$(CXX) $(CXXFLAGS) $(WGPU_INC) -I$(TEST_DIR) -c $< -o $@
 
 clean:
 	rm -rf tmp/test/test_dawn tmp/obj/dawn
