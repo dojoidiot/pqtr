@@ -464,6 +464,11 @@ int main(int argc, char* argv[]) {
 
     std::cout << "[BASE] JRPC: " << cfg.jrpc_path << std::endl;
 
+    // Redirect root to main.html
+    svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
+        res.set_redirect("/main.html");
+    });
+
     // Static file serving
     if (!cfg.www_path.empty()) {
         std::string www_root = cfg.www_path;

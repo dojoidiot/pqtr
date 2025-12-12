@@ -20,13 +20,13 @@ SRC = src/wasm/login.cpp \
 
 INC = -I$(IMGUI) -I$(IMGUI)/backends
 
-# Emscripten flags
-EMFLAGS = -s USE_GLFW=3 \
+# Emscripten flags (requires emsdk 4.x - run: source env.sh)
+EMFLAGS = --use-port=contrib.glfw3 \
           -s USE_WEBGL2=1 \
           -s FULL_ES3=1 \
           -s WASM=1 \
           -s ALLOW_MEMORY_GROWTH=1 \
-          -s NO_EXIT_RUNTIME=1 \
+          -s NO_EXIT_RUNTIME=0 \
           -s ASSERTIONS=1
 
 # Shell template (custom HTML)
@@ -42,7 +42,7 @@ $(OUT)/labs.js: $(SRC) | $(OUT)
 	emcc $(SRC) $(INC) $(EMFLAGS) -O2 -o $@
 
 $(OUT)/labs.html: src/wasm/shell.html $(OUT)/labs.js
-	sed 's|{{{ SCRIPT }}}|<script src="labs.js"></script>|' $< > $@
+	sed 's|{{{ SCRIPT }}}|<script src="labs.js?v=$(shell date +%s)"></script>|' $< > $@
 
 $(OUT):
 	mkdir -p $(OUT)

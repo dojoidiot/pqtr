@@ -12,6 +12,10 @@
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/console.h>
+#define LOG(msg) emscripten_console_log(msg)
+#else
+#define LOG(msg) printf("%s\n", msg)
 #endif
 
 // Application state
@@ -131,22 +135,49 @@ void render_login_dialog() {
     ImGui::End();
 }
 
+static int frame_count = 0;
+
 // Main loop iteration (called by Emscripten or native loop)
 void main_loop() {
     glfwPollEvents();
+
+    int display_w, display_h;
+    glfwGetFramebufferSize(g_state.window, &display_w, &display_h);
+
+    if (frame_count < 3) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Frame %d: framebuffer=%dx%d", frame_count, display_w, display_h);
+        LOG(buf);
+        frame_count++;
+    }
+
+    if (display_w <= 0 || display_h <= 0) return;
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplGlfw_NewFrame();
     ImGui::NewFrame();
 
+    // Debug: log ImGui display size on first frame
+    if (frame_count == 1) {
+        ImGuiIO& io = ImGui::GetIO();
+        char buf[128];
+        snprintf(buf, sizeof(buf), "ImGui DisplaySize: %.0fx%.0f", io.DisplaySize.x, io.DisplaySize.y);
+        LOG(buf);
+    }
+
+    // Simple test: draw a visible window
+    ImGui::SetNextWindowPos(ImVec2(50, 50));
+    ImGui::SetNextWindowSize(ImVec2(300, 200));
+    ImGui::Begin("Test Window");
+    ImGui::Text("If you see this, ImGui works!");
+    ImGui::End();
+
     render_login_dialog();
 
     ImGui::Render();
 
-    int display_w, display_h;
-    glfwGetFramebufferSize(g_state.window, &display_w, &display_h);
     glViewport(0, 0, display_w, display_h);
-    glClearColor(0.15f, 0.15f, 0.18f, 1.0f);
+    glClearColor(0.3f, 0.1f, 0.1f, 1.0f);  // Red tint to confirm we're rendering
     glClear(GL_COLOR_BUFFER_BIT);
 
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -159,11 +190,16 @@ void glfw_error_callback(int error, const char* description) {
 }
 
 int main(int /*argc*/, char** /*argv*/) {
+    EM_ASM(console.log('=== C++ MAIN CALLED ==='));
+    LOG("LABS: Starting...");
+
     glfwSetErrorCallback(glfw_error_callback);
 
     if (!glfwInit()) {
+        LOG("LABS: glfwInit failed!");
         return 1;
     }
+    LOG("LABS: GLFW initialized");
 
     // OpenGL ES 3.0 for Emscripten, OpenGL 3.3 for native
 #ifdef __EMSCRIPTEN__
@@ -180,18 +216,24 @@ int main(int /*argc*/, char** /*argv*/) {
 
     g_state.window = glfwCreateWindow(800, 600, "PQTR - Login", nullptr, nullptr);
     if (!g_state.window) {
+        LOG("LABS: glfwCreateWindow failed!");
         glfwTerminate();
         return 1;
     }
+    LOG("LABS: Window created");
 
     glfwMakeContextCurrent(g_state.window);
     glfwSwapInterval(1);
+    LOG("LABS: Context ready");
 
     // Setup ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+#ifdef __EMSCRIPTEN__
+    io.IniFilename = nullptr;  // No filesystem access in browser
+#endif
 
     // Dark theme
     ImGui::StyleColorsDark();
@@ -204,6 +246,10 @@ int main(int /*argc*/, char** /*argv*/) {
     ImGui_ImplOpenGL3_Init(glsl_version);
 
 #ifdef __EMSCRIPTEN__
+    // Install Emscripten canvas callbacks for proper event handling
+    LOG("LABS: Installing Emscripten callbacks");
+    ImGui_ImplGlfw_InstallEmscriptenCallbacks(g_state.window, "#canvas");
+    LOG("LABS: Starting main loop");
     emscripten_set_main_loop(main_loop, 0, 1);
 #else
     while (!glfwWindowShouldClose(g_state.window)) {

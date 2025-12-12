@@ -73,11 +73,22 @@
         <div class="spinner"></div>
     </div>
 
-    <canvas id="canvas" oncontextmenu="event.preventDefault()"></canvas>
+    <canvas id="canvas" width="800" height="600" oncontextmenu="event.preventDefault()"></canvas>
 
     <script>
+        console.log('LABS HTML: Script starting');
+
+        // Set initial canvas size before WASM loads
+        (function() {
+            var canvas = document.getElementById('canvas');
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            console.log('LABS HTML: Canvas sized to', canvas.width, 'x', canvas.height);
+        })();
+
         var Module = {
             canvas: (function() {
+                console.log('LABS HTML: Setting up canvas');
                 var canvas = document.getElementById('canvas');
                 canvas.addEventListener("webglcontextlost", function(e) {
                     alert('WebGL context lost. Please reload the page.');
@@ -86,9 +97,13 @@
                 return canvas;
             })(),
             onRuntimeInitialized: function() {
+                console.log('LABS HTML: WASM initialized!');
                 document.getElementById('loading').classList.add('hidden');
-            }
+            },
+            print: function(text) { console.log(text); },
+            printErr: function(text) { console.error(text); }
         };
+        console.log('LABS HTML: Module defined, loading WASM...');
     </script>
     {{{ SCRIPT }}}
 </body>

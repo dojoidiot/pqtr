@@ -154,14 +154,23 @@ Reference documentation is in [docs/](docs/).
 
 ## Development
 
+**Prerequisites:** g++, make, git, autotools (for libsodium build)
+
+**First time setup:**
+```bash
+git clone --recursive <repo-url>
+cd pqtr
+bash init.sh   # Downloads emsdk (~350MB), builds libsodium
+```
+
 **Test locally:**
 ```bash
-bash test.sh
-# Open http://127.0.0.1:8080/main.html
-# OTP codes print to console
+bash test.sh        # Incremental build + run server
+bash test.sh clean  # Full rebuild + run server
+# Open http://127.0.0.1:4040
 ```
 
 **Deploy to production:**
 ```bash
-bash send.sh
+bash send.sh   # Build + deploy to pqtr.ai
 ```
