@@ -1,5 +1,5 @@
-// poly_color.cpp - VIBE
-// Polynomial Color Transform Module
+// poly_color.cpp - LUTE
+// Polynomial Color Transform Module (30 coefficients)
 
 #include "mods.h"
 #include <opencv2/imgproc.hpp>
@@ -8,16 +8,27 @@
 #include <vector>
 #include <random>
 
-namespace vibe
+namespace lute
 {
 namespace mods
 {
+
+// Manual gamma to avoid OpenCL cv::pow crash
+static void apply_gamma(cv::Mat& img, float gamma)
+{
+    for (int y = 0; y < img.rows; y++)
+    {
+        float* row = img.ptr<float>(y);
+        for (int x = 0; x < img.cols * 3; x++)
+            row[x] = std::pow(std::clamp(row[x], 0.0f, 1.0f), gamma);
+    }
+}
 
 bool poly_color(const View& in, View& out, Grid coeffs)
 {
     if (in.empty() || coeffs == nullptr || in.type() != CV_32FC3)
     {
-        std::cerr << "[vibe::poly_color] invalid input\n";
+        std::cerr << "[lute::poly_color] invalid input\n";
         return false;
     }
 
@@ -97,31 +108,37 @@ bool estimate_poly_color(const View& base, const View& target, float* coeffs, in
 {
     if (base.empty() || target.empty() || coeffs == nullptr)
     {
-        std::cerr << "[vibe::estimate_poly_color] invalid input\n";
+        std::cerr << "[lute::estimate_poly_color] invalid input\n";
         return false;
     }
 
-    cv::Mat base_cpu;
+    cv::Mat base_cpu, target_cpu;
+    base.copyTo(base_cpu);
+
     if (base.size() != target.size())
     {
-        View resized;
-        cv::resize(base, resized, target.size(), 0, 0, cv::INTER_AREA);
-        resized.copyTo(base_cpu);
+        cv::Mat temp;
+        target.copyTo(temp);
+        cv::resize(temp, target_cpu, base.size());
     }
     else
     {
-        base.copyTo(base_cpu);
+        target.copyTo(target_cpu);
     }
 
-    cv::Mat base_gamma;
-    cv::max(base_cpu, 0.0f, base_gamma);
-    cv::min(base_gamma, 1.0f, base_gamma);
-    cv::pow(base_gamma, 1.0f / 2.2f, base_gamma);
+    cv::Mat base_gamma = base_cpu.clone();
+    apply_gamma(base_gamma, 1.0f / 2.2f);
 
-    cv::Mat target_cpu;
-    target.copyTo(target_cpu);
     cv::Mat target_f;
-    target_cpu.convertTo(target_f, CV_32FC3, 1.0f / 255.0f);
+    if (target_cpu.type() == CV_8UC3)
+    {
+        target_cpu.convertTo(target_f, CV_32FC3, 1.0f / 255.0f);
+    }
+    else
+    {
+        target_f = target_cpu.clone();
+        apply_gamma(target_f, 1.0f / 2.2f);
+    }
 
     std::vector<std::vector<float>> samples;
     std::vector<float> tgt_r, tgt_g, tgt_b;
@@ -160,4 +177,4 @@ void identity_poly_color(float* coeffs)
 }
 
 } // namespace mods
-} // namespace vibe
+} // namespace lute

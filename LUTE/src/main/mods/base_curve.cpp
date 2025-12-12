@@ -1,11 +1,11 @@
-// base_curve.cpp - VIBE
-// Base Curve Module - Applies per-channel tone curves from RAWS
+// base_curve.cpp - LUTE
+// Base Curve Module - Camera tone response curve (768 floats)
 
 #include "mods.h"
 #include <iostream>
 #include <cmath>
 
-namespace vibe
+namespace lute
 {
 namespace mods
 {
@@ -68,4 +68,4 @@ void base_curve_identity(float* curve)
 }
 
 } // namespace mods
-} // namespace vibe
+} // namespace lute

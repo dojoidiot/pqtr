@@ -1,5 +1,5 @@
-// hsv_lut.cpp - VIBE
-// HSV-space LUT for per-hue/saturation color corrections
+// hsv_lut.cpp - LUTE
+// HSV-space LUT for per-hue/saturation color corrections (1296 floats)
 
 #include "mods.h"
 #include <opencv2/imgproc.hpp>
@@ -8,26 +8,37 @@
 #include <vector>
 #include <algorithm>
 
-namespace vibe
+namespace lute
 {
 namespace mods
 {
+
+// Manual gamma to avoid OpenCL cv::pow crash
+static void apply_gamma(cv::Mat& img, float gamma)
+{
+    for (int y = 0; y < img.rows; y++)
+    {
+        float* row = img.ptr<float>(y);
+        for (int x = 0; x < img.cols * 3; x++)
+            row[x] = std::pow(std::clamp(row[x], 0.0f, 1.0f), gamma);
+    }
+}
 
 bool hsv_lut_apply(const View& in, View& out, Grid lut)
 {
     if (in.empty() || lut == nullptr || in.type() != CV_32FC3)
     {
-        std::cerr << "[vibe::hsv_lut_apply] invalid input\n";
+        std::cerr << "[lute::hsv_lut_apply] invalid input\n";
         return false;
     }
 
     cv::Mat cpu;
     in.copyTo(cpu);
 
-    cv::Mat gamma_rgb, gamma_8u;
-    cv::pow(cpu, 1.0f / 2.2f, gamma_rgb);
-    cv::max(gamma_rgb, 0.0f, gamma_rgb);
-    cv::min(gamma_rgb, 1.0f, gamma_rgb);
+    cv::Mat gamma_rgb = cpu.clone();
+    apply_gamma(gamma_rgb, 1.0f / 2.2f);
+
+    cv::Mat gamma_8u;
     gamma_rgb.convertTo(gamma_8u, CV_8UC3, 255.0);
 
     cv::Mat hsv_8u, hsv;
@@ -83,9 +94,9 @@ bool hsv_lut_apply(const View& in, View& out, Grid lut)
     hsv.convertTo(hsv_out_8u, CV_8UC3);
     cv::cvtColor(hsv_out_8u, result_gamma_8u, cv::COLOR_HSV2BGR);
     result_gamma_8u.convertTo(result_gamma, CV_32FC3, 1.0 / 255.0);
-    cv::pow(result_gamma, 2.2f, result_linear);
+    apply_gamma(result_gamma, 2.2f);
 
-    result_linear.copyTo(out);
+    result_gamma.copyTo(out);
     return true;
 }
 
@@ -93,32 +104,43 @@ bool hsv_lut_estimate(const View& base, const View& target, float* lut)
 {
     if (base.empty() || target.empty() || lut == nullptr)
     {
-        std::cerr << "[vibe::hsv_lut_estimate] invalid input\n";
+        std::cerr << "[lute::hsv_lut_estimate] invalid input\n";
         return false;
     }
 
-    View target_r;
-    if (base.size() != target.size())
-        cv::resize(target, target_r, base.size());
-    else
-        target.copyTo(target_r);
-
-    auto to8bit = [](const View& src, cv::Mat& dst) {
-        cv::Mat temp, clamped, gamma;
-        src.copyTo(temp);
-        cv::max(temp, 0.0f, clamped);
-        cv::min(clamped, 1.0f, clamped);
-        cv::pow(clamped, 1.0f / 2.2f, gamma);
-        gamma.convertTo(dst, CV_8UC3, 255.0);
-    };
-
     cv::Mat base_cpu, target_cpu;
-    to8bit(base, base_cpu);
-    to8bit(target_r, target_cpu);
+    base.copyTo(base_cpu);
+
+    if (base.size() != target.size())
+    {
+        cv::Mat temp;
+        target.copyTo(temp);
+        cv::resize(temp, target_cpu, base.size());
+    }
+    else
+    {
+        target.copyTo(target_cpu);
+    }
+
+    // Convert to 8-bit
+    apply_gamma(base_cpu, 1.0f / 2.2f);
+    cv::Mat base8u;
+    base_cpu.convertTo(base8u, CV_8UC3, 255.0);
+
+    cv::Mat target8u;
+    if (target_cpu.type() == CV_8UC3)
+    {
+        target8u = target_cpu;
+    }
+    else
+    {
+        apply_gamma(target_cpu, 1.0f / 2.2f);
+        target_cpu.convertTo(target8u, CV_8UC3, 255.0);
+    }
 
     cv::Mat base_hsv, target_hsv;
-    cv::cvtColor(base_cpu, base_hsv, cv::COLOR_BGR2HSV);
-    cv::cvtColor(target_cpu, target_hsv, cv::COLOR_BGR2HSV);
+    cv::cvtColor(base8u, base_hsv, cv::COLOR_BGR2HSV);
+    cv::cvtColor(target8u, target_hsv, cv::COLOR_BGR2HSV);
 
     std::vector<double> sum_dh(HSV_H_BINS * HSV_S_BINS, 0.0);
     std::vector<double> sum_ds(HSV_H_BINS * HSV_S_BINS, 0.0);
@@ -202,4 +224,4 @@ void hsv_lut_identity(float* lut)
 }
 
 } // namespace mods
-} // namespace vibe
+} // namespace lute

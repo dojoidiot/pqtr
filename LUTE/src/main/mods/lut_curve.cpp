@@ -1,4 +1,4 @@
-// lut_curve.cpp - VIBE
+// lut_curve.cpp - LUTE
 // LUT-based Per-Channel Curve Module
 
 #include "mods.h"
@@ -7,16 +7,27 @@
 #include <cmath>
 #include <vector>
 
-namespace vibe
+namespace lute
 {
 namespace mods
 {
+
+// Manual gamma to avoid OpenCL cv::pow crash
+static void apply_gamma(cv::Mat& img, float gamma)
+{
+    for (int y = 0; y < img.rows; y++)
+    {
+        float* row = img.ptr<float>(y);
+        for (int x = 0; x < img.cols * 3; x++)
+            row[x] = std::pow(std::clamp(row[x], 0.0f, 1.0f), gamma);
+    }
+}
 
 bool lut_curve(const View& in, View& out, Grid lut, int lut_size)
 {
     if (in.empty() || lut == nullptr || lut_size < 2 || in.type() != CV_32FC3)
     {
-        std::cerr << "[vibe::lut_curve] invalid input\n";
+        std::cerr << "[lute::lut_curve] invalid input\n";
         return false;
     }
 
@@ -41,21 +52,17 @@ bool lut_curve(const View& in, View& out, Grid lut, int lut_size)
         full_b[i] = lut_b[idx0] + frac * (lut_b[idx1] - lut_b[idx0]);
     }
 
-    View clamped, gamma;
-    cv::max(in, 0.0f, clamped);
-    cv::min(clamped, 1.0f, clamped);
-    cv::pow(clamped, 1.0f/2.2f, gamma);
-
-    View in8u;
-    gamma.convertTo(in8u, CV_8UC3, 255.0);
-
     cv::Mat cpu;
-    in8u.copyTo(cpu);
+    in.copyTo(cpu);
+    apply_gamma(cpu, 1.0f / 2.2f);
 
-    for (int y = 0; y < cpu.rows; y++)
+    cv::Mat cpu8u;
+    cpu.convertTo(cpu8u, CV_8UC3, 255.0);
+
+    for (int y = 0; y < cpu8u.rows; y++)
     {
-        uchar* ptr = cpu.ptr<uchar>(y);
-        for (int x = 0; x < cpu.cols; x++)
+        uchar* ptr = cpu8u.ptr<uchar>(y);
+        for (int x = 0; x < cpu8u.cols; x++)
         {
             int idx = x * 3;
             ptr[idx + 0] = static_cast<uchar>(full_b[ptr[idx + 0]] * 255.0f + 0.5f);
@@ -64,11 +71,11 @@ bool lut_curve(const View& in, View& out, Grid lut, int lut_size)
         }
     }
 
-    View result8u, result_f;
-    cpu.copyTo(result8u);
-    result8u.convertTo(result_f, CV_32FC3, 1.0/255.0);
-    cv::pow(result_f, 2.2f, out);
+    cv::Mat result_f;
+    cpu8u.convertTo(result_f, CV_32FC3, 1.0 / 255.0);
+    apply_gamma(result_f, 2.2f);
 
+    result_f.copyTo(out);
     return true;
 }
 
@@ -76,42 +83,50 @@ bool estimate_lut(const View& base, const View& target, float* lut, int lut_size
 {
     if (base.empty() || target.empty() || lut == nullptr || lut_size < 2)
     {
-        std::cerr << "[vibe::estimate_lut] invalid input\n";
+        std::cerr << "[lute::estimate_lut] invalid input\n";
         return false;
     }
 
-    View target_r;
-    if (base.size() != target.size())
-        cv::resize(target, target_r, base.size());
-    else
-        target.copyTo(target_r);
-
-    // Convert to 8-bit
-    auto to8bit = [](const View& src, View& dst) {
-        View clamped, gamma;
-        cv::max(src, 0.0f, clamped);
-        cv::min(clamped, 1.0f, clamped);
-        cv::pow(clamped, 1.0f/2.2f, gamma);
-        gamma.convertTo(dst, CV_8UC3, 255.0);
-    };
-
-    View base8, target8;
-    to8bit(base, base8);
-    to8bit(target_r, target8);
-
     cv::Mat base_cpu, target_cpu;
-    base8.copyTo(base_cpu);
-    target8.copyTo(target_cpu);
+    base.copyTo(base_cpu);
+
+    if (base.size() != target.size())
+    {
+        cv::Mat temp;
+        target.copyTo(temp);
+        cv::resize(temp, target_cpu, base.size());
+    }
+    else
+    {
+        target.copyTo(target_cpu);
+    }
+
+    // Convert base to 8-bit
+    apply_gamma(base_cpu, 1.0f / 2.2f);
+    cv::Mat base8u;
+    base_cpu.convertTo(base8u, CV_8UC3, 255.0);
+
+    // Convert target to 8-bit (may already be uint8)
+    cv::Mat target8u;
+    if (target_cpu.type() == CV_8UC3)
+    {
+        target8u = target_cpu;
+    }
+    else
+    {
+        apply_gamma(target_cpu, 1.0f / 2.2f);
+        target_cpu.convertTo(target8u, CV_8UC3, 255.0);
+    }
 
     float bin_size = 256.0f / lut_size;
     std::vector<double> sum_r(lut_size), sum_g(lut_size), sum_b(lut_size);
     std::vector<double> wgt_r(lut_size), wgt_g(lut_size), wgt_b(lut_size);
 
-    for (int y = 0; y < base_cpu.rows; y++)
+    for (int y = 0; y < base8u.rows; y++)
     {
-        const uchar* bp = base_cpu.ptr<uchar>(y);
-        const uchar* tp = target_cpu.ptr<uchar>(y);
-        for (int x = 0; x < base_cpu.cols; x++)
+        const uchar* bp = base8u.ptr<uchar>(y);
+        const uchar* tp = target8u.ptr<uchar>(y);
+        for (int x = 0; x < base8u.cols; x++)
         {
             int i = x * 3;
             uchar bb = bp[i], bg = bp[i+1], br = bp[i+2];
@@ -165,4 +180,4 @@ bool estimate_lut(const View& base, const View& target, float* lut, int lut_size
 }
 
 } // namespace mods
-} // namespace vibe
+} // namespace lute
