@@ -1,10 +1,10 @@
-// vibe.hpp - PQTR Style Processing Module
+// vibe.hpp - PQTR Creative Style Module
 //
-// VIBE handles the 45 style dials + non-dial transforms (LUTs, curves).
-// Implements pipe::Task interface for integration with LABS.
+// VIBE handles the photographer's creative adjustments - the dials they
+// twist in Lightroom/Darktable to express their style.
 //
 // Key abstractions:
-//   - Vibe: Style container (45 dials + LUTs + curves)
+//   - Vibe: Style container (51 dials organized into modules)
 //   - Dial: Individual adjustable parameter with view() and tune()
 //   - Module: Group of related dials operating in same color space
 //
@@ -13,6 +13,9 @@
 //   vibe->geometric().crop().crop_top(0.1f);
 //   vibe->toneMapping().contrast().set(1.2f);
 //   auto out = vibe->view(data);         // Apply to image
+//
+// Note: Camera profile transforms (BaseCurve, PolyColor, LutCurve, HsvLut)
+// are handled by LUTE, not VIBE. VIBE is purely creative adjustments.
 
 #pragma once
 
@@ -66,7 +69,7 @@ namespace vibe
     // Vibe - Complete style container
     // ============================================================
     //
-    // Holds all 45 dials organized into modules:
+    // Holds 51 dials organized into modules:
     //   - Geometric (6): crop, zoom, rotation
     //   - ColorCorrection (3): exposure, white balance
     //   - ToneMapping (7): contrast, highlights, shadows, pivots, clips
@@ -74,12 +77,6 @@ namespace vibe
     //   - SplitTone (4): shadow/highlight color grading
     //   - SelectiveColour (24): per-hue HSL adjustments
     //   - Detail (4): sharpen, denoise
-    //
-    // Plus non-dial transforms:
-    //   - BaseCurve (768 floats): camera response curve
-    //   - PolyColor (30 floats): polynomial coefficients
-    //   - LutCurve (14739 floats): 17³ 3D LUT
-    //   - HsvLut (1296 floats): 36×12 HSV delta LUT
 
     class Vibe
     {
@@ -161,86 +158,6 @@ namespace vibe
 
             virtual Exposure& exposure() = 0;
             virtual WhiteBalance& whiteBalance() = 0;
-        };
-
-        // ==========================================================
-        // Module 2.5: BaseCurve (768 floats) - LINEAR_RGB
-        // Camera response curve from RAWS
-        // ==========================================================
-
-        class BaseCurve
-        {
-        public:
-            virtual ~BaseCurve() = default;
-            static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
-            static constexpr int CURVE_LEN = 256;
-            static constexpr int CURVE_CHANNELS = 3;
-            static constexpr int CURVE_SIZE = CURVE_LEN * CURVE_CHANNELS;
-
-            virtual const float* curve() const = 0;
-            virtual void setCurve(const float* values) = 0;
-            virtual void reset() = 0;
-            virtual bool isActive() const = 0;
-        };
-
-        // ==========================================================
-        // Module 2.6: PolyColor (30 floats) - LINEAR_RGB
-        // Quadratic polynomial RGB→RGB transform
-        // ==========================================================
-
-        class PolyColor
-        {
-        public:
-            virtual ~PolyColor() = default;
-            static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
-            static constexpr int COEFFS_PER_CHANNEL = 10;
-            static constexpr int COEFFS_SIZE = COEFFS_PER_CHANNEL * 3;
-
-            virtual const float* coeffs() const = 0;
-            virtual void setCoeffs(const float* values) = 0;
-            virtual void reset() = 0;
-            virtual bool isActive() const = 0;
-        };
-
-        // ==========================================================
-        // Module 2.7: LutCurve (14739 floats) - LINEAR_RGB
-        // 17³ 3D LUT for full RGB→RGB transform capture
-        // ==========================================================
-
-        class LutCurve
-        {
-        public:
-            virtual ~LutCurve() = default;
-            static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
-            static constexpr int GRID_SIZE = 17;
-            static constexpr int LUT_SIZE = GRID_SIZE * GRID_SIZE * GRID_SIZE * 3;
-
-            virtual const float* lut() const = 0;
-            virtual void setLut(const float* values) = 0;
-            virtual bool estimate(View base, View target) = 0;
-            virtual void reset() = 0;
-            virtual bool isEstimated() const = 0;
-        };
-
-        // ==========================================================
-        // Module 2.8: HsvLut (1296 floats) - LINEAR_RGB
-        // 36×12 HSV delta LUT for per-hue corrections
-        // ==========================================================
-
-        class HsvLut
-        {
-        public:
-            virtual ~HsvLut() = default;
-            static constexpr ColourSpace space = ColourSpace::LINEAR_RGB;
-            static constexpr int H_BINS = 36;
-            static constexpr int S_BINS = 12;
-            static constexpr int LUT_SIZE = H_BINS * S_BINS * 3;
-
-            virtual const float* lut() const = 0;
-            virtual void setLut(const float* values) = 0;
-            virtual bool estimate(View base, View target) = 0;
-            virtual void reset() = 0;
-            virtual bool isEstimated() const = 0;
         };
 
         // ==========================================================
@@ -454,10 +371,6 @@ namespace vibe
         virtual Name name() const = 0;
         virtual Geometric& geometric() = 0;
         virtual ColorCorrection& colorCorrection() = 0;
-        virtual BaseCurve& baseCurve() = 0;
-        virtual PolyColor& polyColor() = 0;
-        virtual LutCurve& lutCurve() = 0;
-        virtual HsvLut& hsvLut() = 0;
         virtual ToneMapping& toneMapping() = 0;
         virtual GlobalColor& globalColor() = 0;
         virtual SplitTone& splitTone() = 0;

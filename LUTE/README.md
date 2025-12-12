@@ -1,99 +1,72 @@
 # LUTE
 
-The Lookup Table Estimator. 
-
-Camera profile LUT module for PQTR. Learns and applies camera-specific color transforms.
+Camera Profile Module - learns and applies gear manufacturer's color science.
 
 ## What It Does
 
-LUTE bridges the gap between scene-linear RAW data and display-referred camera JPEGs by learning 3D LUTs from flat/preview pairs.
+When photographers compose shots, they see the camera's interpretation of the scene on their LCD. LUTE captures this "out of camera" look by learning from RAW + embedded preview pairs.
 
-**Key insight:** Camera manufacturers apply sophisticated color processing (highlight roll-off, skin tone protection, gamut mapping) that varies by creative style. LUTE captures this per-camera.
+## Camera Transforms
 
-## How It Works
+LUTE manages four transform types, all learned from camera behavior:
 
-### Learning Phase (tune)
+| Transform | Size | Purpose |
+|-----------|------|---------|
+| **BaseCurve** | 768 floats | Camera tone response curve |
+| **PolyColor** | 30 floats | Polynomial RGB→RGB transform |
+| **LutCurve** | 14,739 floats | 17³ 3D LUT for full color mapping |
+| **HsvLut** | 1,296 floats | 36×12 HSV delta corrections |
 
-1. RAWS decodes RAW file to scene-linear + embedded preview
-2. LUTE accumulates RGB→RGB mappings into 17³ grid
-3. Multiple images fill gaps (dark shadows, bright highlights, saturated colors)
-4. Profile converges when average cell delta < 0.1%
-
-### Application Phase (view)
-
-1. Image arrives in scene-linear
-2. LUTE looks up profile by EXIF (camera + creative style + DRO)
-3. Applies 3D LUT with trilinear interpolation
-4. Output matches camera's color science
-
-## Profile Storage
-
-Profiles stored at `~/.pqtr/var/profiles/`:
+## Learning Process
 
 ```
-~/.pqtr/var/profiles/
-├── Sony_ILCE-7M4_Standard_DRO-Off.json
-├── Sony_ILCE-7M4_Vivid_DRO-Auto.json
-├── Canon_EOS-R5_Faithful_DRO-Off.json
-└── ...
+1. RAWS decodes RAW → scene-linear RGB
+2. Extract embedded preview JPEG
+3. LUTE compares flat vs preview
+4. Accumulate RGB→RGB mappings into transforms
+5. Repeat with more images until converged
 ```
+
+Profiles are keyed by camera model + creative style:
+- `Sony_ILCE-7M4_Standard.json`
+- `Canon_EOS-R5_Faithful.json`
 
 ## Usage
 
 ```cpp
 #include <lute.hpp>
 
-// Create profile manager
 auto lute = lute::create();
 
 // Set camera key (loads existing profile if found)
-lute->setKey("Sony_ILCE-7M4", "Standard", "Off");
+lute->setKey("Sony", "ILCE-7M4", "Standard");
 
-// Apply to image
-auto out = lute->view(input);
+// Learn from RAW+preview pair
+lute->tune(flat_image, preview_image);
 
-// Or accumulate from RAW
-bool updated = lute->tune(flat, preview);
+// Apply to new images
+auto output = lute->view(input);
+
+// Save when converged
 if (lute->profile()->converged()) {
     lute->save();
 }
+```
+
+## Profile Storage
+
+```
+~/.pqtr/var/profiles/
+├── Sony_ILCE-7M4_Standard.json
+├── Sony_ILCE-7M4_Vivid.json
+├── Canon_EOS-R5_Faithful.json
+└── ...
 ```
 
 ## Build
 
 ```bash
 make        # Build lib/lute.a
+make test   # Run tests
 make tidy   # Clean
-```
-
-## Integration
-
-LUTE is used by LABS as part of the processing pipeline:
-
-```
-RAWS → LUTE → DROP → VIBE → output
-```
-
-Wire into LABS:
-```bash
-# In wire.sh
-WIRE LUTE inc LABS
-WIRE LUTE lib LABS
-```
-
-## Profile Format
-
-JSON with 3D LUT data:
-
-```json
-{
-  "key": "Sony_ILCE-7M4_Standard_DRO-Off",
-  "camera_model": "ILCE-7M4",
-  "creative_style": "Standard",
-  "dro": "Off",
-  "sample_count": 47,
-  "coverage": 0.923,
-  "converged": true,
-  "lut": [...]
-}
 ```

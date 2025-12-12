@@ -2,67 +2,61 @@
 
 ## Current State (2025-12-12)
 
+### Architecture Clarified
+
+Two-phase processing that mirrors professional workflow:
+
+1. **LUTE** - Camera profile (gear manufacturer's style)
+   - BaseCurve, PolyColor, LutCurve, HsvLut
+   - Learned from RAW + embedded preview pairs
+   - Fixed per camera model + creative style
+
+2. **VIBE** - Creative style (photographer's adjustments)
+   - 51 dials across 7 modules
+   - Optimized by TUNE to match reference
+   - Variable per photographer/vibe
+
 ### Recent Changes
-- **WGPU**: Renamed from DAWN (WebGPU compute library)
-- **BASE**: Renamed from JWTA, now serves static site + JWT auth
-- **TUNE**: Separated from LABS as standalone optimizer
-- **APEX/SITE**: Removed (unused)
+- Moved BaseCurve, PolyColor, LutCurve, HsvLut from VIBE to LUTE
+- Moved corresponding WGSL shaders to LUTE
+- Rewrote README.md with complete architecture
+- WGPU: Renamed from DAWN
+- BASE: Renamed from JWTA
 
-### WGPU Shaders - COMPLETE
-- **VIBE**: 16 WGSL compute shaders (all mods except geometric)
-- **RAWS**: 5 WGSL compute shaders (BLC, WB, demosaic, color matrix)
-- All tests passing: VIBE 16/16, RAWS 5/5
+## Projects
 
-## Architecture
-
-```
-RAWS → VIBE → TUNE
-  │      │      │
-  │      │      └── Style optimizer (GeoS algorithm)
-  │      └── 17 image processing modules
-  └── RAW decoder (camera-specific)
-```
-
-### Projects
-
-| Project | Purpose |
-|---------|---------|
-| BASE | Web server + JWT auth + static site |
-| DESK | Desktop GUI (ImGui) |
-| LABS | Core pipeline orchestrator |
-| RAWS | RAW file decoding |
-| TUNE | Style optimization |
-| VIBE | Image processing modules |
-| WGPU | WebGPU compute (Dawn backend) |
+| Project | Status | Purpose |
+|---------|--------|---------|
+| RAWS | Active | RAW decoder |
+| LUTE | Active | Camera profiles |
+| VIBE | Active | Creative styles (51 dials) |
+| TUNE | Active | Style optimizer |
+| LABS | Active | Pipeline orchestrator |
+| WGPU | Active | GPU compute |
+| DESK | In Dev | Desktop GUI |
+| BASE | Active | Web server |
 
 ## What's Working
 
-- ✅ 17 VIBE modules (CV backend)
-- ✅ 16 VIBE WGSL shaders (GPU backend)
-- ✅ 5 RAWS WGSL shaders (GPU backend)
-- ✅ TUNE separated from LABS
-- ✅ BASE web server with static site serving
-- ✅ Theory-based testing (CPU reference vs GPU)
+- VIBE: 13 WGSL shaders (creative dials)
+- LUTE: 4 WGSL shaders (camera transforms)
+- RAWS: 5 WGSL shaders (RAW decode)
+- TUNE: Style optimizer (GeoS algorithm)
 
 ## Next
 
+- [ ] Wire LUTE into LABS pipeline
 - [ ] Wire VIBE into LABS pipeline
-- [ ] Implement Vibe orchestrator class
-- [ ] GPU pipeline integration (WGPU)
 - [ ] DESK UI for vibe creation
+- [ ] Profile convergence testing
 
 ## Build & Test
 
 ```bash
 ./wire.sh && make
 
-# WGPU shader tests
+# GPU shader tests
 cd VIBE && make test-dawn
+cd LUTE && make test-dawn
 cd RAWS && make test-dawn
-
-# TUNE optimizer
-cd TUNE && ./bin/tune --help
-
-# BASE server
-cd BASE && make && ./bin/base --help
 ```
