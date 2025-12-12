@@ -113,7 +113,7 @@ The tail is the final step of the pipeline. It produces a final, display-referre
 
 ### LABS
 
-LABS is the desktop application for using PQTR. It provides a GUI for creating and editing vibes, processing images through the pipeline, and managing your camera profiles.
+LABS is the PQTR application — available anywhere, any time. It provides a GUI for creating and editing vibes, processing images through the pipeline, and managing your camera profiles. Built with WebAssembly for cross-platform deployment.
 
 ### BASE
 
@@ -127,10 +127,10 @@ BASE is your PQTR home base. It is the web server, authentication system, and ho
 | **LUTE** | Camera profiles — learns gear manufacturer's color science |
 | **DROP** | Dynamic range — optimization for high-contrast scenes |
 | **VIBE** | Creative styles — 51 adjustable dials for photographer expression |
-| **PIPE** | Pipeline library — coordinates GEAR → LUTE → DROP → VIBE |
+| **PIPE** | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DROP,VIBE] -> TAIL [POST] |
 | **POST** | Distribution — platform plugins for Instagram, Email, SMS, etc. |
 | **WGPU** | GPU compute — WebGPU/WGSL shaders for fast processing |
-| **LABS** | Desktop app — GUI for creating and editing vibes |
+| **LABS** | WASM app — Anywhere, any time, creating and editing vibes |
 | **BASE** | Web server — JWT auth + static site for pqtr.ai |
 
 ## Building
