@@ -101,7 +101,7 @@ The user vibe is where the creative's magic happens. At its simplest level, VIBE
 | SelectiveColor | 24 | Per-hue HSL adjustments |
 | Detail | 4 | Sharpen, denoise |
 
-The first part of the magic: if you add a production image into PIPE that has been styled by your favorite tool (e.g., Lightroom), VIBE will find the optimal dial settings to match your image — capturing your vibe. This vibe can then be applied to any new image.
+The first part of the magic: if you add a production image into LABS that has been styled by your favorite tool (e.g., Lightroom), VIBE will find the optimal dial settings to match your image — capturing your vibe. This vibe can then be applied to any new image.
 
 The second part of the magic: you can have many VIBE steps. Apply an existing vibe in one step, then do quick edits in a subsequent step to finish the image — including crop and tilt — so it's ready to post to clients.
 
@@ -111,9 +111,9 @@ The tail is the final step of the pipeline. It produces a final, display-referre
 
 ## Applications
 
-### PIPE
+### LABS
 
-PIPE is the application you use to run PQTR. It is a fully dynamic web app that determines what view you need based on the size of the screen you're working on. PIPE uses highly optimized WASM (WebAssembly) and WebGL GPU code so that all tasks are done on the device instantly and fast.
+LABS is the desktop application for using PQTR. It provides a GUI for creating and editing vibes, processing images through the pipeline, and managing your camera profiles.
 
 ### BASE
 
@@ -125,9 +125,10 @@ BASE is your PQTR home base. It is the web server, authentication system, and ho
 |---------|---------|
 | **GEAR** | Camera gear — RAW decoding, metadata, scene-linear normalization |
 | **LUTE** | Camera profiles — learns gear manufacturer's color science |
+| **DROP** | Dynamic range — optimization for high-contrast scenes |
 | **VIBE** | Creative styles — 51 adjustable dials for photographer expression |
-| **TUNE** | Style optimizer — finds dial values to match a reference |
-| **PIPE** | Pipeline orchestrator — coordinates GEAR → LUTE → VIBE |
+| **PIPE** | Pipeline library — coordinates GEAR → LUTE → DROP → VIBE |
+| **POST** | Distribution — platform plugins for Instagram, Email, SMS, etc. |
 | **WGPU** | GPU compute — WebGPU/WGSL shaders for fast processing |
 | **LABS** | Desktop app — GUI for creating and editing vibes |
 | **BASE** | Web server — JWT auth + static site for pqtr.ai |
@@ -147,6 +148,6 @@ cd VIBE && make test-dawn
 cd GEAR && make test-dawn
 
 # Module tests
-cd VIBE && make test
 cd LUTE && make test
+cd PIPE && make test
 ```
