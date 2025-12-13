@@ -111,7 +111,7 @@ make clean                    # Clean all artifacts
 GEAR contributes the first link in any pipe:
 
 ```cpp
-pipe::Hold<pipe::Link> gear::link();
+pipe::Hold<pipe::Link> gear::read();
 ```
 
 | Input Page | Output Page | Info Added |
@@ -122,7 +122,7 @@ pipe::Hold<pipe::Link> gear::link();
 
 ```cpp
 auto pipe = pipe::make();
-pipe->link(gear::link());    // raw → Bayer (CPU)
+pipe->link(gear::read());    // raw → Bayer (CPU)
 pipe->link(wgpu::open());    // Bayer → GPU
 pipe->link(pipe::blc());     // Black level correction
 pipe->link(pipe::wb());      // White balance

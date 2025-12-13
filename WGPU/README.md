@@ -82,7 +82,7 @@ For saving results. Encodes to PNG via WGSL compute shader:
 ```cpp
 // Tuning pipeline (interactive)
 auto tune = pipe::make();
-tune->link(gear::link());    // raw → Bayer (CPU)
+tune->link(gear::read());    // raw → Bayer (CPU)
 tune->link(wgpu::open());    // Bayer → GPU float32
 tune->link(lute::tune());    // learn profile (GPU)
 tune->link(wgpu::view());    // display preview (no save)
@@ -90,7 +90,7 @@ tune->link(wgpu::shut());    // GPU → CPU
 
 // Production pipeline (final output)
 auto prod = pipe::make();
-prod->link(gear::link());    // raw → Bayer (CPU)
+prod->link(gear::read());    // raw → Bayer (CPU)
 prod->link(wgpu::open());    // Bayer → GPU float32
 prod->link(lute::view());    // apply profile (GPU)
 prod->link(vibe::view());    // apply style (GPU)

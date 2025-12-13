@@ -51,7 +51,7 @@ OUT = tmp/wasm
 all: $(OUT)/labs.js $(OUT)/labs.html
 
 $(OUT)/labs.js: $(SRC) | $(OUT)
-	emcc $(SRC) $(INC) $(EMFLAGS) -O2 -o $@
+	emcc $(SRC) $(INC) $(EMFLAGS) -O1 -o $@
 
 $(OUT)/labs.html: src/wasm/shell.html $(OUT)/labs.js
 	sed 's|{{{ SCRIPT }}}|<script src="labs.js?v=$(shell date +%s)"></script>|' $< > $@

@@ -5,6 +5,7 @@
 #include <sodium.h>
 #include <ctime>
 #include <cstdio>
+#include <iostream>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <cerrno>
@@ -40,16 +41,23 @@ bool Service::init() {
 
     // Try to load existing signing keys from database
     if (m_store.getSigningKeys(m_signing_pubkey, m_signing_privkey)) {
-        return true;  // Keys loaded successfully
+        std::cerr << "[init] Signing keys loaded from database" << std::endl;
+        return true;
     }
 
     // Generate new signing keypair
+    std::cerr << "[init] Generating new signing keys..." << std::endl;
     if (!crypto::generateKeypair(m_signing_pubkey, m_signing_privkey)) {
+        std::cerr << "[init] FAIL: Could not generate signing keys" << std::endl;
         return false;
     }
 
     // Persist keys to database
-    m_store.setSigningKeys(m_signing_pubkey, m_signing_privkey);
+    if (m_store.setSigningKeys(m_signing_pubkey, m_signing_privkey)) {
+        std::cerr << "[init] Signing keys saved to database" << std::endl;
+    } else {
+        std::cerr << "[init] WARNING: Could not save signing keys!" << std::endl;
+    }
 
     return true;
 }
@@ -57,20 +65,25 @@ bool Service::init() {
 rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     rpc::RegisterResponse resp{};
 
+    std::cerr << "[register] email=" << req.email << std::endl;
+
     // Rate limit check
     if (!m_store.checkOtpRateLimit(req.email)) {
+        std::cerr << "[register] FAIL: rate limit exceeded" << std::endl;
         resp.ok = false;
-        return resp;  // Too many requests
+        return resp;
     }
 
     // Check if user already exists - if so, send login OTP instead
     auto existing = m_store.getUserByEmail(req.email);
     if (existing) {
         if (existing->locked) {
+            std::cerr << "[register] FAIL: user locked" << std::endl;
             resp.ok = false;
             return resp;
         }
         // Existing user - send login OTP
+        std::cerr << "[register] existing user, forwarding to login" << std::endl;
         auto login_resp = handleLogin({req.email});
         resp.ok = login_resp.ok;
         resp.expires = login_resp.expires;
@@ -96,17 +109,21 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
 
     // Store new OTP
     if (!m_store.createOtp(otp)) {
+        std::cerr << "[register] FAIL: createOtp failed" << std::endl;
         resp.ok = false;
         return resp;
     }
 
     // Send OTP email
+    std::cerr << "[register] sending OTP..." << std::endl;
     if (!m_mailer.sendOtp(req.email, otp_code)) {
+        std::cerr << "[register] FAIL: sendOtp failed" << std::endl;
         m_store.deleteOtp(req.email);
         resp.ok = false;
         return resp;
     }
 
+    std::cerr << "[register] OK" << std::endl;
     resp.ok = true;
     resp.expires = 600;
     return resp;
@@ -213,21 +230,26 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
 rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     rpc::LoginResponse resp{};
 
+    std::cerr << "[login] email=" << req.email << std::endl;
+
     // Rate limit check
     if (!m_store.checkOtpRateLimit(req.email)) {
+        std::cerr << "[login] FAIL: rate limit exceeded" << std::endl;
         resp.ok = false;
-        return resp;  // Too many requests
+        return resp;
     }
 
     // Check if user exists
     auto existing = m_store.getUserByEmail(req.email);
     if (!existing) {
+        std::cerr << "[login] FAIL: user not found" << std::endl;
         resp.ok = false;
         return resp;
     }
 
     // Check if account is locked
     if (existing->locked) {
+        std::cerr << "[login] FAIL: user locked" << std::endl;
         resp.ok = false;
         return resp;
     }
@@ -251,17 +273,21 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
 
     // Store new OTP
     if (!m_store.createOtp(otp)) {
+        std::cerr << "[login] FAIL: createOtp failed" << std::endl;
         resp.ok = false;
         return resp;
     }
 
     // Send OTP email
+    std::cerr << "[login] sending OTP..." << std::endl;
     if (!m_mailer.sendOtp(req.email, otp_code)) {
+        std::cerr << "[login] FAIL: sendOtp failed" << std::endl;
         m_store.deleteOtp(req.email);
         resp.ok = false;
         return resp;
     }
 
+    std::cerr << "[login] OK" << std::endl;
     resp.ok = true;
     resp.expires = 600;
     return resp;
@@ -424,11 +450,19 @@ bool Service::verifyBootstrapToken(const std::string& token) {
 rpc::ListResponse Service::handleList(const rpc::ListRequest& req) {
     rpc::ListResponse resp{};
 
+    std::cerr << "[list] jwt_len=" << req.jwt.size() << " name=" << req.name << std::endl;
+
     // Verify JWT and extract itag
     auto claims = jwt::decode(req.jwt, m_signing_pubkey);
-    if (!claims || !itag::valid(claims->itag)) {
+    if (!claims) {
+        std::cerr << "[list] FAIL: JWT decode failed" << std::endl;
         return resp;
     }
+    if (!itag::valid(claims->itag)) {
+        std::cerr << "[list] FAIL: invalid itag=" << claims->itag << std::endl;
+        return resp;
+    }
+    std::cerr << "[list] itag=" << claims->itag << std::endl;
 
     if (m_data_area.empty()) {
         resp.ok = true;

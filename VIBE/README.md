@@ -95,7 +95,7 @@ pipe::Hold<pipe::Link> vibe::view();  // Apply style
 
 **tune pipe** (learning):
 ```cpp
-pipe->link(gear::link());    // raw → Bayer
+pipe->link(gear::read());    // raw → Bayer
 pipe->link(wgpu::open());    // Bayer → GPU
 pipe->link(lute::tune());    // learn profile
 pipe->link(vibe::tune());    // ← learn style
@@ -104,7 +104,7 @@ pipe->link(wgpu::shut());    // GPU → output
 
 **view pipe** (production):
 ```cpp
-pipe->link(gear::link());    // raw → Bayer
+pipe->link(gear::read());    // raw → Bayer
 pipe->link(wgpu::open());    // Bayer → GPU
 pipe->link(lute::view());    // apply profile
 pipe->link(vibe::view());    // ← apply style

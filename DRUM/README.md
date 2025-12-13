@@ -31,7 +31,7 @@ pipe::Hold<pipe::Link> drum::view();  // Apply DRO
 ### Pipe Configuration
 
 ```cpp
-pipe->link(gear::link());    // raw → Bayer
+pipe->link(gear::read());    // raw → Bayer
 pipe->link(wgpu::open());    // Bayer → GPU
 pipe->link(lute::view());    // apply camera profile
 pipe->link(drum::view());    // ← apply DRO

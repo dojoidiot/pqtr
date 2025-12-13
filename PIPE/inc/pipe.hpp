@@ -127,7 +127,7 @@ namespace pipe
     //
     // Example:
     //   auto pipe = pipe::make();
-    //   pipe->link(gear::link());
+    //   pipe->link(gear::read());
     //   pipe->link(vibe::link("style1"));
     //   Data out = pipe->flow(in);
 
@@ -157,5 +157,27 @@ namespace pipe
     Hold<Link> demosaic();  // Bayer → RGB
     Hold<Link> cst();       // Color space transform (matrix)
     Hold<Link> crop();      // Active area crop
+
+    // ============================================================
+    // View Link - PNG snapshot pushed to BASE
+    // ============================================================
+    //
+    // Generates PNG on GPU and pushes to BASE server.
+    // Runs in browser WASM - no filesystem access.
+    //
+    // Reads from Info:
+    //   "name" - base filename (e.g., "DSC00144")
+    //   "jwt"  - auth token for BASE push
+    //
+    // Writes to Info:
+    //   "view" - filename pushed (e.g., "DSC00144.png")
+    //
+    // Example:
+    //   pipe->link(pipe::view());  // → pushes {name}.png to BASE
+    //
+    // The fidelity rule: view quantizes to 8-bit for POST only.
+    // Pipeline data (Page) passes through unchanged at full precision.
+
+    Hold<Link> view();
 
 } // namespace pipe

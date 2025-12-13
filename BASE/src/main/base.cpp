@@ -6,7 +6,10 @@
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
+#include <sys/stat.h>
+#include <cerrno>
 
 namespace {
 
@@ -308,6 +311,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     service.setDataArea(data_area);
+
+    // Initialize var directory structure
+    if (!data_area.empty()) {
+        std::string labs_dir = data_area + "LABS";
+        if (mkdir(labs_dir.c_str(), 0755) == 0) {
+            std::cout << "[BASE] Created: " << labs_dir << std::endl;
+        } else if (errno == EEXIST) {
+            std::cout << "[BASE] Data: " << labs_dir << std::endl;
+        } else {
+            std::cerr << "[BASE] Warning: Could not create " << labs_dir << ": " << strerror(errno) << std::endl;
+        }
+    }
 
     if (!cfg.admin_email.empty()) {
         service.setAdminEmail(cfg.admin_email);
@@ -611,8 +626,36 @@ int main(int argc, char* argv[]) {
         res.set_redirect("/labs.html");
     });
 
-    // Static file serving
+    // Static file serving with proper MIME types for WASM
     if (!wasm_root.empty()) {
+        // Serve .wasm files with correct MIME type and caching
+        svr.Get("/.*\\.wasm", [&wasm_root](const httplib::Request& req, httplib::Response& res) {
+            std::string path = wasm_root + req.path;
+            std::ifstream file(path, std::ios::binary);
+            if (!file) {
+                res.status = 404;
+                return;
+            }
+            std::ostringstream ss;
+            ss << file.rdbuf();
+            res.set_content(ss.str(), "application/wasm");
+            res.set_header("Cache-Control", "public, max-age=31536000");  // Cache for 1 year
+        });
+
+        // Serve .js files with caching
+        svr.Get("/.*\\.js", [&wasm_root](const httplib::Request& req, httplib::Response& res) {
+            std::string path = wasm_root + req.path;
+            std::ifstream file(path);
+            if (!file) {
+                res.status = 404;
+                return;
+            }
+            std::ostringstream ss;
+            ss << file.rdbuf();
+            res.set_content(ss.str(), "application/javascript");
+            res.set_header("Cache-Control", "no-cache");  // Check for updates
+        });
+
         if (svr.set_mount_point("/", wasm_root)) {
             std::cout << "[BASE] WWW: " << wasm_root << std::endl;
         } else {

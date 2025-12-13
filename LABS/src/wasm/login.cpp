@@ -24,6 +24,93 @@
 #define LOG(msg) printf("%s\n", msg)
 #endif
 
+// ============================================================
+// Fetch Context System - Safe async request handling
+// ============================================================
+// Each fetch request gets a heap-allocated context that:
+// - Holds all data needed for the request (body, headers, etc.)
+// - Tracks session ID to detect stale responses after auth changes
+// - Is freed in the callback (success or error)
+
+// Global session counter - incremented on auth changes
+static uint32_t g_auth_session = 0;
+
+// Request types for different handlers
+enum class FetchType {
+    Login,
+    Verify,
+    List,
+    Files,
+    Push,
+    Pull
+};
+
+// Context for each fetch request - heap allocated, freed in callback
+struct FetchContext {
+    FetchType type;
+    uint32_t session;           // Session ID when request was made
+    char* body;                 // Heap-allocated request body
+    size_t body_size;
+    char* url;                  // Heap-allocated URL (for push/pull)
+    uint8_t* data;              // Heap-allocated binary data (for push)
+    size_t data_size;
+    char extra[256];            // Extra context (e.g., basename for chained ops)
+
+    FetchContext(FetchType t) : type(t), session(g_auth_session),
+                                 body(nullptr), body_size(0),
+                                 url(nullptr), data(nullptr), data_size(0) {
+        extra[0] = '\0';
+    }
+
+    ~FetchContext() {
+        if (body) free(body);
+        if (url) free(url);
+        if (data) free(data);
+    }
+
+    // Check if this request is still valid (session hasn't changed)
+    bool isValid() const { return session == g_auth_session; }
+
+    // Allocate and copy body
+    void setBody(const char* src) {
+        body_size = strlen(src);
+        body = (char*)malloc(body_size + 1);
+        memcpy(body, src, body_size + 1);
+    }
+
+    // Allocate and copy URL
+    void setUrl(const char* src) {
+        size_t len = strlen(src);
+        url = (char*)malloc(len + 1);
+        memcpy(url, src, len + 1);
+    }
+
+    // Allocate and copy binary data
+    void setData(const uint8_t* src, size_t size) {
+        data_size = size;
+        data = (uint8_t*)malloc(size);
+        memcpy(data, src, size);
+    }
+};
+
+// Static headers - persist for lifetime of program
+static const char* g_json_headers[] = {"Content-Type", "application/json", nullptr};
+
+// Auth header buffer - updated when JWT changes, used by push/pull
+static char g_auth_header[2200] = "";
+static const char* g_auth_headers[] = {"Authorization", g_auth_header, nullptr};
+
+// Helper to update auth header when JWT changes
+static void updateAuthHeader(const char* jwt) {
+    snprintf(g_auth_header, sizeof(g_auth_header), "Bearer %s", jwt);
+}
+
+// Helper to invalidate all in-flight requests (call on logout/auth change)
+static void invalidateRequests() {
+    g_auth_session++;
+    LOG("Auth session invalidated - stale requests will be ignored");
+}
+
 // Application screens
 enum class Screen {
     Login,      // Email entry
@@ -644,48 +731,9 @@ EM_JS(void, loadAuthUserId, (char* out, int maxLen), {
     } catch(e) {}
 });
 
-// Helper to create gear.json after RAW push succeeds
-static void createGearJson(const char* basename, const char* raw_filename) {
-    // Build gear.json content
-    static char gear_json[256];
-    snprintf(gear_json, sizeof(gear_json), "{\"raw\":\"%s\"}", raw_filename);
-
-    // Build URL: POST /push?name={basename}&file={basename}.gear.json
-    static char url[512];
-    snprintf(url, sizeof(url), "/push?name=%s&file=%s.gear.json", basename, basename);
-
-    // Build Authorization header
-    static char auth_header[2100];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
-    static const char* headers[] = {"Authorization", auth_header, nullptr};
-
-    emscripten_fetch_attr_t attr;
-    emscripten_fetch_attr_init(&attr);
-    strcpy(attr.requestMethod, "POST");
-    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.requestHeaders = headers;
-    attr.requestData = gear_json;
-    attr.requestDataSize = strlen(gear_json);
-
-    attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        LOG("gear.json created");
-        // Extract basename from raws_name for note
-        char basename[256];
-        strncpy(basename, g_state.raws_name, sizeof(basename) - 1);
-        char* dot = strrchr(basename, '.');
-        if (dot) *dot = '\0';
-        postNote("raws.load", basename);
-        emscripten_fetch_close(fetch);
-    };
-
-    attr.onerror = [](emscripten_fetch_t* fetch) {
-        LOG("Failed to create gear.json");
-        postNote("raws.error", "gear.json failed");
-        emscripten_fetch_close(fetch);
-    };
-
-    emscripten_fetch(&attr, url);
-}
+// Forward declarations for fetch callbacks (defined later, used by onRawFileLoaded)
+static void onFetchSuccess(emscripten_fetch_t* fetch);
+static void onFetchError(emscripten_fetch_t* fetch);
 
 // C callback for file load - called from JavaScript
 extern "C" {
@@ -701,56 +749,39 @@ void onRawFileLoaded(const char* name, uint8_t* data, int size) {
     g_state.raws_name[sizeof(g_state.raws_name) - 1] = '\0';
 
     // Extract basename (without extension)
-    static char basename[256];
+    char basename[256];
     strncpy(basename, name, sizeof(basename) - 1);
     char* dot = strrchr(basename, '.');
     if (dot) *dot = '\0';
 
-    // Build URL: POST /push?name={basename}&file={filename}
-    static char url[512];
+    // Update auth header in case it changed
+    updateAuthHeader(g_state.jwt);
+
+    // Create context with binary data and URL
+    FetchContext* ctx = new FetchContext(FetchType::Push);
+    ctx->setData(data, size);
+
+    char url[512];
     snprintf(url, sizeof(url), "/push?name=%s&file=%s", basename, name);
+    ctx->setUrl(url);
 
-    // Copy data for async use (will be freed after push)
-    static uint8_t* raw_data = nullptr;
-    static size_t raw_size = 0;
-    if (raw_data) free(raw_data);
-    raw_data = (uint8_t*)malloc(size);
-    memcpy(raw_data, data, size);
-    raw_size = size;
-
-    // Build Authorization header
-    static char auth_header[2100];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
-    static const char* headers[] = {"Authorization", auth_header, nullptr};
+    // Store basename in extra for gear.json chaining
+    strncpy(ctx->extra, basename, sizeof(ctx->extra) - 1);
+    ctx->extra[sizeof(ctx->extra) - 1] = '\0';
 
     // Push RAW to BASE
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "POST");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.requestHeaders = headers;
-    attr.requestData = reinterpret_cast<const char*>(raw_data);
-    attr.requestDataSize = raw_size;
+    attr.onsuccess = onFetchSuccess;
+    attr.onerror = onFetchError;
+    attr.userData = ctx;
+    attr.requestHeaders = g_auth_headers;
+    attr.requestData = reinterpret_cast<const char*>(ctx->data);
+    attr.requestDataSize = ctx->data_size;
 
-    attr.onsuccess = [](emscripten_fetch_t* fetch) {
-        LOG("RAW pushed to BASE");
-        emscripten_fetch_close(fetch);
-
-        // Now create gear.json
-        char basename[256];
-        strncpy(basename, g_state.raws_name, sizeof(basename) - 1);
-        char* dot = strrchr(basename, '.');
-        if (dot) *dot = '\0';
-        createGearJson(basename, g_state.raws_name);
-    };
-
-    attr.onerror = [](emscripten_fetch_t* fetch) {
-        LOG("Failed to push RAW to BASE");
-        postNote("raws.error", "push failed");
-        emscripten_fetch_close(fetch);
-    };
-
-    emscripten_fetch(&attr, url);
+    emscripten_fetch(&attr, ctx->url);
 }
 }
 
@@ -815,96 +846,299 @@ static bool extractJsonBool(const char* json, const char* key) {
 }
 
 #ifdef __EMSCRIPTEN__
-// Fetch callbacks
-static void onLoginSuccess(emscripten_fetch_t* fetch) {
-    LOG("Login response received");
-    char buf[512];
-    size_t len = fetch->numBytes < 511 ? fetch->numBytes : 511;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-    LOG(buf);
+// ============================================================
+// Unified fetch callback - handles all request types with context
+// ============================================================
+static void onFetchSuccess(emscripten_fetch_t* fetch);
+static void onFetchError(emscripten_fetch_t* fetch);
 
-    if (extractJsonBool(buf, "ok")) {
-        g_state.screen = Screen::OTP;
-        strcpy(g_state.status_message, "Check console for OTP");
-        g_state.error_message[0] = '\0';
-    } else {
-        strcpy(g_state.error_message, "Login failed");
+// Helper to cleanup fetch and context
+static void cleanupFetch(emscripten_fetch_t* fetch) {
+    FetchContext* ctx = static_cast<FetchContext*>(fetch->userData);
+    if (ctx) delete ctx;
+    emscripten_fetch_close(fetch);
+}
+
+// Check if response is stale (auth changed since request was made)
+static bool isStaleResponse(emscripten_fetch_t* fetch) {
+    FetchContext* ctx = static_cast<FetchContext*>(fetch->userData);
+    if (!ctx || !ctx->isValid()) {
+        LOG("Ignoring stale response (auth session changed)");
+        cleanupFetch(fetch);
+        return true;
     }
-    g_state.request_pending = false;
-    emscripten_fetch_close(fetch);
+    return false;
 }
 
-static void onLoginFail(emscripten_fetch_t* fetch) {
-    LOG("Login request failed");
-    strcpy(g_state.error_message, "Network error");
-    g_state.request_pending = false;
-    emscripten_fetch_close(fetch);
-}
-
-static void onVerifySuccess(emscripten_fetch_t* fetch) {
-    LOG("Verify response received");
-    char buf[4096];
-    size_t len = fetch->numBytes < 4095 ? fetch->numBytes : 4095;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-    LOG(buf);
-
-    // Check for error
-    if (strstr(buf, "\"error\"")) {
-        strcpy(g_state.error_message, "Invalid OTP");
-        g_state.request_pending = false;
+static void onFetchSuccess(emscripten_fetch_t* fetch) {
+    FetchContext* ctx = static_cast<FetchContext*>(fetch->userData);
+    if (!ctx) {
+        LOG("ERROR: fetch success with null context");
         emscripten_fetch_close(fetch);
         return;
     }
 
-    // Extract tokens
-    extractJsonString(buf, "jwt", g_state.jwt, sizeof(g_state.jwt));
-    extractJsonString(buf, "refresh_token", g_state.refresh_token, sizeof(g_state.refresh_token));
-    extractJsonString(buf, "user_id", g_state.user_id, sizeof(g_state.user_id));
-    extractJsonString(buf, "itag", g_state.itag, sizeof(g_state.itag));
-    extractJsonString(buf, "role", g_state.role, sizeof(g_state.role));
-
-    if (g_state.jwt[0] != '\0') {
-        g_state.screen = Screen::Desktop;
-        g_state.error_message[0] = '\0';
-        saveAuth(g_state.jwt, g_state.itag, g_state.role, g_state.user_id);
-        postNote("labs.open", g_state.itag);
-        LOG("Login successful, entering desktop");
-    } else {
-        strcpy(g_state.error_message, "Verification failed");
+    // Check for stale response
+    if (!ctx->isValid()) {
+        LOG("Ignoring stale response (auth session changed)");
+        cleanupFetch(fetch);
+        return;
     }
-    g_state.request_pending = false;
-    emscripten_fetch_close(fetch);
+
+    // Parse response
+    char buf[4096];
+    size_t len = fetch->numBytes < 4095 ? fetch->numBytes : 4095;
+    strncpy(buf, fetch->data, len);
+    buf[len] = '\0';
+
+    switch (ctx->type) {
+        case FetchType::Login: {
+            LOG("Login response received");
+            LOG(buf);
+            if (extractJsonBool(buf, "ok")) {
+                g_state.screen = Screen::OTP;
+                strcpy(g_state.status_message, "Check console for OTP");
+                g_state.error_message[0] = '\0';
+            } else {
+                strcpy(g_state.error_message, "Login failed");
+            }
+            g_state.request_pending = false;
+            break;
+        }
+
+        case FetchType::Verify: {
+            LOG("Verify response received");
+            LOG(buf);
+            if (strstr(buf, "\"error\"")) {
+                strcpy(g_state.error_message, "Invalid OTP");
+                g_state.request_pending = false;
+                break;
+            }
+
+            // Extract tokens
+            extractJsonString(buf, "jwt", g_state.jwt, sizeof(g_state.jwt));
+            extractJsonString(buf, "refresh_token", g_state.refresh_token, sizeof(g_state.refresh_token));
+            extractJsonString(buf, "user_id", g_state.user_id, sizeof(g_state.user_id));
+            extractJsonString(buf, "itag", g_state.itag, sizeof(g_state.itag));
+            extractJsonString(buf, "role", g_state.role, sizeof(g_state.role));
+
+            if (g_state.jwt[0] != '\0') {
+                // Update auth header for future requests
+                updateAuthHeader(g_state.jwt);
+                g_state.screen = Screen::Desktop;
+                g_state.error_message[0] = '\0';
+                saveAuth(g_state.jwt, g_state.itag, g_state.role, g_state.user_id);
+                postNote("labs.open", g_state.itag);
+                LOG("Login successful, entering desktop");
+            } else {
+                strcpy(g_state.error_message, "Verification failed");
+            }
+            g_state.request_pending = false;
+            break;
+        }
+
+        case FetchType::List: {
+            LOG("List response received");
+            LOG(buf);
+
+            // Check for auth failure (401/403 or "Unauthorized")
+            if (fetch->status == 401 || fetch->status == 403 || strstr(buf, "Unauthorized")) {
+                postNote("auth.expired", "");
+                clearAuth();
+                invalidateRequests();  // Invalidate any other in-flight requests
+                g_state.screen = Screen::Login;
+                g_state.jwt[0] = '\0';
+                g_state.itag[0] = '\0';
+                g_state.list_loaded = false;
+                g_state.list_loading = false;
+                break;
+            }
+
+            g_state.pipe_count = 0;
+
+            // Parse items array
+            const char* items_start = strstr(buf, "\"items\":[");
+            if (items_start) {
+                items_start += 9;
+                while (*items_start && g_state.pipe_count < AppState::MAX_PIPES) {
+                    if (*items_start == '"') {
+                        items_start++;
+                        const char* end = strchr(items_start, '"');
+                        if (end) {
+                            size_t plen = end - items_start;
+                            if (plen < 64) {
+                                strncpy(g_state.pipes[g_state.pipe_count], items_start, plen);
+                                g_state.pipes[g_state.pipe_count][plen] = '\0';
+                                g_state.pipe_count++;
+                            }
+                            items_start = end + 1;
+                        } else break;
+                    } else if (*items_start == ']') break;
+                    else items_start++;
+                }
+            }
+
+            g_state.list_loaded = true;
+            g_state.list_loading = false;
+
+            char count_msg[32];
+            snprintf(count_msg, sizeof(count_msg), "%d pipes", g_state.pipe_count);
+            postNote("labs.list", count_msg);
+            break;
+        }
+
+        case FetchType::Files: {
+            LOG("Files response received");
+            g_state.file_count = 0;
+
+            const char* items_start = strstr(buf, "\"items\":[");
+            if (items_start) {
+                items_start += 9;
+                while (*items_start && g_state.file_count < AppState::MAX_FILES) {
+                    if (*items_start == '"') {
+                        items_start++;
+                        const char* end = strchr(items_start, '"');
+                        if (end) {
+                            size_t plen = end - items_start;
+                            if (plen < 64) {
+                                strncpy(g_state.files[g_state.file_count], items_start, plen);
+                                g_state.files[g_state.file_count][plen] = '\0';
+                                g_state.file_count++;
+                            }
+                            items_start = end + 1;
+                        } else break;
+                    } else if (*items_start == ']') break;
+                    else items_start++;
+                }
+            }
+
+            g_state.files_loaded = true;
+            g_state.files_loading = false;
+            break;
+        }
+
+        case FetchType::Push: {
+            LOG("Push response received");
+            // Check if this was RAW push (has extra with basename)
+            if (ctx->extra[0] != '\0') {
+                LOG("RAW pushed to BASE - creating gear.json");
+                // Chain to gear.json creation - but only if session still valid
+                if (ctx->isValid()) {
+                    // Build gear.json request
+                    FetchContext* gearCtx = new FetchContext(FetchType::Push);
+                    char gear_json[256];
+                    snprintf(gear_json, sizeof(gear_json), "{\"raw\":\"%s\"}", g_state.raws_name);
+                    gearCtx->setBody(gear_json);
+
+                    char gear_url[512];
+                    snprintf(gear_url, sizeof(gear_url), "/push?name=%s&file=%s.gear.json",
+                             ctx->extra, ctx->extra);
+                    gearCtx->setUrl(gear_url);
+
+                    // Mark as gear.json (no extra = don't chain further)
+                    gearCtx->extra[0] = '\0';
+
+                    emscripten_fetch_attr_t attr;
+                    emscripten_fetch_attr_init(&attr);
+                    strcpy(attr.requestMethod, "POST");
+                    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+                    attr.onsuccess = onFetchSuccess;
+                    attr.onerror = onFetchError;
+                    attr.userData = gearCtx;
+                    attr.requestHeaders = g_auth_headers;
+                    attr.requestData = gearCtx->body;
+                    attr.requestDataSize = gearCtx->body_size;
+
+                    emscripten_fetch(&attr, gearCtx->url);
+                }
+            } else {
+                // gear.json push completed
+                LOG("gear.json created");
+                // Extract basename from raws_name for note
+                char basename[256];
+                strncpy(basename, g_state.raws_name, sizeof(basename) - 1);
+                char* dot = strrchr(basename, '.');
+                if (dot) *dot = '\0';
+                postNote("raws.load", basename);
+            }
+            break;
+        }
+
+        case FetchType::Pull: {
+            LOG("Pull response received");
+            // Handle pull response (binary data)
+            break;
+        }
+    }
+
+    cleanupFetch(fetch);
 }
 
-static void onVerifyFail(emscripten_fetch_t* fetch) {
-    LOG("Verify request failed");
-    strcpy(g_state.error_message, "Network error");
-    g_state.request_pending = false;
-    emscripten_fetch_close(fetch);
+static void onFetchError(emscripten_fetch_t* fetch) {
+    FetchContext* ctx = static_cast<FetchContext*>(fetch->userData);
+    if (!ctx) {
+        LOG("ERROR: fetch error with null context");
+        emscripten_fetch_close(fetch);
+        return;
+    }
+
+    char msg[128];
+    snprintf(msg, sizeof(msg), "Fetch failed: HTTP %d (type %d)", fetch->status, (int)ctx->type);
+    LOG(msg);
+
+    // Only update state if session still valid
+    if (ctx->isValid()) {
+        switch (ctx->type) {
+            case FetchType::Login:
+            case FetchType::Verify:
+                strcpy(g_state.error_message, "Network error");
+                g_state.request_pending = false;
+                break;
+
+            case FetchType::List:
+                g_state.list_loaded = true;  // Prevent retry spam
+                g_state.list_loading = false;
+                postNote("labs.list", msg);
+                break;
+
+            case FetchType::Files:
+                g_state.files_loaded = true;
+                g_state.files_loading = false;
+                break;
+
+            case FetchType::Push:
+                postNote("raws.error", msg);
+                break;
+
+            case FetchType::Pull:
+                break;
+        }
+    }
+
+    cleanupFetch(fetch);
 }
 
 static void sendLoginRequest() {
     if (g_state.request_pending) return;
     g_state.request_pending = true;
 
+    FetchContext* ctx = new FetchContext(FetchType::Login);
     char body[512];
     snprintf(body, sizeof(body),
         "{\"jsonrpc\":\"2.0\",\"method\":\"register\",\"params\":{\"email\":\"%s\"},\"id\":1}",
         g_state.email);
+    ctx->setBody(body);
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "POST");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onLoginSuccess;
-    attr.onerror = onLoginFail;
-
-    const char* headers[] = {"Content-Type", "application/json", nullptr};
-    attr.requestHeaders = headers;
-    attr.requestData = body;
-    attr.requestDataSize = strlen(body);
+    attr.onsuccess = onFetchSuccess;
+    attr.onerror = onFetchError;
+    attr.userData = ctx;
+    attr.requestHeaders = g_json_headers;
+    attr.requestData = ctx->body;
+    attr.requestDataSize = ctx->body_size;
 
     emscripten_fetch(&attr, "/jrpc");
 }
@@ -913,154 +1147,55 @@ static void sendVerifyRequest() {
     if (g_state.request_pending) return;
     g_state.request_pending = true;
 
+    FetchContext* ctx = new FetchContext(FetchType::Verify);
     char body[512];
     snprintf(body, sizeof(body),
         "{\"jsonrpc\":\"2.0\",\"method\":\"verify\",\"params\":{\"email\":\"%s\",\"otp\":\"%s\"},\"id\":1}",
         g_state.email, g_state.otp);
+    ctx->setBody(body);
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "POST");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onVerifySuccess;
-    attr.onerror = onVerifyFail;
-
-    const char* headers[] = {"Content-Type", "application/json", nullptr};
-    attr.requestHeaders = headers;
-    attr.requestData = body;
-    attr.requestDataSize = strlen(body);
+    attr.onsuccess = onFetchSuccess;
+    attr.onerror = onFetchError;
+    attr.userData = ctx;
+    attr.requestHeaders = g_json_headers;
+    attr.requestData = ctx->body;
+    attr.requestDataSize = ctx->body_size;
 
     emscripten_fetch(&attr, "/jrpc");
-}
-
-static void onListSuccess(emscripten_fetch_t* fetch) {
-    LOG("List response received");
-    char buf[4096];
-    size_t len = fetch->numBytes < 4095 ? fetch->numBytes : 4095;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-    LOG(buf);
-
-    // Check for unauthorized - JWT expired or server key changed
-    if (strstr(buf, "Unauthorized") || strstr(buf, "\"error\"")) {
-        postNote("auth.expired", "");
-        clearAuth();
-        g_state.screen = Screen::Login;
-        g_state.jwt[0] = '\0';
-        g_state.itag[0] = '\0';
-        g_state.list_loaded = false;
-        g_state.list_loading = false;
-        emscripten_fetch_close(fetch);
-        return;
-    }
-
-    g_state.pipe_count = 0;
-
-    // Parse items array - simple extraction
-    const char* items_start = strstr(buf, "\"items\":[");
-    if (items_start) {
-        items_start += 9;  // Skip "items":[
-        while (*items_start && g_state.pipe_count < AppState::MAX_PIPES) {
-            if (*items_start == '"') {
-                items_start++;
-                const char* end = strchr(items_start, '"');
-                if (end) {
-                    size_t plen = end - items_start;
-                    if (plen < 64) {
-                        strncpy(g_state.pipes[g_state.pipe_count], items_start, plen);
-                        g_state.pipes[g_state.pipe_count][plen] = '\0';
-                        g_state.pipe_count++;
-                    }
-                    items_start = end + 1;
-                } else break;
-            } else if (*items_start == ']') break;
-            else items_start++;
-        }
-    }
-
-    g_state.list_loaded = true;
-    g_state.list_loading = false;
-
-    char count_msg[32];
-    snprintf(count_msg, sizeof(count_msg), "%d pipes", g_state.pipe_count);
-    postNote("labs.list", count_msg);
-
-    emscripten_fetch_close(fetch);
-}
-
-static void onListFail(emscripten_fetch_t* fetch) {
-    LOG("List request failed");
-    g_state.list_loaded = true;
-    g_state.list_loading = false;
-    postNote("labs.list", "error");
-    emscripten_fetch_close(fetch);
 }
 
 static void sendListRequest() {
     if (g_state.list_loading) return;
     g_state.list_loading = true;
 
-    static char body[2560];
+    // Debug: log JWT length
+    char jwt_debug[64];
+    snprintf(jwt_debug, sizeof(jwt_debug), "sendListRequest jwt_len=%zu", strlen(g_state.jwt));
+    LOG(jwt_debug);
+
+    FetchContext* ctx = new FetchContext(FetchType::List);
+    char body[2560];
     snprintf(body, sizeof(body),
         "{\"jsonrpc\":\"2.0\",\"method\":\"list\",\"params\":{\"jwt\":\"%s\"},\"id\":1}",
         g_state.jwt);
+    ctx->setBody(body);
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "POST");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onListSuccess;
-    attr.onerror = onListFail;
-
-    const char* headers[] = {"Content-Type", "application/json", nullptr};
-    attr.requestHeaders = headers;
-    attr.requestData = body;
-    attr.requestDataSize = strlen(body);
+    attr.onsuccess = onFetchSuccess;
+    attr.onerror = onFetchError;
+    attr.userData = ctx;
+    attr.requestHeaders = g_json_headers;
+    attr.requestData = ctx->body;
+    attr.requestDataSize = ctx->body_size;
 
     emscripten_fetch(&attr, "/jrpc");
-}
-
-static void onFilesSuccess(emscripten_fetch_t* fetch) {
-    LOG("Files response received");
-    char buf[4096];
-    size_t len = fetch->numBytes < 4095 ? fetch->numBytes : 4095;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-
-    g_state.file_count = 0;
-
-    // Parse items array
-    const char* items_start = strstr(buf, "\"items\":[");
-    if (items_start) {
-        items_start += 9;
-        while (*items_start && g_state.file_count < AppState::MAX_FILES) {
-            if (*items_start == '"') {
-                items_start++;
-                const char* end = strchr(items_start, '"');
-                if (end) {
-                    size_t flen = end - items_start;
-                    if (flen < 64) {
-                        strncpy(g_state.files[g_state.file_count], items_start, flen);
-                        g_state.files[g_state.file_count][flen] = '\0';
-                        g_state.file_count++;
-                    }
-                    items_start = end + 1;
-                } else break;
-            } else if (*items_start == ']') break;
-            else items_start++;
-        }
-    }
-
-    g_state.files_loaded = true;
-    g_state.files_loading = false;
-    emscripten_fetch_close(fetch);
-}
-
-static void onFilesFail(emscripten_fetch_t* fetch) {
-    LOG("Files request failed");
-    g_state.files_loaded = true;
-    g_state.files_loading = false;
-    emscripten_fetch_close(fetch);
 }
 
 static void sendFilesRequest(const char* pipe_name) {
@@ -1069,93 +1204,27 @@ static void sendFilesRequest(const char* pipe_name) {
     g_state.files_loaded = false;
     g_state.file_count = 0;
 
-    static char body[2560];
+    FetchContext* ctx = new FetchContext(FetchType::Files);
+    char body[2560];
     snprintf(body, sizeof(body),
         "{\"jsonrpc\":\"2.0\",\"method\":\"list\",\"params\":{\"jwt\":\"%s\",\"name\":\"%s\"},\"id\":1}",
         g_state.jwt, pipe_name);
+    ctx->setBody(body);
 
     emscripten_fetch_attr_t attr;
     emscripten_fetch_attr_init(&attr);
     strcpy(attr.requestMethod, "POST");
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onFilesSuccess;
-    attr.onerror = onFilesFail;
-
-    const char* headers[] = {"Content-Type", "application/json", nullptr};
-    attr.requestHeaders = headers;
-    attr.requestData = body;
-    attr.requestDataSize = strlen(body);
-
-    emscripten_fetch(&attr, "/jrpc");
-}
-
-// Test API - check if pipe folder exists
-static void onTestSuccess(emscripten_fetch_t* fetch) {
-    LOG("Test response received");
-    char buf[512];
-    size_t len = fetch->numBytes < 511 ? fetch->numBytes : 511;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-    LOG(buf);
-
-    bool exists = extractJsonBool(buf, "exists");
-
-    if (exists) {
-        // File already exists - error state
-        setTaskStatus(0, TaskStatus::Error, "RAWS already exists");
-        setTaskStatus(1, TaskStatus::Pending);  // Cancel upload task
-        g_state.current_task = -1;  // Stop queue
-    } else {
-        // File doesn't exist - proceed to upload
-        setTaskStatus(0, TaskStatus::Done, "New file");
-        g_state.current_task = 1;
-        startNextTask();
-    }
-    emscripten_fetch_close(fetch);
-}
-
-static void onTestFail(emscripten_fetch_t* fetch) {
-    LOG("Test request failed");
-    setTaskStatus(0, TaskStatus::Error, "Network error");
-    g_state.current_task = -1;
-    emscripten_fetch_close(fetch);
-}
-
-static void sendTestRequest() {
-    setTaskStatus(0, TaskStatus::Running, "Checking...");
-
-    // Extract base name without extension for folder name
-    char base_name[256];
-    strncpy(base_name, g_state.raws_name, sizeof(base_name) - 1);
-    char* dot = strrchr(base_name, '.');
-    if (dot) *dot = '\0';
-
-    static char body[2560];
-    snprintf(body, sizeof(body),
-        "{\"jsonrpc\":\"2.0\",\"method\":\"test\",\"params\":{\"jwt\":\"%s\",\"name\":\"%s\"},\"id\":1}",
-        g_state.jwt, base_name);
-
-    emscripten_fetch_attr_t attr;
-    emscripten_fetch_attr_init(&attr);
-    strcpy(attr.requestMethod, "POST");
-    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onTestSuccess;
-    attr.onerror = onTestFail;
-
-    const char* headers[] = {"Content-Type", "application/json", nullptr};
-    attr.requestHeaders = headers;
-    attr.requestData = body;
-    attr.requestDataSize = strlen(body);
+    attr.onsuccess = onFetchSuccess;
+    attr.onerror = onFetchError;
+    attr.userData = ctx;
+    attr.requestHeaders = g_json_headers;
+    attr.requestData = ctx->body;
+    attr.requestDataSize = ctx->body_size;
 
     emscripten_fetch(&attr, "/jrpc");
 }
 
-// Push is now handled directly in onRawFileLoaded via PUT /raws/{name}
-
-// Legacy task queue - no longer used for push but kept for compatibility
-static void startNextTask() {
-    // No longer used - push is handled in onRawFileLoaded
-}
 
 #else
 // Native stubs
@@ -1178,7 +1247,6 @@ static void sendVerifyRequest() {
 static void sendListRequest() {
     g_state.list_loaded = true;
 }
-static void startNextTask() {}
 #endif
 
 // Render login screen (email entry)
@@ -1282,12 +1350,13 @@ static void render_otp_screen() {
 
     ImGui::Spacing();
 
-    // Back button
+    // Back button - always works, clears all OTP state
     if (ImGui::SmallButton("< Back")) {
         g_state.screen = Screen::Login;
         g_state.otp[0] = '\0';
         g_state.error_message[0] = '\0';
         g_state.status_message[0] = '\0';
+        g_state.request_pending = false;  // Clear any stuck request
     }
 
     ImGui::End();
@@ -1322,6 +1391,7 @@ static void render_desktop_screen() {
         ImGui::SameLine(0, 10);
 
         if (ImGui::SmallButton("Logout")) {
+            invalidateRequests();  // Mark any in-flight requests as stale
             g_state.screen = Screen::Login;
             g_state.jwt[0] = '\0';
             g_state.email[0] = '\0';
@@ -1736,7 +1806,9 @@ int main(int argc, char** argv) {
     }
 
     glfwMakeContextCurrent(g_state.window);
-    glfwSwapInterval(1);
+#ifndef __EMSCRIPTEN__
+    glfwSwapInterval(1);  // Emscripten uses requestAnimationFrame for vsync
+#endif
 
     // Setup ImGui
     IMGUI_CHECKVERSION();
@@ -1762,6 +1834,7 @@ int main(int argc, char** argv) {
         loadAuthItag(g_state.itag, sizeof(g_state.itag));
         loadAuthRole(g_state.role, sizeof(g_state.role));
         loadAuthUserId(g_state.user_id, sizeof(g_state.user_id));
+        updateAuthHeader(g_state.jwt);  // Set auth header for push/pull
         g_state.screen = Screen::Desktop;
 
         // Debug: show jwt length and itag

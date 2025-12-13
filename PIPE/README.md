@@ -94,7 +94,7 @@ Built-in links for the standard RAW processing pipeline. All run on GPU via WGSL
 
 ```cpp
 auto pipe = pipe::make();
-pipe->link(gear::link());      // RAW → Bayer + Info
+pipe->link(gear::read());      // RAW → Bayer + Info
 pipe->link(wgpu::open());      // CPU → GPU
 pipe->link(pipe::blc());       // Black level correction
 pipe->link(pipe::wb());        // White balance
@@ -110,7 +110,7 @@ GEAR populates Info with all parameters. Core links read from Info automatically
 
 | Project | Link | Input Page | Output Page |
 |---------|------|------------|-------------|
-| GEAR | `gear::link()` | raw file buffer | BayerBuffer* |
+| GEAR | `gear::read()` | raw file buffer | BayerBuffer* |
 | WGPU | `wgpu::open()` | BayerBuffer* | Context* (GPU) |
 | LUTE | `lute::tune()` | Context* | Context* (learns profile) |
 | LUTE | `lute::view()` | Context* | Context* (applies profile) |
@@ -126,7 +126,7 @@ GEAR populates Info with all parameters. Core links read from Info automatically
 
 ```cpp
 auto tune = pipe::make();
-tune->link(gear::link());    // raw → Bayer (CPU)
+tune->link(gear::read());    // raw → Bayer (CPU)
 tune->link(wgpu::open());    // Bayer → GPU
 tune->link(lute::tune());    // learn camera profile
 tune->link(vibe::tune());    // learn style
@@ -139,7 +139,7 @@ Outputs learned parameters in Info.
 
 ```cpp
 auto view = pipe::make();
-view->link(gear::link());    // raw → Bayer (CPU)
+view->link(gear::read());    // raw → Bayer (CPU)
 view->link(wgpu::open());    // Bayer → GPU
 view->link(lute::view());    // apply camera profile
 view->link(vibe::view());    // apply style
@@ -265,7 +265,7 @@ g++ -std=c++17 -I./inc src/main/pipe.cpp src/main/part/pipe/node.cpp -c
 
 ## See Also
 
-- [GEAR](../GEAR/README.md) - `gear::link()` RAW decoder
+- [GEAR](../GEAR/README.md) - `gear::read()` RAW decoder
 - [WGPU](../WGPU/README.md) - `wgpu::open()/shut()` GPU lifecycle
 - [LUTE](../LUTE/README.md) - `lute::tune()/view()` camera profiles
 - [VIBE](../VIBE/README.md) - `vibe::tune()/view()` style processing

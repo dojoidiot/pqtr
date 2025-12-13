@@ -3,7 +3,7 @@
 // Auto-detects format (Sony ARW, Canon CR2/CR3, Nikon NEF, etc.)
 //
 // NEW API (pipe::Link):
-//   gear::link() - Link contributor for pipe
+//   gear::read() - Link contributor for pipe
 //   Input:  Page = raw file buffer, Info = { "size": buffer_size }
 //   Output: Page = Bayer buffer, Info = camera metadata
 //
@@ -24,8 +24,8 @@ namespace gear {
     // NEW: pipe::Link API (OpenCV-free)
     // ============================================================
 
-    // Link contributor for pipe
-    pipe::Hold<pipe::Link> link();
+    // Read RAW file into pipeline
+    pipe::Hold<pipe::Link> read();
 
     // Sony decoder direct call (returns pipe::Data)
     namespace sony {
