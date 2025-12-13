@@ -1,23 +1,14 @@
-// sony_link.cpp - Bridge between new pipe::Link API and existing Sony decoder
+// sony_link.cpp - Bridge between pipe::Link API and Sony decoder
 //
-// Wraps existing sony::Decoder to return pipe::Data (Page + Info)
+// Uses pure (OpenCV-free) decoder for WASM compatibility
+// Returns pipe::Data (Page = BayerBuffer*, Info = metadata)
 
 #include "gear.hpp"
-#include "part/sony.h"
-#include <opencv2/imgproc.hpp>
+#include "part/sony_pure.h"
 #include <cstring>
 
 namespace gear {
 namespace sony {
-
-// Buffer wrapper - holds decoded Bayer data
-struct BayerBuffer {
-    std::vector<uint16_t> data;
-    int width;
-    int height;
-    int black_level;
-    int white_level;
-};
 
 pipe::Data decode(const char* raw_data, size_t raw_size) {
     pipe::Data out;
@@ -28,43 +19,49 @@ pipe::Data decode(const char* raw_data, size_t raw_size) {
     std::memcpy(copy, raw_data, raw_size);
     sink.push(copy, raw_size);
 
-    // Decode using existing Sony decoder
-    cv::UMat bayer;
-    ::sony::Info sonyInfo;
-    ::sony::RawMetadata meta;
+    // Decode using pure (OpenCV-free) Sony decoder
+    ::sony::pure::Result result = ::sony::pure::decode(sink);
 
-    if (!::sony::Decoder::prepare(sink, bayer, sonyInfo, meta)) {
-        out.info.text("error", "sony decoder failed");
+    if (!result.success) {
+        out.info.text("error", result.error);
         return out;
     }
 
-    // Copy Bayer data to our buffer
+    const auto& meta = result.metadata;
+
+    // Copy Bayer data to output buffer
     BayerBuffer* buf = new BayerBuffer();
     buf->width = meta.crop_width;
     buf->height = meta.crop_height;
     buf->black_level = meta.black_level;
     buf->white_level = meta.white_level;
 
-    // Get Bayer data from UMat
-    cv::Mat bayerCpu;
-    bayer.copyTo(bayerCpu);
-
-    // Store raw Bayer (cropped region)
+    // Extract cropped region from full Bayer
     int crop_x = meta.crop_left;
     int crop_y = meta.crop_top;
     buf->data.resize(buf->width * buf->height);
 
     for (int y = 0; y < buf->height; y++) {
-        const uint16_t* src = bayerCpu.ptr<uint16_t>(crop_y + y) + crop_x;
+        const uint16_t* src = result.bayer.data.data() + (crop_y + y) * result.bayer.width + crop_x;
         uint16_t* dst = buf->data.data() + y * buf->width;
         std::memcpy(dst, src, buf->width * sizeof(uint16_t));
+    }
+
+    // Copy preview if available
+    if (!result.preview.data.empty()) {
+        buf->preview = std::move(result.preview.data);
+        buf->preview_width = meta.preview_width;
+        buf->preview_height = meta.preview_height;
+    } else {
+        buf->preview_width = 0;
+        buf->preview_height = 0;
     }
 
     // Output Page = Bayer buffer
     out.page = buf;
 
-    // Output Info = metadata
-    out.info.text("decoder", "gear_sony_arw2");
+    // Output Info = metadata (MUST fields per GEAR contract)
+    out.info.text("decoder", "gear_sony_arw2_pure");
     out.info.text("make", meta.camera_make);
     out.info.text("model", meta.camera_model);
 
@@ -88,17 +85,17 @@ pipe::Data decode(const char* raw_data, size_t raw_size) {
         out.info.dial("wb_b", meta.wb_rggb[3] / wb_g);
     }
 
-    // Color matrix (3x3)
-    float cm[9];
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            cm[i * 3 + j] = meta.color_matrix(i, j);
-        }
-    }
-    out.info.data("color_matrix", cm, 9);
+    // Color matrix (3x3, row-major)
+    out.info.data("color_matrix", meta.color_matrix, 9);
 
     // Bayer pattern
     out.info.dial("bayer_pattern", static_cast<float>(meta.bayer_pattern));
+
+    // Crop params (for downstream links if needed)
+    out.info.dial("crop_left", static_cast<float>(meta.crop_left));
+    out.info.dial("crop_top", static_cast<float>(meta.crop_top));
+    out.info.dial("crop_width", static_cast<float>(meta.crop_width));
+    out.info.dial("crop_height", static_cast<float>(meta.crop_height));
 
     // Creative style info
     out.info.text("creative_style", meta.creative_style);
@@ -115,6 +112,10 @@ pipe::Data decode(const char* raw_data, size_t raw_size) {
         }
         out.info.data("distortion", dp, meta.distortion_knot_count);
     }
+
+    // Preview dimensions in Info (actual data is in BayerBuffer)
+    out.info.dial("preview_width", static_cast<float>(buf->preview_width));
+    out.info.dial("preview_height", static_cast<float>(buf->preview_height));
 
     return out;
 }

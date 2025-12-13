@@ -7,6 +7,7 @@
 #include <optional>
 #include <cstdint>
 #include <memory>
+#include <vector>
 
 namespace base {
 
@@ -57,6 +58,10 @@ public:
     virtual bool checkVerifyRateLimit(const std::string& email) = 0;
     virtual void recordVerifyAttempt(const std::string& email) = 0;
     virtual void clearVerifyAttempts(const std::string& email) = 0;
+
+    // Signing key persistence (prevents key drift on restart)
+    virtual bool getSigningKeys(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) = 0;
+    virtual bool setSigningKeys(const std::vector<uint8_t>& pubkey, const std::vector<uint8_t>& privkey) = 0;
 };
 
 std::unique_ptr<Store> createStore(const std::string& db_path);

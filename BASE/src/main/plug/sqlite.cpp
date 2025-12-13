@@ -55,6 +55,11 @@ public:
             );
             CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
             CREATE INDEX IF NOT EXISTS idx_rate_limits ON rate_limits(email, action, timestamp);
+            CREATE TABLE IF NOT EXISTS signing_keys (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                pubkey BLOB NOT NULL,
+                privkey BLOB NOT NULL
+            );
         )";
 
         char* err = nullptr;
@@ -368,6 +373,43 @@ public:
 
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
+    }
+
+    bool getSigningKeys(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) override {
+        const char* sql = "SELECT pubkey, privkey FROM signing_keys WHERE id = 1;";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+        bool found = false;
+        if (sqlite3_step(stmt) == SQLITE_ROW) {
+            const void* pub = sqlite3_column_blob(stmt, 0);
+            int pub_len = sqlite3_column_bytes(stmt, 0);
+            const void* priv = sqlite3_column_blob(stmt, 1);
+            int priv_len = sqlite3_column_bytes(stmt, 1);
+
+            if (pub && priv && pub_len > 0 && priv_len > 0) {
+                pubkey.resize(pub_len);
+                privkey.resize(priv_len);
+                std::memcpy(pubkey.data(), pub, pub_len);
+                std::memcpy(privkey.data(), priv, priv_len);
+                found = true;
+            }
+        }
+        sqlite3_finalize(stmt);
+        return found;
+    }
+
+    bool setSigningKeys(const std::vector<uint8_t>& pubkey, const std::vector<uint8_t>& privkey) override {
+        const char* sql = "INSERT OR REPLACE INTO signing_keys (id, pubkey, privkey) VALUES (1, ?, ?);";
+        sqlite3_stmt* stmt = nullptr;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+
+        sqlite3_bind_blob(stmt, 1, pubkey.data(), pubkey.size(), SQLITE_TRANSIENT);
+        sqlite3_bind_blob(stmt, 2, privkey.data(), privkey.size(), SQLITE_TRANSIENT);
+
+        int rc = sqlite3_step(stmt);
+        sqlite3_finalize(stmt);
+        return rc == SQLITE_DONE;
     }
 
 private:

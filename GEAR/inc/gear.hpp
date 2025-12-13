@@ -7,7 +7,7 @@
 //   Input:  Page = raw file buffer, Info = { "size": buffer_size }
 //   Output: Page = Bayer buffer, Info = camera metadata
 //
-// LEGACY API (direct calls):
+// LEGACY API (requires GEAR_OPENCV):
 //   load() - decode RAW to flat scene-linear RGB
 //   tune() - estimate camera LUT from flat/jpeg pairs
 
@@ -15,18 +15,44 @@
 
 #include "pipe.hpp"
 #include "sink.hpp"
+#include <vector>
+#include <cstdint>
 
 namespace gear {
 
     // ============================================================
-    // NEW: Link contributor for pipe
+    // NEW: pipe::Link API (OpenCV-free)
     // ============================================================
 
+    // Link contributor for pipe
     pipe::Hold<pipe::Link> link();
 
-    // ============================================================
-    // LEGACY: Direct API (for existing code)
-    // ============================================================
+    // Sony decoder direct call (returns pipe::Data)
+    namespace sony {
+        // Bayer buffer - raw sensor data + embedded preview
+        struct BayerBuffer {
+            std::vector<uint16_t> data;
+            int width;
+            int height;
+            int black_level;
+            int white_level;
+
+            // Embedded preview (RGB 8-bit)
+            std::vector<uint8_t> preview;
+            int preview_width;
+            int preview_height;
+        };
+
+        // Decode Sony ARW file
+        // Returns: Page = BayerBuffer*, Info = camera metadata
+        pipe::Data decode(const char* raw_data, size_t raw_size);
+    }
+
+// ============================================================
+// LEGACY API (requires OpenCV)
+// Define GEAR_OPENCV to enable this section
+// ============================================================
+#ifdef GEAR_OPENCV
 
     // Forward declarations
     struct Result;
@@ -143,5 +169,7 @@ namespace gear {
     // lut:    Output - accumulated into existing LUT for averaging
     // Returns true on success
     bool tune(const pipe::View& flat, const pipe::View& target, CameraLut& lut);
+
+#endif // GEAR_OPENCV
 
 } // namespace gear

@@ -162,6 +162,13 @@ struct AppState {
     int preview_height = 0;
     unsigned int preview_texture = 0;  // OpenGL texture ID
 
+    // Stage textures (each stage's output)
+    uint8_t* gear_rgb = nullptr;       // Flat demosaiced RAW
+    unsigned int gear_texture = 0;
+    unsigned int lute_texture = 0;
+    unsigned int drum_texture = 0;
+    unsigned int diff_texture = 0;
+
     // Task queue
     bool show_task_view = false;
     static constexpr int MAX_TASKS = 16;
@@ -241,6 +248,79 @@ static void uploadPreviewTexture() {
 
     char msg[64];
     snprintf(msg, sizeof(msg), "Preview texture: %dx%d", g_state.preview_width, g_state.preview_height);
+    LOG(msg);
+}
+
+// Demosaic Bayer data to flat RGB and upload as gear_texture
+// Simple bilinear interpolation, RGGB pattern, no tone curve
+static void createGearTexture() {
+    if (!g_state.bayer_data || g_state.bayer_width <= 0 || g_state.bayer_height <= 0) {
+        return;
+    }
+
+    int w = g_state.bayer_width;
+    int h = g_state.bayer_height;
+    int black = g_state.bayer_black;
+    int white = g_state.bayer_white;
+    float scale = 255.0f / (white - black);
+
+    // Allocate RGB buffer (half resolution to avoid edge artifacts)
+    int out_w = w / 2;
+    int out_h = h / 2;
+
+    if (g_state.gear_rgb) free(g_state.gear_rgb);
+    g_state.gear_rgb = (uint8_t*)malloc(out_w * out_h * 3);
+
+    // Simple 2x2 Bayer block sampling (RGGB)
+    // Each 2x2 block: [R  Gr]
+    //                 [Gb B ]
+    for (int y = 0; y < out_h; y++) {
+        for (int x = 0; x < out_w; x++) {
+            int bx = x * 2;
+            int by = y * 2;
+
+            // Get raw values from 2x2 block
+            int r  = g_state.bayer_data[by * w + bx];           // R
+            int gr = g_state.bayer_data[by * w + bx + 1];       // Gr
+            int gb = g_state.bayer_data[(by + 1) * w + bx];     // Gb
+            int b  = g_state.bayer_data[(by + 1) * w + bx + 1]; // B
+
+            // Average greens
+            int g = (gr + gb) / 2;
+
+            // Normalize to 0-255 (linear, no gamma)
+            auto norm = [black, scale](int v) -> uint8_t {
+                float f = (v - black) * scale;
+                if (f < 0) f = 0;
+                if (f > 255) f = 255;
+                return (uint8_t)f;
+            };
+
+            int idx = (y * out_w + x) * 3;
+            g_state.gear_rgb[idx + 0] = norm(r);
+            g_state.gear_rgb[idx + 1] = norm(g);
+            g_state.gear_rgb[idx + 2] = norm(b);
+        }
+    }
+
+    // Delete old texture
+    if (g_state.gear_texture) {
+        glDeleteTextures(1, &g_state.gear_texture);
+        g_state.gear_texture = 0;
+    }
+
+    // Create texture
+    glGenTextures(1, &g_state.gear_texture);
+    glBindTexture(GL_TEXTURE_2D, g_state.gear_texture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, out_w, out_h, 0, GL_RGB, GL_UNSIGNED_BYTE, g_state.gear_rgb);
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "GEAR texture: %dx%d (flat RAW)", out_w, out_h);
     LOG(msg);
 }
 
@@ -384,6 +464,9 @@ static void runTuneStep() {
                     if (g_state.gear_info) delete g_state.gear_info;
                     g_state.gear_info = new pipe::Info(std::move(result.info));
                     g_state.gear_decoded = true;
+
+                    // Create flat RAW texture from Bayer data
+                    createGearTexture();
 
                     // Copy preview data
                     if (g_state.preview_data) free(g_state.preview_data);
@@ -1470,14 +1553,14 @@ static void render_desktop_screen() {
             float stage_width = (pane_width - (3 * stage_gap)) / 4.0f;
             float stage_height = stage_width * 2.0f / 3.0f;  // 3:2 aspect
 
-            // Helper lambda to render a stage
+            // Helper lambda to render a stage with texture
             auto renderStage = [&](const char* label, const char* id, ImVec4 label_color,
-                                   bool show_preview, const char* placeholder) {
+                                   unsigned int texture, int tex_w, int tex_h, const char* placeholder) {
                 ImGui::BeginGroup();
                 ImGui::TextColored(label_color, "%s", label);
                 ImGui::BeginChild(id, ImVec2(stage_width, stage_height), true);
-                if (show_preview && g_state.preview_texture) {
-                    float aspect = (float)g_state.preview_width / (float)g_state.preview_height;
+                if (texture && tex_w > 0 && tex_h > 0) {
+                    float aspect = (float)tex_w / (float)tex_h;
                     float child_width = ImGui::GetContentRegionAvail().x;
                     float child_height = ImGui::GetContentRegionAvail().y;
 
@@ -1492,7 +1575,7 @@ static void render_desktop_screen() {
                     float offset_y = (child_height - img_height) * 0.5f;
                     if (offset_x > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
                     if (offset_y > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset_y);
-                    ImGui::Image((ImTextureID)(intptr_t)g_state.preview_texture, ImVec2(img_width, img_height));
+                    ImGui::Image((ImTextureID)(intptr_t)texture, ImVec2(img_width, img_height));
                 } else if (g_state.current_pipe[0]) {
                     ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", placeholder);
                 } else {
@@ -1502,23 +1585,26 @@ static void render_desktop_screen() {
                 ImGui::EndGroup();
             };
 
-            // Stage 1: GEAR
-            renderStage("GEAR", "stage_gear", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), true, "Press Tune");
+            // Stage 1: GEAR - flat RAW (or preview fallback)
+            unsigned int gear_tex = g_state.gear_texture ? g_state.gear_texture : g_state.preview_texture;
+            int gear_w = g_state.gear_texture ? g_state.bayer_width / 2 : g_state.preview_width;
+            int gear_h = g_state.gear_texture ? g_state.bayer_height / 2 : g_state.preview_height;
+            renderStage("GEAR", "stage_gear", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), gear_tex, gear_w, gear_h, "Press Tune");
 
             ImGui::SameLine(0, stage_gap);
 
             // Stage 2: LUTE
-            renderStage("LUTE", "stage_lute", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), false, "[camera profile]");
+            renderStage("LUTE", "stage_lute", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), g_state.lute_texture, 0, 0, "[camera profile]");
 
             ImGui::SameLine(0, stage_gap);
 
             // Stage 3: DRUM
-            renderStage("DRUM", "stage_drum", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), false, "[dynamic range]");
+            renderStage("DRUM", "stage_drum", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), g_state.drum_texture, 0, 0, "[dynamic range]");
 
             ImGui::SameLine(0, stage_gap);
 
-            // Stage 4: DONE
-            renderStage("DONE", "stage_done", ImVec4(0.4f, 0.9f, 0.4f, 1.0f), false, "[final output]");
+            // Stage 4: DIFF
+            renderStage("DIFF", "stage_diff", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), g_state.diff_texture, 0, 0, "[diff from camera]");
         }
         ImGui::End();
     }

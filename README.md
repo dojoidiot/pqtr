@@ -83,9 +83,9 @@ Camera profiles are stored per camera model and creative style:
 - `Canon_EOS-R5_Faithful.lute`
 - `Nikon_Z8_Vivid.lute`
 
-#### DROP — Dynamic Range Optimization
+#### DRUM — Dynamic Range Uplift Module
 
-DROP handles dynamic range optimization for high-contrast scenes. It follows the same three-step process as LUTE: detect, learn, apply.
+DRUM handles dynamic range optimization for high-contrast scenes. It follows the same three-step process as LUTE: detect, learn, apply.
 
 #### VIBE — User Vibe
 
@@ -108,6 +108,20 @@ The second part of the magic: you can have many VIBE steps. Apply an existing vi
 ### TAIL — Output Phase
 
 The tail is the final step of the pipeline. It produces a final, display-referred image in lossless PNG format. This master image can then be used in POST steps configured to send your image to your client, a social media platform, or multiple destinations. Pipeline steps can also add EXIF data to embed your process steps for later use and cryptographically sign the image to prove it is your creative work.
+
+### The Fidelity Rule
+
+**No fidelity loss until POST.**
+
+All processing from HEAD through BODY maintains full float32 precision. Only the final POST step quantizes to 8-bit output. This prevents accumulation of rounding errors and preserves maximum image quality.
+
+| Stage | Precision | Fidelity |
+|-------|-----------|----------|
+| HEAD (GEAR) | float32 | Lossless |
+| BODY (LUTE, DRUM, VIBE) | float32 | Lossless |
+| TAIL (POST) | uint8 | Lossy (final output only) |
+
+Display previews during editing are temporary 8-bit renders for screen display only — the pipeline data remains full precision.
 
 ## Applications
 
@@ -142,9 +156,9 @@ All metadata is indexed from JSON sidecars and camera EXIF data. You can downloa
 |---------|---------|
 | [GEAR](GEAR/README.md) | Camera gear — RAW decoding, metadata, scene-linear normalization |
 | [LUTE](LUTE/README.md) | Camera profiles — learns gear manufacturer's color science |
-| [DROP](DROP/README.md) | Dynamic range — optimization for high-contrast scenes |
+| [DRUM](DRUM/README.md) | Dynamic range — optimization for high-contrast scenes |
 | [VIBE](VIBE/README.md) | Creative styles — 51 adjustable dials for photographer expression |
-| [PIPE](PIPE/README.md) | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DROP,VIBE] -> TAIL [POST] |
+| [PIPE](PIPE/README.md) | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DRUM,VIBE] -> TAIL [POST] |
 | [POST](POST/README.md) | Distribution — platform plugins for Instagram, Email, SMS, etc. |
 | [WGPU](WGPU/README.md) | GPU compute — WebGPU/WGSL shaders for fast processing |
 | [LABS](LABS/README.md) | WASM app — Anywhere, any time, creating and editing vibes |

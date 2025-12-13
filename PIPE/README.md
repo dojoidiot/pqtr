@@ -2,6 +2,29 @@
 
 Processing pipeline for PQTR. Link-based architecture where projects contribute processing units.
 
+## The Fidelity Rule
+
+**No fidelity loss until POST.**
+
+```
+GEAR → LUTE → DRUM → VIBE → POST
+ ↑       ↑       ↑       ↑      ↑
+ │       │       │       │      └── 8-bit output here (lossy OK)
+ └───────┴───────┴───────┴──────── Full precision (float32)
+```
+
+All processing maintains full floating-point precision. Quantization to 8-bit only happens at the final POST stage. This prevents accumulation of rounding errors through the pipeline.
+
+| Stage | Precision | Fidelity |
+|-------|-----------|----------|
+| GEAR | float32 | Lossless (from RAW) |
+| LUTE | float32 | Lossless |
+| DRUM | float32 | Lossless |
+| VIBE | float32 | Lossless |
+| POST | uint8 | Lossy (final output) |
+
+**Display vs Output**: `wgpu.view` may quantize for screen display, but this is temporary and not saved. Only `wgpu.post` writes the final 8-bit output.
+
 ## How PIPE Works
 
 PIPE is a chain of Links. Data flows through each Link in sequence, transforming as it goes.
@@ -55,7 +78,35 @@ Pipe = chain of Links
 **Page** flows through as buffer pointer (CPU or GPU).
 **Info** accumulates metadata as tree structure.
 
-## Link Contributions
+## Core Links (RAW Processing)
+
+Built-in links for the standard RAW processing pipeline. All run on GPU via WGSL compute shaders.
+
+| Link | Info Params | Purpose |
+|------|-------------|---------|
+| `pipe::blc()` | `black_level`, `white_level` | Black level correction (normalize Bayer) |
+| `pipe::wb()` | `wb_r`, `wb_g`, `wb_b`, `bayer_pattern` | White balance (per-channel gains) |
+| `pipe::demosaic()` | `bayer_pattern` | Bayer → RGB (bilinear interpolation) |
+| `pipe::cst()` | `color_matrix[9]` | Color space transform (3x3 matrix) |
+| `pipe::crop()` | `crop_left`, `crop_top`, `crop_width`, `crop_height` | Active area extraction |
+
+### Core Pipeline
+
+```cpp
+auto pipe = pipe::make();
+pipe->link(gear::link());      // RAW → Bayer + Info
+pipe->link(wgpu::open());      // CPU → GPU
+pipe->link(pipe::blc());       // Black level correction
+pipe->link(pipe::wb());        // White balance
+pipe->link(pipe::demosaic());  // Bayer → RGB
+pipe->link(pipe::cst());       // Color matrix
+pipe->link(pipe::crop());      // Active area crop
+pipe->link(wgpu::shut());      // GPU → CPU
+```
+
+GEAR populates Info with all parameters. Core links read from Info automatically.
+
+## Project Link Contributions
 
 | Project | Link | Input Page | Output Page |
 |---------|------|------------|-------------|
@@ -63,6 +114,8 @@ Pipe = chain of Links
 | WGPU | `wgpu::open()` | BayerBuffer* | Context* (GPU) |
 | LUTE | `lute::tune()` | Context* | Context* (learns profile) |
 | LUTE | `lute::view()` | Context* | Context* (applies profile) |
+| DRUM | `drum::tune()` | Context* | Context* (learns DRO) |
+| DRUM | `drum::view()` | Context* | Context* (applies DRO) |
 | VIBE | `vibe::tune()` | Context* | Context* (learns style) |
 | VIBE | `vibe::view()` | Context* | Context* (applies style) |
 | WGPU | `wgpu::shut()` | Context* | OutputBuffer* |
@@ -184,11 +237,23 @@ pipe::Hold<pipe::Link> link() {
 
 ```
 PIPE/
-├── inc/pipe.hpp       # Public API
+├── inc/pipe.hpp           # Public API
 ├── src/main/
-│   └── pipe.cpp       # Pipe implementation
+│   ├── pipe.cpp           # Pipe implementation
+│   └── link/              # Core processing links
+│       ├── blc.cpp        # Black level correction
+│       ├── wb.cpp         # White balance
+│       ├── demosaic.cpp   # Bayer → RGB
+│       ├── cst.cpp        # Color space transform
+│       └── crop.cpp       # Active area crop
+├── src/wgsl/              # GPU compute shaders
+│   ├── blc.wgsl
+│   ├── wb.wgsl
+│   ├── demosaic.wgsl
+│   ├── cst.wgsl
+│   └── crop.wgsl
 ├── src/test/
-│   └── pipe.cpp       # Tests
+│   └── pipe.cpp           # Tests
 └── README.md
 ```
 

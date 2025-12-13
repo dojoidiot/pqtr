@@ -36,9 +36,20 @@ Camera RAW ──► [GEAR] ──► scene-linear RGB ──► [LUTE] ──�
 
 **GEAR output will look flat and desaturated.** This is correct — scene-linear data has no tone curve or color grading. The camera JPEG look is achieved by LUTE (learned from the embedded preview), not GEAR.
 
-- **Produces**: `GEAR.a` static library
-- **Exposes**: `gear::load(Sink&)` → `gear::Result`
+- **Produces**: `GEAR.a` or `GEAR_pure.a` static library
+- **Exposes**: `gear::sony::decode()` → `pipe::Data`
 - **Used by**: PIPE (links into `pipe.a`)
+
+## Builds
+
+| Build | Makefile | Output | Dependencies |
+|-------|----------|--------|--------------|
+| Pure (WASM) | `Makefile.pure` | `GEAR_pure.a` | stb_image only |
+| Full (native) | `Makefile.gear` | `GEAR.a` | OpenCV |
+
+**Use Pure build** for WebGPU/WASM pipeline. Processing happens in PIPE links (GPU).
+
+**Use Full build** for legacy native apps that need OpenCV processing.
 
 ## Project Structure
 
@@ -47,35 +58,43 @@ GEAR/
 ├── inc/
 │   └── gear.hpp              # Public API
 ├── lib/
-│   └── GEAR.a                # Built library
+│   ├── stb_image.h           # JPEG decode (no OpenCV)
+│   ├── GEAR.a                # Full build (OpenCV)
+│   └── GEAR_pure.a           # Pure build (no OpenCV)
 ├── src/
 │   ├── main/
 │   │   ├── gear.cpp          # Format detection, dispatch
+│   │   ├── sony_link.cpp     # pipe::Link adapter (uses pure decoder)
 │   │   └── part/
-│   │       ├── sony.cpp      # Sony decoder entry
-│   │       ├── sony.h        # Sony internal header
+│   │       ├── sony.cpp      # Sony TIFF helpers
+│   │       ├── sony.h        # Sony internal header (OpenCV)
+│   │       ├── sony_pure.h   # Sony pure header (no OpenCV)
 │   │       └── sony/         # Sony pipeline stages
+│   │           ├── prepare.cpp       # OpenCV version
+│   │           └── prepare_pure.cpp  # Pure version (stb_image)
 │   └── test/
 │       └── sony/             # Sony decoder tests
-│           ├── sony.cpp      # Main decoder test
-│           └── distortion.cpp
 ├── tmp/
 │   ├── obj/                  # Build objects
-│   ├── bin/                  # Test binaries
-│   └── var/                  # Test output
+│   └── pure/                 # Pure build objects
 ├── Makefile                  # Top-level (delegates)
-├── Makefile.gear             # Builds lib/GEAR.a
+├── Makefile.gear             # Builds lib/GEAR.a (OpenCV)
+├── Makefile.pure             # Builds lib/GEAR_pure.a (no OpenCV)
 └── Makefile.sony             # Sony decoder tests
 ```
 
 ## Building
 
 ```bash
-make              # Build lib/GEAR.a (default)
-make test         # Run sony decoder test
-make test-all     # Run full test suite (+ distortion)
-make all          # Build everything
-make clean        # Clean all artifacts
+# Pure build (recommended for WASM/WebGPU)
+make -f Makefile.pure         # Build lib/GEAR_pure.a (no OpenCV)
+
+# Full build (legacy, requires OpenCV)
+make -f Makefile.gear         # Build lib/GEAR.a (OpenCV)
+
+# Tests
+make -f Makefile.sony test    # Run sony decoder test
+make clean                    # Clean all artifacts
 ```
 
 ## Supported Formats
@@ -105,12 +124,93 @@ pipe::Hold<pipe::Link> gear::link();
 auto pipe = pipe::make();
 pipe->link(gear::link());    // raw → Bayer (CPU)
 pipe->link(wgpu::open());    // Bayer → GPU
-// ...processing links...
+pipe->link(pipe::blc());     // Black level correction
+pipe->link(pipe::wb());      // White balance
+pipe->link(pipe::demosaic()); // Bayer → RGB
+pipe->link(pipe::cst());     // Color matrix
+pipe->link(pipe::crop());    // Active area
+pipe->link(wgpu::shut());    // GPU → CPU
 ```
 
 The link auto-detects format from magic bytes and dispatches to the appropriate manufacturer decoder (Sony, Canon, Nikon, etc.).
 
 See [PIPE](../PIPE/README.md) for the full pipeline model.
+
+## Info Contract
+
+GEAR implementations MUST/MAY populate Info fields for downstream PIPE links.
+
+### MUST Provide (Required)
+
+| Field | Type | Used By | Description |
+|-------|------|---------|-------------|
+| `width` | dial | all | Image width in pixels |
+| `height` | dial | all | Image height in pixels |
+| `black_level` | dial | blc | Sensor black level (raw units) |
+| `white_level` | dial | blc | Sensor white level (raw units) |
+| `bayer_pattern` | dial | wb, demosaic | CFA pattern: 46=RGGB, 47=GRBG, 48=BGGR, 49=GBRG |
+| `wb_r` | dial | wb | Red channel gain (normalized, G=1.0) |
+| `wb_g` | dial | wb | Green channel gain (1.0) |
+| `wb_b` | dial | wb | Blue channel gain (normalized, G=1.0) |
+
+### MAY Provide (Optional)
+
+| Field | Type | Used By | Description |
+|-------|------|---------|-------------|
+| `color_matrix` | data[9] | cst | 3x3 camera RGB → sRGB matrix (row-major). Default: identity |
+| `crop_left` | dial | crop | Active area left offset. Default: 0 |
+| `crop_top` | dial | crop | Active area top offset. Default: 0 |
+| `crop_width` | dial | crop | Active area width. Default: full width |
+| `crop_height` | dial | crop | Active area height. Default: full height |
+
+### MAY Provide (Metadata)
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `camera_make` | text | Manufacturer (Sony, Canon, Nikon) |
+| `camera_model` | text | Model name (ILCE-7M4, EOS R5) |
+| `iso` | dial | ISO sensitivity |
+| `shutter_speed` | dial | Exposure time in seconds |
+| `aperture` | dial | F-number |
+| `focal_length` | dial | Focal length in mm |
+| `lens_model` | text | Lens name |
+| `creative_style` | text | Camera style preset (Standard, Vivid, etc.) |
+| `dro` | text | Dynamic range optimizer setting |
+| `orientation` | dial | EXIF orientation |
+
+### Preview (for LUTE)
+
+GEAR implementations SHOULD also extract the embedded camera preview JPEG for LUTE learning. This is returned separately from Info as part of the Result struct.
+
+### Example: Sony Implementation
+
+```cpp
+// Populate MUST fields
+info.dial("width", metadata.width);
+info.dial("height", metadata.height);
+info.dial("black_level", metadata.black_level);
+info.dial("white_level", metadata.white_level);
+info.dial("bayer_pattern", metadata.bayer_pattern);
+
+// Normalize WB gains (G=1.0)
+float g_ref = metadata.wb_rggb[1];
+info.dial("wb_r", metadata.wb_rggb[0] / g_ref);
+info.dial("wb_g", 1.0f);
+info.dial("wb_b", metadata.wb_rggb[2] / g_ref);
+
+// MAY fields
+float matrix[9] = { ... };
+info.data("color_matrix", matrix, 9);
+info.dial("crop_left", metadata.crop_left);
+info.dial("crop_top", metadata.crop_top);
+info.dial("crop_width", metadata.crop_width);
+info.dial("crop_height", metadata.crop_height);
+
+// Metadata
+info.text("camera_make", metadata.camera_make);
+info.text("camera_model", metadata.camera_model);
+info.dial("iso", metadata.iso);
+```
 
 ---
 

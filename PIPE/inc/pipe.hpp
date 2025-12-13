@@ -148,4 +148,14 @@ namespace pipe
 
     Hold<Pipe> make();
 
+    // ============================================================
+    // Core Pipeline Links (RAW processing)
+    // ============================================================
+
+    Hold<Link> blc();       // Black level correction
+    Hold<Link> wb();        // White balance (Bayer domain)
+    Hold<Link> demosaic();  // Bayer → RGB
+    Hold<Link> cst();       // Color space transform (matrix)
+    Hold<Link> crop();      // Active area crop
+
 } // namespace pipe

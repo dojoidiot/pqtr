@@ -1,0 +1,66 @@
+# GEAR Library Makefile (Pure/OpenCV-free)
+# Builds lib/GEAR.a static library without OpenCV dependency
+# For WASM/WebGPU pipeline
+#
+# Exposes:
+#   - sony::pure::decode() (Sony ARW RAW decoder)
+#   - gear::sony::decode() (pipe::Link API)
+
+# Compiler
+CXX = g++
+CXXFLAGS = -std=c++17 -Wall -O2
+
+# Include paths (no OpenCV!)
+INCLUDES = -I./inc \
+           -I./lib \
+           -I./src/main/part \
+           -I../PIPE/inc
+
+# Directories
+SRC_DIR = src/main
+TMP_DIR = tmp/pure
+OBJ_DIR = $(TMP_DIR)/obj
+LIB_DIR = lib
+
+# Pure sources (no OpenCV)
+PURE_SRCS = $(SRC_DIR)/part/sony/prepare_pure.cpp \
+            $(SRC_DIR)/sony_link.cpp
+
+# Object files
+PURE_OBJS = $(OBJ_DIR)/prepare_pure.o \
+            $(OBJ_DIR)/sony_link.o
+
+# Target static library
+GEAR_A = $(LIB_DIR)/GEAR_pure.a
+
+.PHONY: all clean info
+
+all: $(GEAR_A)
+
+$(GEAR_A): $(PURE_OBJS) | $(LIB_DIR)
+	ar rcs $@ $^
+	@echo "Built: $@ (OpenCV-free)"
+
+# Sony pure decoder (stb_image included via #define STB_IMAGE_IMPLEMENTATION)
+$(OBJ_DIR)/prepare_pure.o: $(SRC_DIR)/part/sony/prepare_pure.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Link bridge (uses pure decoder)
+$(OBJ_DIR)/sony_link.o: $(SRC_DIR)/sony_link.cpp | $(OBJ_DIR)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
+
+# Directory creation
+$(LIB_DIR):
+	mkdir -p $(LIB_DIR)
+
+$(OBJ_DIR):
+	mkdir -p $(OBJ_DIR)
+
+clean:
+	rm -rf $(TMP_DIR) $(GEAR_A)
+
+info:
+	@echo "Target: $(GEAR_A)"
+	@echo "Objects: $(PURE_OBJS)"
+	@echo "Dependencies: stb_image.h (bundled), PIPE headers"
+	@echo "NO OpenCV dependency"
