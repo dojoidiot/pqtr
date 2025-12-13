@@ -77,15 +77,46 @@ make info   # Show source counts
 make tidy   # Clean
 ```
 
-## Integration
+## Pipe Link Contributions
 
-VIBE is used by PIPE as part of the processing pipeline:
+VIBE contributes two links:
 
+```cpp
+pipe::Hold<pipe::Link> vibe::tune();  // Learn style
+pipe::Hold<pipe::Link> vibe::view();  // Apply style
 ```
-GEAR → LUTE → VIBE → output
+
+| Link | Input Page | Output Page | Purpose |
+|------|------------|-------------|---------|
+| `vibe::tune()` | Context* | Context* | Optimize dials to match reference |
+| `vibe::view()` | Context* | Context* | Apply learned style transforms |
+
+### Pipe Configurations
+
+**tune pipe** (learning):
+```cpp
+pipe->link(gear::link());    // raw → Bayer
+pipe->link(wgpu::open());    // Bayer → GPU
+pipe->link(lute::tune());    // learn profile
+pipe->link(vibe::tune());    // ← learn style
+pipe->link(wgpu::shut());    // GPU → output
 ```
 
-Wire into PIPE:
+**view pipe** (production):
+```cpp
+pipe->link(gear::link());    // raw → Bayer
+pipe->link(wgpu::open());    // Bayer → GPU
+pipe->link(lute::view());    // apply profile
+pipe->link(vibe::view());    // ← apply style
+pipe->link(wgpu::shut());    // GPU → output
+```
+
+See [PIPE](../PIPE/README.md) for the full pipeline model.
+
+---
+
+## Wire Integration
+
 ```bash
 # In wire.sh
 WIRE VIBE inc PIPE

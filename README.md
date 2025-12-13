@@ -152,6 +152,51 @@ All metadata is indexed from JSON sidecars and camera EXIF data. You can downloa
 
 Reference documentation is in [docs/](docs/).
 
+## Code Standards
+
+### Directory Structure (FHS-inspired)
+
+```
+PROJECT/
+├── inc/          # Public headers (API only)
+├── src/
+│   ├── main/     # Implementation
+│   └── test/     # Tests (one file per module)
+├── lib/          # Dependencies (git submodules)
+├── bin/          # Executables
+├── tmp/          # Build artifacts (gitignored)
+├── var/          # Runtime data (gitignored)
+├── etc/          # Configuration files
+└── README.md     # Project documentation
+```
+
+### Naming Conventions
+
+| Element | Style | Example |
+|---------|-------|---------|
+| Types/Classes | PascalCase | `Node`, `Data`, `Link`, `Pipe` |
+| Functions/Methods | camelCase | `dial()`, `text()`, `make()`, `find()` |
+| Member variables | m_prefix | `m_impl`, `m_links`, `m_name` |
+| Type aliases | PascalCase | `Name`, `List`, `Hold`, `Dict`, `Page`, `Info` |
+| Namespaces | lowercase | `pipe::`, `gear::`, `vibe::` |
+
+### Code Patterns
+
+- **Type aliases** for STL types — keeps API stable if implementation changes
+- **PIMPL** for public classes — hides implementation, enables ABI stability
+- **Move-only** for resource types — delete copy, default move
+- **Virtual interfaces** with factory functions — `Hold<Pipe> make()`
+- **Single namespace** per module — `namespace pipe { ... }`
+- **No exceptions** — return `nullptr` or `bool` for errors
+- **No cout** in library code — tests only
+
+### File Conventions
+
+- One public header per module: `inc/pipe.hpp`
+- Implementation matches header: `src/main/pipe.cpp`
+- Test matches module: `src/test/pipe.cpp`
+- Build to `tmp/`, install to `bin/`
+
 ## Development
 
 **Prerequisites:** g++, make, git, autotools (for libsodium build)

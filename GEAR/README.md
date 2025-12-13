@@ -87,7 +87,34 @@ make clean        # Clean all artifacts
 | Nikon NEF | — | Planned |
 | DNG | Phone cameras | Planned |
 
-## Public API
+## Pipe Link Contribution
+
+GEAR contributes the first link in any pipe:
+
+```cpp
+pipe::Hold<pipe::Link> gear::link();
+```
+
+| Input Page | Output Page | Info Added |
+|------------|-------------|------------|
+| raw file buffer | BayerBuffer* | camera metadata, WB, color matrix |
+
+### Usage in Pipe
+
+```cpp
+auto pipe = pipe::make();
+pipe->link(gear::link());    // raw → Bayer (CPU)
+pipe->link(wgpu::open());    // Bayer → GPU
+// ...processing links...
+```
+
+The link auto-detects format from magic bytes and dispatches to the appropriate manufacturer decoder (Sony, Canon, Nikon, etc.).
+
+See [PIPE](../PIPE/README.md) for the full pipeline model.
+
+---
+
+## Legacy API
 
 ```cpp
 // GEAR/inc/gear.hpp
@@ -104,7 +131,7 @@ namespace gear {
 }
 ```
 
-PIPE calls `gear::load()` and receives scene-linear RGB plus the embedded preview. It knows nothing about Sony, Canon, or Nikon internals.
+Direct `gear::load()` API remains for non-pipe usage.
 
 ## Adding a New Format
 

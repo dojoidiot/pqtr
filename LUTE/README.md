@@ -31,7 +31,45 @@ Profiles are keyed by camera model + creative style:
 - `Sony_ILCE-7M4_Standard.json`
 - `Canon_EOS-R5_Faithful.json`
 
-## Usage
+## Pipe Link Contributions
+
+LUTE contributes two links:
+
+```cpp
+pipe::Hold<pipe::Link> lute::tune();  // Learn profile
+pipe::Hold<pipe::Link> lute::view();  // Apply profile
+```
+
+| Link | Input Page | Output Page | Purpose |
+|------|------------|-------------|---------|
+| `lute::tune()` | Context* | Context* | Learn camera profile from RAW+preview |
+| `lute::view()` | Context* | Context* | Apply learned profile |
+
+### Pipe Configurations
+
+**tune pipe** (learning):
+```cpp
+pipe->link(gear::link());    // raw → Bayer
+pipe->link(wgpu::open());    // Bayer → GPU
+pipe->link(lute::tune());    // ← learn profile
+pipe->link(vibe::tune());    // learn style
+pipe->link(wgpu::shut());    // GPU → output
+```
+
+**view pipe** (production):
+```cpp
+pipe->link(gear::link());    // raw → Bayer
+pipe->link(wgpu::open());    // Bayer → GPU
+pipe->link(lute::view());    // ← apply profile
+pipe->link(vibe::view());    // apply style
+pipe->link(wgpu::shut());    // GPU → output
+```
+
+See [PIPE](../PIPE/README.md) for the full pipeline model.
+
+---
+
+## Direct API
 
 ```cpp
 #include <lute.hpp>

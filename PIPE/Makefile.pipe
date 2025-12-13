@@ -37,7 +37,8 @@ GEAR_A = $(LIB_DIR)/GEAR.a
 # Pipe sources (HEAD/BODY/TAIL + internal)
 PIPE_SRCS = $(SRC_DIR)/part/pipe/pipe.cpp \
             $(SRC_DIR)/part/pipe/view.cpp \
-            $(SRC_DIR)/part/pipe/link.cpp
+            $(SRC_DIR)/part/pipe/link.cpp \
+            $(SRC_DIR)/part/pipe/node.cpp
 
 # Module sources (processing)
 MODS_SRCS = $(SRC_DIR)/part/pipe/mods/color_matrix.cpp \
@@ -67,7 +68,8 @@ GEOS_SRCS = $(SRC_DIR)/part/geos/task.cpp \
 # Object files
 PIPE_OBJS = $(OBJ_DIR)/pipe/pipe.o \
             $(OBJ_DIR)/pipe/view.o \
-            $(OBJ_DIR)/pipe/link.o
+            $(OBJ_DIR)/pipe/link.o \
+            $(OBJ_DIR)/pipe/node.o
 
 MODS_OBJS = $(OBJ_DIR)/mods/baseline.o \
             $(OBJ_DIR)/mods/color_matrix.o \

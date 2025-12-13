@@ -2,11 +2,14 @@
 // Handles RAW decoding, metadata extraction, and scene-linear normalization
 // Auto-detects format (Sony ARW, Canon CR2/CR3, Nikon NEF, etc.)
 //
-// GEAR provides:
+// NEW API (pipe::Link):
+//   gear::link() - Link contributor for pipe
+//   Input:  Page = raw file buffer, Info = { "size": buffer_size }
+//   Output: Page = Bayer buffer, Info = camera metadata
+//
+// LEGACY API (direct calls):
 //   load() - decode RAW to flat scene-linear RGB
 //   tune() - estimate camera LUT from flat/jpeg pairs
-//
-// Outputs: scene-linear RGB, metadata, embedded preview for LUTE learning
 
 #pragma once
 
@@ -14,6 +17,16 @@
 #include "sink.hpp"
 
 namespace gear {
+
+    // ============================================================
+    // NEW: Link contributor for pipe
+    // ============================================================
+
+    pipe::Hold<pipe::Link> link();
+
+    // ============================================================
+    // LEGACY: Direct API (for existing code)
+    // ============================================================
 
     // Forward declarations
     struct Result;
