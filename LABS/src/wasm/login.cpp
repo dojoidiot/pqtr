@@ -4,8 +4,12 @@
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
+#include "gear.hpp"
 
 #include <GLFW/glfw3.h>
+#ifdef __EMSCRIPTEN__
+#include <GLES3/gl3.h>
+#endif
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +46,67 @@ struct Task {
     TaskStatus status = TaskStatus::Pending;
 };
 
+// Note system - simple event queue
+struct Note {
+    char event[32] = "";
+    char data[256] = "";
+};
+
+static constexpr int MAX_NOTES = 16;
+static Note g_notes[MAX_NOTES];
+static int g_note_count = 0;
+
+// Note history for display
+static constexpr int MAX_NOTE_HISTORY = 64;
+static Note g_note_history[MAX_NOTE_HISTORY];
+static int g_note_history_count = 0;
+static bool g_note_history_scroll = false;  // Flag to scroll to bottom
+
+static void postNote(const char* event, const char* data = "") {
+    // Add to active queue
+    if (g_note_count >= MAX_NOTES) {
+        // Shift notes down, drop oldest
+        for (int i = 0; i < MAX_NOTES - 1; i++) {
+            g_notes[i] = g_notes[i + 1];
+        }
+        g_note_count = MAX_NOTES - 1;
+    }
+    Note& note = g_notes[g_note_count++];
+    strncpy(note.event, event, sizeof(note.event) - 1);
+    strncpy(note.data, data, sizeof(note.data) - 1);
+
+    // Add to history
+    if (g_note_history_count >= MAX_NOTE_HISTORY) {
+        // Shift history down, drop oldest
+        for (int i = 0; i < MAX_NOTE_HISTORY - 1; i++) {
+            g_note_history[i] = g_note_history[i + 1];
+        }
+        g_note_history_count = MAX_NOTE_HISTORY - 1;
+    }
+    Note& hist = g_note_history[g_note_history_count++];
+    strncpy(hist.event, event, sizeof(hist.event) - 1);
+    strncpy(hist.data, data, sizeof(hist.data) - 1);
+    g_note_history_scroll = true;
+}
+
+static bool checkNote(const char* event, char* data_out = nullptr, size_t data_size = 0) {
+    for (int i = 0; i < g_note_count; i++) {
+        if (strcmp(g_notes[i].event, event) == 0) {
+            if (data_out && data_size > 0) {
+                strncpy(data_out, g_notes[i].data, data_size - 1);
+                data_out[data_size - 1] = '\0';
+            }
+            // Remove note (shift remaining)
+            for (int j = i; j < g_note_count - 1; j++) {
+                g_notes[j] = g_notes[j + 1];
+            }
+            g_note_count--;
+            return true;
+        }
+    }
+    return false;
+}
+
 // Application state
 struct AppState {
     GLFWwindow* window = nullptr;
@@ -62,23 +127,51 @@ struct AppState {
 
     // Desktop state
     bool show_labs_panel = false;
+    bool show_note_pane = false;
+    bool show_tune_pane = false;
+    bool layout_loaded = false;
     bool list_loaded = false;
     bool list_loading = false;
     static constexpr int MAX_PIPES = 64;
     char pipes[MAX_PIPES][64] = {};
     int pipe_count = 0;
+    char current_pipe[64] = "";  // Selected pipeline
 
-    // Current RAW file
-    uint8_t* raws_data = nullptr;
-    size_t raws_size = 0;
+    // Current RAW file (name only - data lives on BASE)
     char raws_name[256] = "";
+
+    // Files in current pipe
+    static constexpr int MAX_FILES = 64;
+    char files[MAX_FILES][64] = {};
+    int file_count = 0;
+    bool files_loaded = false;
+    bool files_loading = false;
+
+    // GEAR decoded data (from BASE pull)
+    uint16_t* bayer_data = nullptr;
+    int bayer_width = 0;
+    int bayer_height = 0;
+    int bayer_black = 0;
+    int bayer_white = 0;
+    pipe::Info* gear_info = nullptr;  // Camera metadata from GEAR decode (heap allocated)
+    bool gear_decoded = false;
+
+    // Preview from GEAR (embedded JPEG, RGB 8-bit)
+    uint8_t* preview_data = nullptr;
+    int preview_width = 0;
+    int preview_height = 0;
+    unsigned int preview_texture = 0;  // OpenGL texture ID
 
     // Task queue
     bool show_task_view = false;
-    static constexpr int MAX_TASKS = 8;
+    static constexpr int MAX_TASKS = 16;
     Task tasks[MAX_TASKS] = {};
     int task_count = 0;
     int current_task = -1;
+
+    // Tune pipeline state
+    bool tune_running = false;
+    int tune_step = 0;
 
     // Async request state
     bool request_pending = false;
@@ -115,38 +208,466 @@ static void setTaskStatus(int idx, TaskStatus status, const char* message = null
 }
 
 static void startNextTask();  // Forward declaration
+static void runTuneStep();    // Forward declaration
+static const char* extractJsonString(const char* json, const char* key, char* out, size_t out_size);  // Forward declaration
+
+// Upload preview RGB data to OpenGL texture
+static void uploadPreviewTexture() {
+    if (!g_state.preview_data || g_state.preview_width <= 0 || g_state.preview_height <= 0) {
+        return;
+    }
+
+    // Delete old texture if exists
+    if (g_state.preview_texture) {
+        glDeleteTextures(1, &g_state.preview_texture);
+        g_state.preview_texture = 0;
+    }
+
+    // Create new texture
+    glGenTextures(1, &g_state.preview_texture);
+    glBindTexture(GL_TEXTURE_2D, g_state.preview_texture);
+
+    // Set texture parameters
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // Upload RGB data
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, g_state.preview_width, g_state.preview_height,
+                 0, GL_RGB, GL_UNSIGNED_BYTE, g_state.preview_data);
+
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    char msg[64];
+    snprintf(msg, sizeof(msg), "Preview texture: %dx%d", g_state.preview_width, g_state.preview_height);
+    LOG(msg);
+}
+
+// Start tune pipeline for current_pipe
+static void startTunePipeline() {
+    if (!g_state.current_pipe[0]) return;
+
+    clearTasks();
+    addTask("gear.load");
+    addTask("wgpu.open");
+    addTask("pipe.view");   // GEAR stage
+    addTask("lute.tune");
+    addTask("pipe.view");   // LUTE stage
+    addTask("drum.tune");
+    addTask("pipe.view");   // DRUM stage
+    addTask("pipe.make");
+    addTask("pipe.save");
+    addTask("wgpu.shut");
+
+    g_state.tune_running = true;
+    g_state.tune_step = 0;
+    g_state.show_task_view = true;
+    g_state.current_task = 0;
+
+    postNote("tune.begin", g_state.current_pipe);
+    runTuneStep();
+}
+
+// Run current tune step (placeholder - will connect to PIPE/WGPU)
+static void runTuneStep() {
+    if (!g_state.tune_running || g_state.tune_step >= g_state.task_count) {
+        g_state.tune_running = false;
+        g_state.current_task = -1;
+        postNote("tune.done", g_state.current_pipe);
+        return;
+    }
+
+    int step = g_state.tune_step;
+    setTaskStatus(step, TaskStatus::Running);
+
+    // Placeholder: immediately complete each step
+    // TODO: Connect to actual PIPE/WGPU calls
+    const char* task_name = g_state.tasks[step].name;
+
+    if (strcmp(task_name, "gear.load") == 0) {
+        // Use current_pipe to find the gear.json file
+        if (!g_state.current_pipe[0]) {
+            setTaskStatus(step, TaskStatus::Error, "no pipe selected");
+            g_state.tune_running = false;
+            postNote("tune.error", "select a pipeline first");
+            return;
+        }
+
+        // First fetch gear.json to get the RAW filename
+        setTaskStatus(step, TaskStatus::Running, "loading gear...");
+
+        // Build URL: GET /pull?name={pipe}&file={pipe}.gear.json
+        static char gear_url[512];
+        snprintf(gear_url, sizeof(gear_url), "/pull?name=%s&file=%s.gear.json",
+                 g_state.current_pipe, g_state.current_pipe);
+
+        // Build Authorization header
+        static char auth_header[2100];
+        snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
+        static const char* headers[] = {"Authorization", auth_header, nullptr};
+
+        emscripten_fetch_attr_t attr;
+        emscripten_fetch_attr_init(&attr);
+        strcpy(attr.requestMethod, "GET");
+        attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+        attr.requestHeaders = headers;
+        attr.userData = reinterpret_cast<void*>(static_cast<intptr_t>(step));
+
+        attr.onsuccess = [](emscripten_fetch_t* fetch) {
+            int step = static_cast<int>(reinterpret_cast<intptr_t>(fetch->userData));
+
+            // Parse gear.json to get raw filename
+            char raw_filename[256] = "";
+            extractJsonString(fetch->data, "raw", raw_filename, sizeof(raw_filename));
+            emscripten_fetch_close(fetch);
+
+            if (!raw_filename[0]) {
+                setTaskStatus(step, TaskStatus::Error, "no raw in gear.json");
+                g_state.tune_running = false;
+                postNote("tune.error", "gear.json missing raw field");
+                return;
+            }
+
+            // Now fetch the actual RAW file
+            setTaskStatus(step, TaskStatus::Running, "pulling RAW...");
+
+            // Build URL: GET /pull?name={pipe}&file={raw_filename}
+            static char raw_url[512];
+            snprintf(raw_url, sizeof(raw_url), "/pull?name=%s&file=%s",
+                     g_state.current_pipe, raw_filename);
+
+            // Reuse static auth header from outer scope
+            static char raw_auth[2100];
+            snprintf(raw_auth, sizeof(raw_auth), "Bearer %s", g_state.jwt);
+            static const char* raw_headers[] = {"Authorization", raw_auth, nullptr};
+
+            emscripten_fetch_attr_t raw_attr;
+            emscripten_fetch_attr_init(&raw_attr);
+            strcpy(raw_attr.requestMethod, "GET");
+            raw_attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+            raw_attr.requestHeaders = raw_headers;
+            raw_attr.userData = reinterpret_cast<void*>(static_cast<intptr_t>(step));
+
+            raw_attr.onsuccess = [](emscripten_fetch_t* fetch) {
+                int step = static_cast<int>(reinterpret_cast<intptr_t>(fetch->userData));
+
+                // Decode the RAW data
+                pipe::Data result = gear::sony::decode(fetch->data, fetch->numBytes);
+                emscripten_fetch_close(fetch);
+
+                // Check for errors
+                if (result.info.text("error")[0] != '\0') {
+                    setTaskStatus(step, TaskStatus::Error, result.info.text("error").c_str());
+                    g_state.tune_running = false;
+                    postNote("tune.error", result.info.text("error").c_str());
+                    return;
+                }
+
+                // Store decoded Bayer data
+                if (result.page) {
+                    auto* buf = static_cast<gear::sony::BayerBuffer*>(result.page);
+
+                    // Free previous if exists
+                    if (g_state.bayer_data) free(g_state.bayer_data);
+
+                    // Copy Bayer data
+                    size_t bayer_size = buf->width * buf->height * sizeof(uint16_t);
+                    g_state.bayer_data = (uint16_t*)malloc(bayer_size);
+                    memcpy(g_state.bayer_data, buf->data.data(), bayer_size);
+                    g_state.bayer_width = buf->width;
+                    g_state.bayer_height = buf->height;
+                    g_state.bayer_black = buf->black_level;
+                    g_state.bayer_white = buf->white_level;
+
+                    // Store metadata
+                    if (g_state.gear_info) delete g_state.gear_info;
+                    g_state.gear_info = new pipe::Info(std::move(result.info));
+                    g_state.gear_decoded = true;
+
+                    // Copy preview data
+                    if (g_state.preview_data) free(g_state.preview_data);
+                    g_state.preview_data = nullptr;
+                    g_state.preview_width = 0;
+                    g_state.preview_height = 0;
+
+                    if (buf->preview_width > 0 && buf->preview_height > 0 && !buf->preview.empty()) {
+                        size_t preview_size = buf->preview_width * buf->preview_height * 3;
+                        g_state.preview_data = (uint8_t*)malloc(preview_size);
+                        memcpy(g_state.preview_data, buf->preview.data(), preview_size);
+                        g_state.preview_width = buf->preview_width;
+                        g_state.preview_height = buf->preview_height;
+
+                        // Upload to texture
+                        uploadPreviewTexture();
+                    }
+
+                    char msg[128];
+                    snprintf(msg, sizeof(msg), "%dx%d", buf->width, buf->height);
+                    setTaskStatus(step, TaskStatus::Done, msg);
+                    postNote("gear.load", msg);
+
+                    delete buf;
+
+                    // Continue to next step
+                    g_state.tune_step++;
+                    runTuneStep();
+                } else {
+                    setTaskStatus(step, TaskStatus::Error, "no page");
+                    g_state.tune_running = false;
+                    postNote("tune.error", "decode failed");
+                }
+            };
+
+            raw_attr.onerror = [](emscripten_fetch_t* fetch) {
+                int step = static_cast<int>(reinterpret_cast<intptr_t>(fetch->userData));
+                setTaskStatus(step, TaskStatus::Error, "RAW fetch failed");
+                g_state.tune_running = false;
+                postNote("tune.error", "failed to pull RAW from BASE");
+                emscripten_fetch_close(fetch);
+            };
+
+            emscripten_fetch(&raw_attr, raw_url);
+        };
+
+        attr.onerror = [](emscripten_fetch_t* fetch) {
+            int step = static_cast<int>(reinterpret_cast<intptr_t>(fetch->userData));
+            setTaskStatus(step, TaskStatus::Error, "gear.json not found");
+            g_state.tune_running = false;
+            postNote("tune.error", "no gear.json - load RAW first");
+            emscripten_fetch_close(fetch);
+        };
+
+        emscripten_fetch(&attr, gear_url);
+        return;  // Async - will continue in callback
+    } else if (strcmp(task_name, "wgpu.open") == 0) {
+        postNote("wgpu.open", "");
+        setTaskStatus(step, TaskStatus::Done, "ready");
+    } else if (strcmp(task_name, "pipe.view") == 0) {
+        // Which stage? 0=GEAR, 1=LUTE, 2=DROP
+        int view_num = 0;
+        for (int i = 0; i < step; i++) {
+            if (strcmp(g_state.tasks[i].name, "pipe.view") == 0) view_num++;
+        }
+        const char* stage_names[] = {"GEAR", "LUTE", "DRUM"};
+        postNote("pipe.view", stage_names[view_num]);
+        setTaskStatus(step, TaskStatus::Done, stage_names[view_num]);
+    } else if (strcmp(task_name, "lute.tune") == 0) {
+        postNote("lute.tune", "");
+        setTaskStatus(step, TaskStatus::Done, "tuned");
+    } else if (strcmp(task_name, "drum.tune") == 0) {
+        postNote("drum.tune", "");
+        setTaskStatus(step, TaskStatus::Done, "tuned");
+    } else if (strcmp(task_name, "pipe.make") == 0) {
+        postNote("pipe.make", "tune.json");
+        setTaskStatus(step, TaskStatus::Done, "json");
+    } else if (strcmp(task_name, "pipe.save") == 0) {
+        postNote("pipe.save", "png");
+        setTaskStatus(step, TaskStatus::Done, "saved");
+    } else if (strcmp(task_name, "wgpu.shut") == 0) {
+        postNote("wgpu.shut", "");
+        setTaskStatus(step, TaskStatus::Done, "closed");
+    }
+
+    // Move to next step
+    g_state.tune_step++;
+    g_state.current_task = g_state.tune_step < g_state.task_count ? g_state.tune_step : -1;
+
+    // Continue to next step (in real impl, this would be async)
+    if (g_state.tune_step < g_state.task_count) {
+        runTuneStep();
+    } else {
+        g_state.tune_running = false;
+        postNote("tune.done", g_state.current_pipe);
+    }
+}
 
 #ifdef __EMSCRIPTEN__
+// Layout persistence via localStorage
+EM_JS(void, saveLayout, (int labs, int note, int tune), {
+    localStorage.setItem('pqtr_layout', JSON.stringify({labs: labs, note: note, tune: tune}));
+});
+
+EM_JS(int, loadLayoutLabs, (), {
+    try {
+        const data = localStorage.getItem('pqtr_layout');
+        if (data) return JSON.parse(data).labs ? 1 : 0;
+    } catch(e) {}
+    return 1;  // Default: LABS on
+});
+
+EM_JS(int, loadLayoutNote, (), {
+    try {
+        const data = localStorage.getItem('pqtr_layout');
+        if (data) return JSON.parse(data).note ? 1 : 0;
+    } catch(e) {}
+    return 0;  // Default: Note off
+});
+
+EM_JS(int, loadLayoutTune, (), {
+    try {
+        const data = localStorage.getItem('pqtr_layout');
+        if (data) return JSON.parse(data).tune ? 1 : 0;
+    } catch(e) {}
+    return 0;  // Default: Tune off
+});
+
+// Auth persistence via localStorage
+EM_JS(void, saveAuth, (const char* jwt, const char* itag, const char* role, const char* user_id), {
+    localStorage.setItem('pqtr_auth', JSON.stringify({
+        jwt: UTF8ToString(jwt),
+        itag: UTF8ToString(itag),
+        role: UTF8ToString(role),
+        user_id: UTF8ToString(user_id)
+    }));
+});
+
+EM_JS(void, clearAuth, (), {
+    localStorage.removeItem('pqtr_auth');
+});
+
+EM_JS(int, loadAuthJwt, (char* out, int maxLen), {
+    try {
+        const data = localStorage.getItem('pqtr_auth');
+        if (data) {
+            const jwt = JSON.parse(data).jwt || "";
+            if (jwt.length > 0 && jwt.length < maxLen) {
+                stringToUTF8(jwt, out, maxLen);
+                return 1;
+            }
+        }
+    } catch(e) {}
+    return 0;
+});
+
+EM_JS(void, loadAuthItag, (char* out, int maxLen), {
+    try {
+        const data = localStorage.getItem('pqtr_auth');
+        if (data) stringToUTF8(JSON.parse(data).itag || "", out, maxLen);
+    } catch(e) {}
+});
+
+EM_JS(void, loadAuthRole, (char* out, int maxLen), {
+    try {
+        const data = localStorage.getItem('pqtr_auth');
+        if (data) stringToUTF8(JSON.parse(data).role || "", out, maxLen);
+    } catch(e) {}
+});
+
+EM_JS(void, loadAuthUserId, (char* out, int maxLen), {
+    try {
+        const data = localStorage.getItem('pqtr_auth');
+        if (data) stringToUTF8(JSON.parse(data).user_id || "", out, maxLen);
+    } catch(e) {}
+});
+
+// Helper to create gear.json after RAW push succeeds
+static void createGearJson(const char* basename, const char* raw_filename) {
+    // Build gear.json content
+    static char gear_json[256];
+    snprintf(gear_json, sizeof(gear_json), "{\"raw\":\"%s\"}", raw_filename);
+
+    // Build URL: POST /push?name={basename}&file={basename}.gear.json
+    static char url[512];
+    snprintf(url, sizeof(url), "/push?name=%s&file=%s.gear.json", basename, basename);
+
+    // Build Authorization header
+    static char auth_header[2100];
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
+    static const char* headers[] = {"Authorization", auth_header, nullptr};
+
+    emscripten_fetch_attr_t attr;
+    emscripten_fetch_attr_init(&attr);
+    strcpy(attr.requestMethod, "POST");
+    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+    attr.requestHeaders = headers;
+    attr.requestData = gear_json;
+    attr.requestDataSize = strlen(gear_json);
+
+    attr.onsuccess = [](emscripten_fetch_t* fetch) {
+        LOG("gear.json created");
+        // Extract basename from raws_name for note
+        char basename[256];
+        strncpy(basename, g_state.raws_name, sizeof(basename) - 1);
+        char* dot = strrchr(basename, '.');
+        if (dot) *dot = '\0';
+        postNote("raws.load", basename);
+        emscripten_fetch_close(fetch);
+    };
+
+    attr.onerror = [](emscripten_fetch_t* fetch) {
+        LOG("Failed to create gear.json");
+        postNote("raws.error", "gear.json failed");
+        emscripten_fetch_close(fetch);
+    };
+
+    emscripten_fetch(&attr, url);
+}
+
 // C callback for file load - called from JavaScript
 extern "C" {
 EMSCRIPTEN_KEEPALIVE
 void onRawFileLoaded(const char* name, uint8_t* data, int size) {
-    LOG("RAW file loaded");
+    LOG("RAW file loaded - pushing to BASE");
     char msg[128];
     snprintf(msg, sizeof(msg), "File: %s, Size: %d bytes", name, size);
     LOG(msg);
 
-    // Free previous data
-    if (g_state.raws_data) {
-        free(g_state.raws_data);
-    }
+    // Store full filename
+    strncpy(g_state.raws_name, name, sizeof(g_state.raws_name) - 1);
+    g_state.raws_name[sizeof(g_state.raws_name) - 1] = '\0';
 
-    // Store new data
-    g_state.raws_data = (uint8_t*)malloc(size);
-    if (g_state.raws_data) {
-        memcpy(g_state.raws_data, data, size);
-        g_state.raws_size = size;
-        strncpy(g_state.raws_name, name, sizeof(g_state.raws_name) - 1);
-        g_state.raws_name[sizeof(g_state.raws_name) - 1] = '\0';
+    // Extract basename (without extension)
+    static char basename[256];
+    strncpy(basename, name, sizeof(basename) - 1);
+    char* dot = strrchr(basename, '.');
+    if (dot) *dot = '\0';
 
-        // Start task queue
-        clearTasks();
-        addTask("Check existing");
-        addTask("Upload RAW");
-        g_state.show_task_view = true;
-        g_state.current_task = 0;
-        startNextTask();
-    }
+    // Build URL: POST /push?name={basename}&file={filename}
+    static char url[512];
+    snprintf(url, sizeof(url), "/push?name=%s&file=%s", basename, name);
+
+    // Copy data for async use (will be freed after push)
+    static uint8_t* raw_data = nullptr;
+    static size_t raw_size = 0;
+    if (raw_data) free(raw_data);
+    raw_data = (uint8_t*)malloc(size);
+    memcpy(raw_data, data, size);
+    raw_size = size;
+
+    // Build Authorization header
+    static char auth_header[2100];
+    snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
+    static const char* headers[] = {"Authorization", auth_header, nullptr};
+
+    // Push RAW to BASE
+    emscripten_fetch_attr_t attr;
+    emscripten_fetch_attr_init(&attr);
+    strcpy(attr.requestMethod, "POST");
+    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+    attr.requestHeaders = headers;
+    attr.requestData = reinterpret_cast<const char*>(raw_data);
+    attr.requestDataSize = raw_size;
+
+    attr.onsuccess = [](emscripten_fetch_t* fetch) {
+        LOG("RAW pushed to BASE");
+        emscripten_fetch_close(fetch);
+
+        // Now create gear.json
+        char basename[256];
+        strncpy(basename, g_state.raws_name, sizeof(basename) - 1);
+        char* dot = strrchr(basename, '.');
+        if (dot) *dot = '\0';
+        createGearJson(basename, g_state.raws_name);
+    };
+
+    attr.onerror = [](emscripten_fetch_t* fetch) {
+        LOG("Failed to push RAW to BASE");
+        postNote("raws.error", "push failed");
+        emscripten_fetch_close(fetch);
+    };
+
+    emscripten_fetch(&attr, url);
 }
 }
 
@@ -264,7 +785,8 @@ static void onVerifySuccess(emscripten_fetch_t* fetch) {
     if (g_state.jwt[0] != '\0') {
         g_state.screen = Screen::Desktop;
         g_state.error_message[0] = '\0';
-        g_state.list_loaded = false;  // Trigger list load
+        saveAuth(g_state.jwt, g_state.itag, g_state.role, g_state.user_id);
+        postNote("labs.open", g_state.itag);
         LOG("Login successful, entering desktop");
     } else {
         strcpy(g_state.error_message, "Verification failed");
@@ -336,32 +858,50 @@ static void onListSuccess(emscripten_fetch_t* fetch) {
     buf[len] = '\0';
     LOG(buf);
 
+    // Check for unauthorized - JWT expired or server key changed
+    if (strstr(buf, "Unauthorized") || strstr(buf, "\"error\"")) {
+        postNote("auth.expired", "");
+        clearAuth();
+        g_state.screen = Screen::Login;
+        g_state.jwt[0] = '\0';
+        g_state.itag[0] = '\0';
+        g_state.list_loaded = false;
+        g_state.list_loading = false;
+        emscripten_fetch_close(fetch);
+        return;
+    }
+
     g_state.pipe_count = 0;
 
-    // Parse pipes array - simple extraction
-    const char* pipes_start = strstr(buf, "\"pipes\":[");
-    if (pipes_start) {
-        pipes_start += 9;  // Skip "pipes":[
-        while (*pipes_start && g_state.pipe_count < AppState::MAX_PIPES) {
-            if (*pipes_start == '"') {
-                pipes_start++;
-                const char* end = strchr(pipes_start, '"');
+    // Parse items array - simple extraction
+    const char* items_start = strstr(buf, "\"items\":[");
+    if (items_start) {
+        items_start += 9;  // Skip "items":[
+        while (*items_start && g_state.pipe_count < AppState::MAX_PIPES) {
+            if (*items_start == '"') {
+                items_start++;
+                const char* end = strchr(items_start, '"');
                 if (end) {
-                    size_t plen = end - pipes_start;
+                    size_t plen = end - items_start;
                     if (plen < 64) {
-                        strncpy(g_state.pipes[g_state.pipe_count], pipes_start, plen);
+                        strncpy(g_state.pipes[g_state.pipe_count], items_start, plen);
                         g_state.pipes[g_state.pipe_count][plen] = '\0';
                         g_state.pipe_count++;
                     }
-                    pipes_start = end + 1;
+                    items_start = end + 1;
                 } else break;
-            } else if (*pipes_start == ']') break;
-            else pipes_start++;
+            } else if (*items_start == ']') break;
+            else items_start++;
         }
     }
 
     g_state.list_loaded = true;
     g_state.list_loading = false;
+
+    char count_msg[32];
+    snprintf(count_msg, sizeof(count_msg), "%d pipes", g_state.pipe_count);
+    postNote("labs.list", count_msg);
+
     emscripten_fetch_close(fetch);
 }
 
@@ -369,6 +909,7 @@ static void onListFail(emscripten_fetch_t* fetch) {
     LOG("List request failed");
     g_state.list_loaded = true;
     g_state.list_loading = false;
+    postNote("labs.list", "error");
     emscripten_fetch_close(fetch);
 }
 
@@ -387,6 +928,75 @@ static void sendListRequest() {
     attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
     attr.onsuccess = onListSuccess;
     attr.onerror = onListFail;
+
+    const char* headers[] = {"Content-Type", "application/json", nullptr};
+    attr.requestHeaders = headers;
+    attr.requestData = body;
+    attr.requestDataSize = strlen(body);
+
+    emscripten_fetch(&attr, "/jrpc");
+}
+
+static void onFilesSuccess(emscripten_fetch_t* fetch) {
+    LOG("Files response received");
+    char buf[4096];
+    size_t len = fetch->numBytes < 4095 ? fetch->numBytes : 4095;
+    strncpy(buf, fetch->data, len);
+    buf[len] = '\0';
+
+    g_state.file_count = 0;
+
+    // Parse items array
+    const char* items_start = strstr(buf, "\"items\":[");
+    if (items_start) {
+        items_start += 9;
+        while (*items_start && g_state.file_count < AppState::MAX_FILES) {
+            if (*items_start == '"') {
+                items_start++;
+                const char* end = strchr(items_start, '"');
+                if (end) {
+                    size_t flen = end - items_start;
+                    if (flen < 64) {
+                        strncpy(g_state.files[g_state.file_count], items_start, flen);
+                        g_state.files[g_state.file_count][flen] = '\0';
+                        g_state.file_count++;
+                    }
+                    items_start = end + 1;
+                } else break;
+            } else if (*items_start == ']') break;
+            else items_start++;
+        }
+    }
+
+    g_state.files_loaded = true;
+    g_state.files_loading = false;
+    emscripten_fetch_close(fetch);
+}
+
+static void onFilesFail(emscripten_fetch_t* fetch) {
+    LOG("Files request failed");
+    g_state.files_loaded = true;
+    g_state.files_loading = false;
+    emscripten_fetch_close(fetch);
+}
+
+static void sendFilesRequest(const char* pipe_name) {
+    if (g_state.files_loading) return;
+    g_state.files_loading = true;
+    g_state.files_loaded = false;
+    g_state.file_count = 0;
+
+    static char body[2560];
+    snprintf(body, sizeof(body),
+        "{\"jsonrpc\":\"2.0\",\"method\":\"list\",\"params\":{\"jwt\":\"%s\",\"name\":\"%s\"},\"id\":1}",
+        g_state.jwt, pipe_name);
+
+    emscripten_fetch_attr_t attr;
+    emscripten_fetch_attr_init(&attr);
+    strcpy(attr.requestMethod, "POST");
+    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+    attr.onsuccess = onFilesSuccess;
+    attr.onerror = onFilesFail;
 
     const char* headers[] = {"Content-Type", "application/json", nullptr};
     attr.requestHeaders = headers;
@@ -457,83 +1067,25 @@ static void sendTestRequest() {
     emscripten_fetch(&attr, "/jrpc");
 }
 
-// Push API - upload RAW file (binary)
-static void onPushSuccess(emscripten_fetch_t* fetch) {
-    LOG("Push response received");
-    char buf[512];
-    size_t len = fetch->numBytes < 511 ? fetch->numBytes : 511;
-    strncpy(buf, fetch->data, len);
-    buf[len] = '\0';
-    LOG(buf);
+// Push is now handled directly in onRawFileLoaded via PUT /raws/{name}
 
-    if (extractJsonBool(buf, "ok")) {
-        setTaskStatus(1, TaskStatus::Done, "Uploaded");
-        g_state.list_loaded = false;  // Refresh list
-    } else {
-        char error[128];
-        extractJsonString(buf, "error", error, sizeof(error));
-        setTaskStatus(1, TaskStatus::Error, error[0] ? error : "Upload failed");
-    }
-    g_state.current_task = -1;  // Done
-    emscripten_fetch_close(fetch);
-}
-
-static void onPushFail(emscripten_fetch_t* fetch) {
-    LOG("Push request failed");
-    setTaskStatus(1, TaskStatus::Error, "Network error");
-    g_state.current_task = -1;
-    emscripten_fetch_close(fetch);
-}
-
-static void sendPushRequest() {
-    setTaskStatus(1, TaskStatus::Running, "Uploading...");
-
-    // Extract base name without extension
-    char base_name[256];
-    strncpy(base_name, g_state.raws_name, sizeof(base_name) - 1);
-    char* dot = strrchr(base_name, '.');
-    if (dot) *dot = '\0';
-
-    // Build URL with query params: /push?name=xxx&file=xxx
-    // JWT goes in Authorization header
-    static char url[512];
-    snprintf(url, sizeof(url), "/push?name=%s&file=%s", base_name, g_state.raws_name);
-
-    static char auth_header[2200];
-    snprintf(auth_header, sizeof(auth_header), "Bearer %s", g_state.jwt);
-
-    emscripten_fetch_attr_t attr;
-    emscripten_fetch_attr_init(&attr);
-    strcpy(attr.requestMethod, "POST");
-    attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
-    attr.onsuccess = onPushSuccess;
-    attr.onerror = onPushFail;
-
-    const char* headers[] = {
-        "Content-Type", "application/octet-stream",
-        "Authorization", auth_header,
-        nullptr
-    };
-    attr.requestHeaders = headers;
-    attr.requestData = (const char*)g_state.raws_data;
-    attr.requestDataSize = g_state.raws_size;
-
-    emscripten_fetch(&attr, url);
-}
-
-// Start next task in queue
+// Legacy task queue - no longer used for push but kept for compatibility
 static void startNextTask() {
-    if (g_state.current_task < 0 || g_state.current_task >= g_state.task_count) return;
-
-    switch (g_state.current_task) {
-        case 0: sendTestRequest(); break;
-        case 1: sendPushRequest(); break;
-        default: break;
-    }
+    // No longer used - push is handled in onRawFileLoaded
 }
 
 #else
 // Native stubs
+static void saveLayout(int, int, int) {}
+static int loadLayoutLabs() { return 1; }
+static int loadLayoutNote() { return 0; }
+static int loadLayoutTune() { return 0; }
+static void saveAuth(const char*, const char*, const char*, const char*) {}
+static void clearAuth() {}
+static int loadAuthJwt(char*, int) { return 0; }
+static void loadAuthItag(char*, int) {}
+static void loadAuthRole(char*, int) {}
+static void loadAuthUserId(char*, int) {}
 static void sendLoginRequest() {
     strcpy(g_state.error_message, "Native login not implemented");
 }
@@ -622,6 +1174,9 @@ static void render_otp_screen() {
     // OTP field
     ImGui::Text("One-Time Password");
     ImGui::SetNextItemWidth(-1);
+    if (g_state.otp[0] == '\0') {
+        ImGui::SetKeyboardFocusHere();
+    }
     bool enter_pressed = ImGui::InputText("##otp", g_state.otp, sizeof(g_state.otp),
         ImGuiInputTextFlags_EnterReturnsTrue);
 
@@ -659,40 +1214,86 @@ static void render_otp_screen() {
 static void render_desktop_screen() {
     ImGuiIO& io = ImGui::GetIO();
 
-    // Load list on first render
-    if (!g_state.list_loaded && !g_state.list_loading) {
-        sendListRequest();
+    // Load layout on first render
+    if (!g_state.layout_loaded) {
+        g_state.show_labs_panel = loadLayoutLabs() != 0;
+        g_state.show_note_pane = loadLayoutNote() != 0;
+        g_state.show_tune_pane = loadLayoutTune() != 0;
+        g_state.layout_loaded = true;
     }
 
-    // Main menu bar
+    // Track layout changes
+    bool prev_labs = g_state.show_labs_panel;
+    bool prev_note = g_state.show_note_pane;
+    bool prev_tune = g_state.show_tune_pane;
+
+    // Web-style menu bar
     if (ImGui::BeginMainMenuBar()) {
-        if (ImGui::BeginMenu("File")) {
-            if (ImGui::MenuItem("Load RAW File...")) {
-                openRawFilePicker();
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem("Logout")) {
-                g_state.screen = Screen::Login;
-                g_state.jwt[0] = '\0';
-                g_state.email[0] = '\0';
-                g_state.otp[0] = '\0';
-                g_state.itag[0] = '\0';
-                g_state.list_loaded = false;
-                g_state.pipe_count = 0;
-                // Free RAW data on logout
-                if (g_state.raws_data) {
-                    free(g_state.raws_data);
-                    g_state.raws_data = nullptr;
-                    g_state.raws_size = 0;
-                    g_state.raws_name[0] = '\0';
-                }
-            }
-            ImGui::EndMenu();
+        // Task: section
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "Task:");
+        ImGui::SameLine(0, 10);
+
+        if (ImGui::SmallButton("Load RAW")) {
+            openRawFilePicker();
+        }
+        ImGui::SameLine(0, 10);
+
+        if (ImGui::SmallButton("Logout")) {
+            g_state.screen = Screen::Login;
+            g_state.jwt[0] = '\0';
+            g_state.email[0] = '\0';
+            g_state.otp[0] = '\0';
+            g_state.itag[0] = '\0';
+            g_state.list_loaded = false;
+            g_state.pipe_count = 0;
+            g_state.raws_name[0] = '\0';
+            clearAuth();
         }
 
-        if (ImGui::BeginMenu("View")) {
-            ImGui::MenuItem("LABS", nullptr, &g_state.show_labs_panel);
-            ImGui::EndMenu();
+        // Divider
+        ImGui::SameLine(0, 20);
+        ImGui::TextColored(ImVec4(0.3f, 0.3f, 0.3f, 1.0f), "|");
+        ImGui::SameLine(0, 20);
+
+        // View: section
+        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "View:");
+        ImGui::SameLine(0, 10);
+
+        // LABS toggle
+        if (g_state.show_labs_panel) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            if (ImGui::SmallButton("[x] LABS")) g_state.show_labs_panel = false;
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            if (ImGui::SmallButton("[ ] LABS")) g_state.show_labs_panel = true;
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::SameLine(0, 10);
+
+        // Note toggle
+        if (g_state.show_note_pane) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            if (ImGui::SmallButton("[x] Note")) g_state.show_note_pane = false;
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            if (ImGui::SmallButton("[ ] Note")) g_state.show_note_pane = true;
+            ImGui::PopStyleColor();
+        }
+
+        ImGui::SameLine(0, 10);
+
+        // Tune toggle
+        if (g_state.show_tune_pane) {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
+            if (ImGui::SmallButton("[x] Tune")) g_state.show_tune_pane = false;
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+            if (ImGui::SmallButton("[ ] Tune")) g_state.show_tune_pane = true;
+            ImGui::PopStyleColor();
         }
 
         // Right-aligned user info
@@ -703,32 +1304,93 @@ static void render_desktop_screen() {
         ImGui::EndMainMenuBar();
     }
 
-    // LABS floating panel
+    // Save layout if changed
+    if (g_state.show_labs_panel != prev_labs || g_state.show_note_pane != prev_note || g_state.show_tune_pane != prev_tune) {
+        saveLayout(g_state.show_labs_panel ? 1 : 0, g_state.show_note_pane ? 1 : 0, g_state.show_tune_pane ? 1 : 0);
+    }
+
+    // LABS floating panel - check for labs.open note to trigger list
+    if (checkNote("labs.open")) {
+        g_state.list_loaded = false;  // Force reload
+        if (!g_state.list_loading) {
+            sendListRequest();
+            postNote("labs.list", "loading");
+        }
+    }
+
+    // Check for tune.start note to trigger pipeline
+    if (checkNote("tune.start")) {
+        if (!g_state.tune_running && g_state.current_pipe[0]) {
+            startTunePipeline();
+        }
+    }
+
+    // Check for raws.load note - file was pushed to BASE, refresh list
+    if (checkNote("raws.load")) {
+        g_state.list_loaded = false;  // Refresh list to show new file
+        g_state.files_loaded = false;  // Reload files
+        // Extract base name for auto-select
+        char base_name[256];
+        strncpy(base_name, g_state.raws_name, sizeof(base_name) - 1);
+        char* dot = strrchr(base_name, '.');
+        if (dot) *dot = '\0';
+        strncpy(g_state.current_pipe, base_name, sizeof(g_state.current_pipe) - 1);
+        postNote("pipe.select", base_name);
+    }
+
+    // Fallback: ensure list loads if not loaded
+    if (!g_state.list_loaded && !g_state.list_loading) {
+        sendListRequest();
+        postNote("labs.list", "loading");
+    }
+
     if (g_state.show_labs_panel) {
-        ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
+        // Check for push.done note to auto-select
+        char pushed_name[64];
+        if (checkNote("push.done", pushed_name, sizeof(pushed_name))) {
+            strncpy(g_state.current_pipe, pushed_name, sizeof(g_state.current_pipe) - 1);
+            g_state.files_loaded = false;  // Reload files
+            postNote("pipe.select", pushed_name);
+        }
+
+        ImGui::SetNextWindowSize(ImVec2(400, 350), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
             ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
 
         if (ImGui::Begin("LABS", &g_state.show_labs_panel)) {
-            // Current RAW file section
-            if (g_state.raws_data) {
-                ImGui::Text("Current RAW:");
-                ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "%s", g_state.raws_name);
-                ImGui::Text("Size: %.2f MB", g_state.raws_size / (1024.0f * 1024.0f));
-                ImGui::Separator();
-            }
-
             // Pipelines section
             if (g_state.list_loading) {
                 ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "Loading...");
-            } else if (g_state.pipe_count == 0 && !g_state.raws_data) {
+            } else if (g_state.pipe_count == 0 && !g_state.raws_name[0]) {
                 ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.4f, 1.0f), "Load a RAW file to begin");
             } else if (g_state.pipe_count > 0) {
                 ImGui::Text("Pipelines:");
                 ImGui::Separator();
                 for (int i = 0; i < g_state.pipe_count; i++) {
-                    if (ImGui::Selectable(g_state.pipes[i])) {
-                        // TODO: Select pipeline
+                    bool is_selected = strcmp(g_state.pipes[i], g_state.current_pipe) == 0;
+                    if (ImGui::Selectable(g_state.pipes[i], is_selected)) {
+                        if (!is_selected) {
+                            strncpy(g_state.current_pipe, g_state.pipes[i], sizeof(g_state.current_pipe) - 1);
+                            g_state.files_loaded = false;  // Trigger files reload
+                            postNote("pipe.select", g_state.current_pipe);
+                        }
+                    }
+
+                    // Show files under selected pipe
+                    if (is_selected && g_state.current_pipe[0]) {
+                        // Load files if not loaded
+                        if (!g_state.files_loaded && !g_state.files_loading) {
+                            sendFilesRequest(g_state.current_pipe);
+                        }
+
+                        // Display files indented
+                        if (g_state.files_loading) {
+                            ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "    ...");
+                        } else if (g_state.file_count > 0) {
+                            for (int f = 0; f < g_state.file_count; f++) {
+                                ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "    %s", g_state.files[f]);
+                            }
+                        }
                     }
                 }
             }
@@ -736,47 +1398,185 @@ static void render_desktop_screen() {
         ImGui::End();
     }
 
-    // Task View pane
-    if (g_state.show_task_view) {
-        ImGui::SetNextWindowSize(ImVec2(350, 200), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
-            ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+    // Note pane - shows note history
+    if (g_state.show_note_pane) {
+        ImGui::SetNextWindowSize(ImVec2(350, 250), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2(20, io.DisplaySize.y - 270),
+            ImGuiCond_FirstUseEver);
 
-        if (ImGui::Begin("Task View", nullptr, ImGuiWindowFlags_NoCollapse)) {
-            // Show tasks
-            for (int i = 0; i < g_state.task_count; i++) {
-                Task& task = g_state.tasks[i];
+        if (ImGui::Begin("Note", &g_state.show_note_pane)) {
+            // Clear button
+            if (ImGui::SmallButton("Clear")) {
+                g_note_history_count = 0;
+            }
+            ImGui::Separator();
 
-                // Status indicator
-                ImVec4 color;
-                const char* icon;
-                switch (task.status) {
-                    case TaskStatus::Pending:  color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); icon = "[ ]"; break;
-                    case TaskStatus::Running:  color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f); icon = "[~]"; break;
-                    case TaskStatus::Done:     color = ImVec4(0.4f, 0.9f, 0.4f, 1.0f); icon = "[+]"; break;
-                    case TaskStatus::Error:    color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); icon = "[!]"; break;
-                }
-
-                ImGui::TextColored(color, "%s %s", icon, task.name);
-                if (task.message[0]) {
+            // Scrollable list
+            ImGui::BeginChild("NoteScroll", ImVec2(0, 0), false);
+            for (int i = 0; i < g_note_history_count; i++) {
+                Note& n = g_note_history[i];
+                ImGui::TextColored(ImVec4(0.4f, 0.7f, 1.0f, 1.0f), "%s", n.event);
+                if (n.data[0]) {
                     ImGui::SameLine();
-                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "- %s", task.message);
+                    ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "%s", n.data);
                 }
             }
+            // Auto-scroll to bottom on new note
+            if (g_note_history_scroll) {
+                ImGui::SetScrollHereY(1.0f);
+                g_note_history_scroll = false;
+            }
+            ImGui::EndChild();
+        }
+        ImGui::End();
+    }
 
-            ImGui::Spacing();
+    // Tune pane - horizontal pipeline stages
+    if (g_state.show_tune_pane) {
+        // Size based on 4 images: each ~240px wide, 3:2 aspect ratio (~160px tall)
+        float stage_width = 240.0f;
+        float stage_gap = 10.0f;
+        float padding = 32.0f;  // Window padding
+        float tune_width = (stage_width * 4) + (stage_gap * 3) + padding;
+        float stage_height = stage_width * 2.0f / 3.0f;  // 3:2 aspect
+        float header_height = 50.0f;  // Header + separator + labels
+        float tune_height = stage_height + header_height + padding;
+
+        ImGui::SetNextWindowSize(ImVec2(tune_width, tune_height), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowPos(ImVec2((io.DisplaySize.x - tune_width) * 0.5f, 50), ImGuiCond_FirstUseEver);
+
+        if (ImGui::Begin("Tune", &g_state.show_tune_pane)) {
+            float pane_width = ImGui::GetContentRegionAvail().x;
+
+            // Header: file name left, Tune button right
+            if (g_state.current_pipe[0]) {
+                ImGui::TextColored(ImVec4(0.4f, 0.8f, 0.4f, 1.0f), "%s", g_state.current_pipe);
+            } else {
+                ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "(no file)");
+            }
+            ImGui::SameLine(pane_width - 50);
+            bool can_tune = g_state.current_pipe[0] != '\0';
+            if (!can_tune) ImGui::BeginDisabled();
+            if (ImGui::SmallButton("Tune")) {
+                postNote("tune.start", g_state.current_pipe);
+            }
+            if (!can_tune) ImGui::EndDisabled();
+
             ImGui::Separator();
             ImGui::Spacing();
 
-            // OK button - enabled when all tasks done or error
-            bool all_done = g_state.current_task < 0;
-            if (!all_done) ImGui::BeginDisabled();
-            if (ImGui::Button("OK", ImVec2(80, 0))) {
-                g_state.show_task_view = false;
-            }
-            if (!all_done) ImGui::EndDisabled();
+            // Fixed stage dimensions for horizontal layout
+            float stage_gap = 10.0f;
+            float stage_width = (pane_width - (3 * stage_gap)) / 4.0f;
+            float stage_height = stage_width * 2.0f / 3.0f;  // 3:2 aspect
+
+            // Helper lambda to render a stage
+            auto renderStage = [&](const char* label, const char* id, ImVec4 label_color,
+                                   bool show_preview, const char* placeholder) {
+                ImGui::BeginGroup();
+                ImGui::TextColored(label_color, "%s", label);
+                ImGui::BeginChild(id, ImVec2(stage_width, stage_height), true);
+                if (show_preview && g_state.preview_texture) {
+                    float aspect = (float)g_state.preview_width / (float)g_state.preview_height;
+                    float child_width = ImGui::GetContentRegionAvail().x;
+                    float child_height = ImGui::GetContentRegionAvail().y;
+
+                    float img_width = child_width;
+                    float img_height = img_width / aspect;
+                    if (img_height > child_height) {
+                        img_height = child_height;
+                        img_width = img_height * aspect;
+                    }
+                    // Center the image
+                    float offset_x = (child_width - img_width) * 0.5f;
+                    float offset_y = (child_height - img_height) * 0.5f;
+                    if (offset_x > 0) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset_x);
+                    if (offset_y > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + offset_y);
+                    ImGui::Image((ImTextureID)(intptr_t)g_state.preview_texture, ImVec2(img_width, img_height));
+                } else if (g_state.current_pipe[0]) {
+                    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f), "%s", placeholder);
+                } else {
+                    ImGui::TextColored(ImVec4(0.4f, 0.4f, 0.4f, 1.0f), "—");
+                }
+                ImGui::EndChild();
+                ImGui::EndGroup();
+            };
+
+            // Stage 1: GEAR
+            renderStage("GEAR", "stage_gear", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), true, "Press Tune");
+
+            ImGui::SameLine(0, stage_gap);
+
+            // Stage 2: LUTE
+            renderStage("LUTE", "stage_lute", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), false, "[camera profile]");
+
+            ImGui::SameLine(0, stage_gap);
+
+            // Stage 3: DRUM
+            renderStage("DRUM", "stage_drum", ImVec4(0.4f, 0.7f, 1.0f, 1.0f), false, "[dynamic range]");
+
+            ImGui::SameLine(0, stage_gap);
+
+            // Stage 4: DONE
+            renderStage("DONE", "stage_done", ImVec4(0.4f, 0.9f, 0.4f, 1.0f), false, "[final output]");
         }
         ImGui::End();
+    }
+
+    // Task View pane
+    if (g_state.show_task_view) {
+        bool all_done = g_state.current_task < 0;
+        bool has_error = false;
+        for (int i = 0; i < g_state.task_count; i++) {
+            if (g_state.tasks[i].status == TaskStatus::Error) {
+                has_error = true;
+                break;
+            }
+        }
+
+        // Auto-hide on success
+        if (all_done && !has_error) {
+            g_state.show_task_view = false;
+        } else {
+            ImGui::SetNextWindowSize(ImVec2(350, 200), ImGuiCond_FirstUseEver);
+            ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y * 0.5f),
+                ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+
+            if (ImGui::Begin("Task View", nullptr, ImGuiWindowFlags_NoCollapse)) {
+                // Show tasks
+                for (int i = 0; i < g_state.task_count; i++) {
+                    Task& task = g_state.tasks[i];
+
+                    // Status indicator
+                    ImVec4 color;
+                    const char* icon;
+                    switch (task.status) {
+                        case TaskStatus::Pending:  color = ImVec4(0.5f, 0.5f, 0.5f, 1.0f); icon = "[ ]"; break;
+                        case TaskStatus::Running:  color = ImVec4(0.4f, 0.7f, 1.0f, 1.0f); icon = "[~]"; break;
+                        case TaskStatus::Done:     color = ImVec4(0.4f, 0.9f, 0.4f, 1.0f); icon = "[+]"; break;
+                        case TaskStatus::Error:    color = ImVec4(1.0f, 0.4f, 0.4f, 1.0f); icon = "[!]"; break;
+                    }
+
+                    ImGui::TextColored(color, "%s %s", icon, task.name);
+                    if (task.message[0]) {
+                        ImGui::SameLine();
+                        ImGui::TextColored(ImVec4(0.6f, 0.6f, 0.6f, 1.0f), "- %s", task.message);
+                    }
+                }
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Shut button - only shown on error
+                if (has_error) {
+                    if (ImGui::Button("Shut", ImVec2(80, 0))) {
+                        g_state.show_task_view = false;
+                    }
+                }
+            }
+            ImGui::End();
+        }
     }
 }
 
@@ -819,10 +1619,8 @@ static void glfw_error_callback(int error, const char* description) {
     fprintf(stderr, "GLFW Error %d: %s\n", error, description);
 }
 
-int main(int /*argc*/, char** /*argv*/) {
-#ifdef __EMSCRIPTEN__
-    EM_ASM(console.log('=== LABS Starting ==='));
-#endif
+EMSCRIPTEN_KEEPALIVE
+int main(int argc, char** argv) {
     LOG("LABS: Starting...");
 
     glfwSetErrorCallback(glfw_error_callback);
@@ -872,6 +1670,22 @@ int main(int /*argc*/, char** /*argv*/) {
 
     ImGui_ImplGlfw_InitForOpenGL(g_state.window, true);
     ImGui_ImplOpenGL3_Init(glsl_version);
+
+    // Try to restore saved auth session
+    if (loadAuthJwt(g_state.jwt, sizeof(g_state.jwt))) {
+        loadAuthItag(g_state.itag, sizeof(g_state.itag));
+        loadAuthRole(g_state.role, sizeof(g_state.role));
+        loadAuthUserId(g_state.user_id, sizeof(g_state.user_id));
+        g_state.screen = Screen::Desktop;
+
+        // Debug: show jwt length and itag
+        char debug_msg[64];
+        snprintf(debug_msg, sizeof(debug_msg), "jwt=%zu itag=%s", strlen(g_state.jwt), g_state.itag);
+        postNote("auth.restore", debug_msg);
+
+        postNote("labs.open", g_state.itag);
+        LOG("LABS: Restored auth session");
+    }
 
 #ifdef __EMSCRIPTEN__
     ImGui_ImplGlfw_InstallEmscriptenCallbacks(g_state.window, "#canvas");

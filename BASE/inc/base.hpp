@@ -75,8 +75,8 @@ namespace rpc {
     struct InfoRequest { std::string jwt; };
     struct InfoResponse { int total_users; int users_none; int users_play; int users_hero; int users_pqtr; };
 
-    struct ListRequest { std::string jwt; };
-    struct ListResponse { bool ok; std::vector<std::string> pipes; };
+    struct ListRequest { std::string jwt; std::string name; };  // name empty = list pipes, name set = list files in pipe
+    struct ListResponse { bool ok; std::vector<std::string> items; };
 
     struct TestRequest { std::string jwt; std::string name; };
     struct TestResponse { bool ok; bool exists; };

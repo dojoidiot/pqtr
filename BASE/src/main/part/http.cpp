@@ -38,10 +38,18 @@ bool Service::init() {
         return false;
     }
 
-    // Generate signing keypair
+    // Try to load existing signing keys from database
+    if (m_store.getSigningKeys(m_signing_pubkey, m_signing_privkey)) {
+        return true;  // Keys loaded successfully
+    }
+
+    // Generate new signing keypair
     if (!crypto::generateKeypair(m_signing_pubkey, m_signing_privkey)) {
         return false;
     }
+
+    // Persist keys to database
+    m_store.setSigningKeys(m_signing_pubkey, m_signing_privkey);
 
     return true;
 }
@@ -158,7 +166,7 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
 
         // Create user folders in var/LABS/<itag>
         if (!m_data_area.empty()) {
-            std::string labs_path = m_data_area + "/LABS";
+            std::string labs_path = m_data_area + "LABS";
             mkdir(labs_path.c_str(), 0755);
             std::string user_path = labs_path + "/" + user.itag;
             mkdir(user_path.c_str(), 0755);
@@ -427,9 +435,21 @@ rpc::ListResponse Service::handleList(const rpc::ListRequest& req) {
         return resp;  // No data area configured
     }
 
-    // List directories in user's pipe folder (var/LABS/<itag>/pipe)
-    std::string pipe_path = m_data_area + "/LABS/" + claims->itag + "/pipe";
-    DIR* dir = opendir(pipe_path.c_str());
+    // If name provided, list files in that pipe folder
+    // Otherwise, list pipe folders
+    std::string path;
+    bool list_files = !req.name.empty();
+
+    if (list_files) {
+        if (!validPathComponent(req.name)) {
+            return resp;  // Invalid name
+        }
+        path = m_data_area + "LABS/" + claims->itag + "/pipe/" + req.name;
+    } else {
+        path = m_data_area + "LABS/" + claims->itag + "/pipe";
+    }
+
+    DIR* dir = opendir(path.c_str());
     if (!dir) {
         resp.ok = true;
         return resp;  // Empty or doesn't exist
@@ -437,10 +457,18 @@ rpc::ListResponse Service::handleList(const rpc::ListRequest& req) {
 
     struct dirent* entry;
     while ((entry = readdir(dir)) != nullptr) {
-        if (entry->d_type == DT_DIR) {
-            std::string name = entry->d_name;
-            if (name != "." && name != "..") {
-                resp.pipes.push_back(name);
+        std::string name = entry->d_name;
+        if (name == "." || name == "..") continue;
+
+        if (list_files) {
+            // List regular files
+            if (entry->d_type == DT_REG) {
+                resp.items.push_back(name);
+            }
+        } else {
+            // List directories (pipes)
+            if (entry->d_type == DT_DIR) {
+                resp.items.push_back(name);
             }
         }
     }
@@ -467,7 +495,7 @@ rpc::TestResponse Service::handleTest(const rpc::TestRequest& req) {
     }
 
     // Check if pipe folder exists (var/LABS/<itag>/pipe/<name>)
-    std::string pipe_path = m_data_area + "/LABS/" + claims->itag + "/pipe/" + req.name;
+    std::string pipe_path = m_data_area + "LABS/" + claims->itag + "/pipe/" + req.name;
     struct stat st;
     resp.exists = (stat(pipe_path.c_str(), &st) == 0 && S_ISDIR(st.st_mode));
     resp.ok = true;
@@ -504,7 +532,7 @@ rpc::PushResponse Service::handlePush(const rpc::PushRequest& req) {
     }
 
     // Create pipe folder (var/LABS/<itag>/pipe/<name>)
-    std::string user_path = m_data_area + "/LABS/" + claims->itag;
+    std::string user_path = m_data_area + "LABS/" + claims->itag;
     std::string pipe_base = user_path + "/pipe";
     std::string pipe_path = pipe_base + "/" + req.name;
 

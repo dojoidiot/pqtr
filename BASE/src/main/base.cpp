@@ -13,7 +13,6 @@ namespace {
 struct Config {
     std::string host;
     int port = 0;
-    std::string www_path;              // static file root (optional)
     std::string jrpc_path;
     std::string boot_path;
     std::string admin_email;
@@ -103,7 +102,6 @@ bool loadConfig(const std::string& path, Config& cfg) {
 
     if (!(s = getString("host")).empty()) cfg.host = s;
     if ((i = getInt("port")) > 0) cfg.port = i;
-    if (!(s = getString("www_path")).empty()) cfg.www_path = s;
     if (!(s = getString("jrpc_path")).empty()) cfg.jrpc_path = s;
     if (!(s = getString("boot_path")).empty()) cfg.boot_path = s;
     if (!(s = getString("admin_email")).empty()) cfg.admin_email = s;
@@ -186,16 +184,18 @@ std::string jrpcError(const std::string& id, int code, const std::string& messag
 int main(int argc, char* argv[]) {
     std::string config_path;
     std::string data_area;
+    std::string wasm_root;
     bool test_mode = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
             std::cout << "BASE Server - Static site + JWT Auth\n\n"
-                      << "Usage: base --info-file <config.json> --data-area <path> [--test]\n\n"
+                      << "Usage: base --info-file <config.json> --data-area <path> [--wasm-root <path>] [--test]\n\n"
                       << "Options:\n"
                       << "  --info-file <path>   Config file (required)\n"
                       << "  --data-area <path>   Data directory (required)\n"
+                      << "  --wasm-root <path>   WASM app directory to serve (optional)\n"
                       << "  --test               Test mode: print OTP to console (no email)\n"
                       << "  -h, --help           Show this help\n";
             return 0;
@@ -204,6 +204,8 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--data-area" && i + 1 < argc) {
             data_area = argv[++i];
             if (!data_area.empty() && data_area.back() != '/') data_area += '/';
+        } else if (arg == "--wasm-root" && i + 1 < argc) {
+            wasm_root = argv[++i];
         } else if (arg == "--test") {
             test_mode = true;
         }
@@ -423,14 +425,15 @@ int main(int argc, char* argv[]) {
             res.set_content(jrpcResult(id, r.str()), "application/json");
 
         } else if (method == "list") {
+            std::string p_name = extractString(body, "name");  // Optional
             if (p_jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
-            auto resp = service.handleList({p_jwt});
+            auto resp = service.handleList({p_jwt, p_name});
             if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
             std::ostringstream r;
-            r << "{\"pipes\":[";
-            for (size_t i = 0; i < resp.pipes.size(); i++) {
+            r << "{\"items\":[";
+            for (size_t i = 0; i < resp.items.size(); i++) {
                 if (i > 0) r << ",";
-                r << "\"" << resp.pipes[i] << "\"";
+                r << "\"" << resp.items[i] << "\"";
             }
             r << "]}";
             res.set_content(jrpcResult(id, r.str()), "application/json");
@@ -523,22 +526,97 @@ int main(int argc, char* argv[]) {
     });
     std::cout << "[BASE] Push: /push" << std::endl;
 
-    // Redirect root to main.html
+    // Binary pull endpoint: GET /pull?name=xxx&file=xxx with Authorization header
+    svr.Get("/pull", [&service, &data_area](const httplib::Request& req, httplib::Response& res) {
+        // Get JWT from Authorization header
+        std::string auth = req.get_header_value("Authorization");
+        std::string jwt;
+        if (auth.substr(0, 7) == "Bearer ") {
+            jwt = auth.substr(7);
+        }
+        if (jwt.empty()) {
+            res.status = 401;
+            res.set_content("Unauthorized", "text/plain");
+            return;
+        }
+
+        // Get name and file from query params
+        std::string name = req.get_param_value("name");
+        std::string file = req.get_param_value("file");
+        if (name.empty() || file.empty()) {
+            res.status = 400;
+            res.set_content("Missing name or file param", "text/plain");
+            return;
+        }
+
+        // Verify JWT and get claims
+        auto claims = base::jwt::decode(jwt, service.getSigningPubkey());
+        if (!claims || claims->itag.empty()) {
+            res.status = 401;
+            res.set_content("Invalid JWT", "text/plain");
+            return;
+        }
+
+        // Validate name and file to prevent path traversal
+        auto validPath = [](const std::string& s) {
+            if (s.empty() || s.size() > 255) return false;
+            if (s.find("..") != std::string::npos) return false;
+            if (s.find('/') != std::string::npos) return false;
+            if (s.find('\\') != std::string::npos) return false;
+            return true;
+        };
+        if (!validPath(name) || !validPath(file)) {
+            res.status = 400;
+            res.set_content("Invalid name or file", "text/plain");
+            return;
+        }
+
+        // Build file path: var/LABS/<itag>/pipe/<name>/<file>
+        std::string file_path = data_area + "LABS/" + claims->itag + "/pipe/" + name + "/" + file;
+
+        // Read file
+        FILE* f = fopen(file_path.c_str(), "rb");
+        if (!f) {
+            res.status = 404;
+            res.set_content("File not found", "text/plain");
+            return;
+        }
+
+        fseek(f, 0, SEEK_END);
+        size_t size = ftell(f);
+        fseek(f, 0, SEEK_SET);
+
+        std::string content(size, '\0');
+        size_t read = fread(&content[0], 1, size, f);
+        fclose(f);
+
+        if (read != size) {
+            res.status = 500;
+            res.set_content("Read error", "text/plain");
+            return;
+        }
+
+        // Determine content type
+        std::string content_type = "application/octet-stream";
+        if (file.size() > 5 && file.substr(file.size() - 5) == ".json") {
+            content_type = "application/json";
+        }
+
+        res.set_content(content, content_type);
+    });
+    std::cout << "[BASE] Pull: /pull" << std::endl;
+
+    // Redirect root to labs.html
     svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
-        res.set_redirect("/main.html");
+        res.set_redirect("/labs.html");
     });
 
     // Static file serving
-    if (!cfg.www_path.empty()) {
-        std::string www_root = cfg.www_path;
-        // If relative path, resolve relative to data_area
-        if (!www_root.empty() && www_root[0] != '/') {
-            www_root = data_area + www_root;
-        }
-        if (svr.set_mount_point("/", www_root)) {
-            std::cout << "[BASE] WWW: " << www_root << std::endl;
+    if (!wasm_root.empty()) {
+        if (svr.set_mount_point("/", wasm_root)) {
+            std::cout << "[BASE] WWW: " << wasm_root << std::endl;
         } else {
-            std::cerr << "[BASE] Warning: Failed to mount www: " << www_root << std::endl;
+            std::cerr << "[BASE] Warning: Failed to mount www: " << wasm_root << std::endl;
         }
     }
 
