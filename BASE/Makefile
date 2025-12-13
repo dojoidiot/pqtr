@@ -33,7 +33,7 @@ LIB_OBJS = $(TMP_DIR)/http.o $(TMP_DIR)/crypto.o $(TMP_DIR)/jwt.o \
 
 # Output
 LIB_TARGET = $(TMP_DIR)/base.a
-HOST_TARGET = bin/base
+HOST_TARGET = tmp/base
 
 .PHONY: all clean
 
@@ -42,13 +42,10 @@ all: $(HOST_TARGET)
 $(TMP_DIR):
 	@mkdir -p $(TMP_DIR)
 
-bin:
-	@mkdir -p bin
-
 $(LIB_TARGET): $(LIB_OBJS) $(SQLITE_OBJ) | $(TMP_DIR)
 	$(AR) $(ARFLAGS) $@ $^
 
-$(HOST_TARGET): $(SRC_DIR)/base.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR) bin
+$(HOST_TARGET): $(SRC_DIR)/base.cpp $(LIB_TARGET) $(SODIUM_LIB) | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) -DCPPHTTPLIB_OPENSSL_SUPPORT $(INCLUDES) $< $(LIB_TARGET) $(SODIUM_LIB) -lpthread -ldl -lssl -lcrypto -o $@
 
 $(SQLITE_OBJ): $(SQLITE_DIR)/sqlite3.c | $(TMP_DIR)
@@ -73,4 +70,4 @@ $(TMP_DIR)/console.o: $(SRC_DIR)/plug/console.cpp $(INC_DIR)/mail.hpp | $(TMP_DI
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
 clean:
-	rm -rf $(TMP_DIR) bin/base
+	rm -rf $(TMP_DIR)

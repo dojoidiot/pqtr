@@ -1,7 +1,7 @@
 {
     "host": "127.0.0.1",
     "port": 4040,
-    "www_path": "../../BASE/www",
+    "www_path": "../../BASE/tmp",
     "jrpc_path": "/jrpc",
     "sqlite": {
         "file": "BASE/base.db"

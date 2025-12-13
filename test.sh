@@ -22,7 +22,8 @@ printf "Building BASE... "
 make -s -C BASE
 echo "done"
 
-cp LABS/tmp/wasm/labs.* BASE/www/
+cp LABS/tmp/wasm/labs.* BASE/tmp/
+cp BASE/www/main.* BASE/tmp/
 mkdir -p BASE/var/BASE BASE/var/LABS
 
 echo ""
@@ -31,4 +32,4 @@ echo ""
 echo "Test mode: Enter any email, OTP prints to console"
 echo ""
 
-BASE/bin/base --info-file BASE/etc/test.json --data-area BASE/var --test
+BASE/tmp/base --info-file BASE/etc/test.json --data-area BASE/var --test
