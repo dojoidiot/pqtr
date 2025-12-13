@@ -1,0 +1,5 @@
+# Build dependencies (fetched by dawn's bootstrap)
+lib/depot_tools/
+
+# Build artifacts
+tmp/
