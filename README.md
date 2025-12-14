@@ -170,18 +170,40 @@ Reference documentation is in [docs/](docs/).
 
 ### Directory Structure (FHS-inspired)
 
+Every project follows this structure:
+
 ```
 PROJECT/
 ├── inc/          # Public headers (API only)
 ├── src/
-│   ├── main/     # Implementation
-│   └── test/     # Tests (one file per module)
+│   ├── main/     # Implementation (.cpp)
+│   ├── test/     # Tests
+│   │   └── dawn/ # GPU shader tests (Dawn backend)
+│   └── wgsl/     # WGSL compute shaders
 ├── lib/          # Dependencies (git submodules)
-├── bin/          # Executables
 ├── tmp/          # Build artifacts (gitignored)
 ├── var/          # Runtime data (gitignored)
 ├── etc/          # Configuration files
+├── Makefile      # Build system (one per project)
 └── README.md     # Project documentation
+```
+
+### Makefile Targets
+
+Every project has exactly **one Makefile** with these standard targets:
+
+| Target | Purpose |
+|--------|---------|
+| `make` | Build the project (default) |
+| `make test` | Run tests |
+| `make tidy` | Clean build artifacts |
+
+Example:
+```bash
+cd PIPE
+make        # Build lib/pipe.a
+make test   # Run WGSL shader tests
+make tidy   # Remove tmp/ and build outputs
 ```
 
 ### Naming Conventions
@@ -208,8 +230,26 @@ PROJECT/
 
 - One public header per module: `inc/pipe.hpp`
 - Implementation matches header: `src/main/pipe.cpp`
-- Test matches module: `src/test/pipe.cpp`
-- Build to `tmp/`, install to `bin/`
+- WGSL shaders in: `src/wgsl/*.wgsl`
+- Dawn GPU tests in: `src/test/dawn/`
+- Build artifacts to `tmp/`, never `bin/`
+
+### Gitignore
+
+One root `.gitignore` for the entire project:
+
+| Pattern | Purpose |
+|---------|---------|
+| `tmp/` | Build artifacts (all projects) |
+| `var/` | Runtime data (databases, logs) |
+| `*.o`, `*.a` | Object files and static libraries |
+| `*.db`, `*.log`, `*.pid` | Runtime files |
+| `__pycache__/`, `.venv/` | Python artifacts |
+| `.env-*` | Environment files |
+| `WGPU/lib/depot_tools/` | Dawn build dependency |
+| `dark/` | External darktable project |
+
+No project-specific `.gitignore` files — all rules in root.
 
 ## Development
 

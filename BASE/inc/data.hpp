@@ -58,6 +58,7 @@ public:
     virtual bool checkVerifyRateLimit(const std::string& email) = 0;
     virtual void recordVerifyAttempt(const std::string& email) = 0;
     virtual void clearVerifyAttempts(const std::string& email) = 0;
+    virtual void clearAllRateLimits() = 0;  // For test mode
 
     // Signing key persistence (prevents key drift on restart)
     virtual bool getSigningKeys(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) = 0;

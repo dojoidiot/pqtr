@@ -3,6 +3,7 @@
 #include "base.hpp"
 #include "httplib.h"
 #include <iostream>
+#include <cstdio>
 #include <fstream>
 #include <sstream>
 #include <cstdlib>
@@ -296,6 +297,12 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "[BASE] Database: " << db_path << std::endl;
 
+    // In test mode, clear rate limits on startup to avoid lockouts during dev
+    if (test_mode) {
+        store->clearAllRateLimits();
+        std::cout << "[BASE] Rate limits: cleared (test mode)" << std::endl;
+    }
+
     std::unique_ptr<base::Mailer> mailer;
     if (test_mode) {
         mailer = base::createConsoleMailer();
@@ -345,6 +352,11 @@ int main(int argc, char* argv[]) {
         const std::string& body = req.body;
         std::string id = extractId(body);
         std::string method = extractString(body, "method");
+
+        // NOTE: Use printf+fflush, NOT iostream. httplib runs handlers in worker
+        // threads where cout/cerr buffer unpredictably and logs may never appear.
+        printf("[JRPC] method=%s\n", method.c_str());
+        fflush(stdout);
 
         if (body.find("\"jsonrpc\"") == std::string::npos || body.find("\"2.0\"") == std::string::npos) {
             res.set_content(jrpcError(id, -32600, "Invalid Request"), "application/json");
@@ -663,7 +675,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    std::cout << "[BASE] Listening on " << cfg.host << ":" << cfg.port << std::endl;
+    std::cout << "[BASE] Listening on " << cfg.host << ":" << cfg.port << " (v2-debug)" << std::endl;
     if (!svr.listen(cfg.host, cfg.port)) {
         std::cerr << "[BASE] Failed to start server" << std::endl;
         return 1;

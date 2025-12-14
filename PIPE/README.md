@@ -263,6 +263,109 @@ PIPE/
 g++ -std=c++17 -I./inc src/main/pipe.cpp src/main/part/pipe/node.cpp -c
 ```
 
+## pipe.json Format
+
+The pipe configuration is stored as `<basename>.pipe.json` alongside the RAW file. This is the source of truth for the tune process.
+
+### Structure
+
+```json
+{
+  "info": {
+    "file": "DSC01234.ARW",
+    ...camera metadata after GEAR
+  },
+  "tune": {
+    "step": ["gear", "lute", ...]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `info.file` | string | Source RAW filename |
+| `info.*` | various | Camera metadata (populated by GEAR) |
+| `tune.step` | array | Completed tune steps |
+
+### Lifecycle
+
+**1. After Load RAW** - Initial creation:
+
+```json
+{
+  "info": {
+    "file": "DSC01234.ARW"
+  },
+  "tune": {
+    "step": []
+  }
+}
+```
+
+**2. After GEAR step** - Camera metadata added:
+
+```json
+{
+  "info": {
+    "file": "DSC01234.ARW",
+    "camera_model": "ILCE-7M3",
+    "width": 6000,
+    "height": 4000
+  },
+  "tune": {
+    "step": ["gear"]
+  }
+}
+```
+
+**3. After LUTE step** - Camera profile learned:
+
+```json
+{
+  "info": {
+    "file": "DSC01234.ARW",
+    "camera_model": "ILCE-7M3",
+    "width": 6000,
+    "height": 4000
+  },
+  "tune": {
+    "step": ["gear", "lute"],
+    "lute": {
+      ...learned camera profile parameters
+    }
+  }
+}
+```
+
+**4. After VIBE step** - Style learned:
+
+```json
+{
+  "info": { ... },
+  "tune": {
+    "step": ["gear", "lute", "vibe"],
+    "lute": { ... },
+    "vibe": {
+      ...51 dial values
+    }
+  }
+}
+```
+
+### Sidecar Files
+
+All sidecars follow `<basename>.<type>` naming:
+
+| File | Content |
+|------|---------|
+| `<basename>.ARW` | Source RAW file |
+| `<basename>.pipe.json` | Pipe configuration (source of truth) |
+| `<basename>.png` | Camera preview (tune target) |
+
+### Re-running
+
+The pipe can be re-run at any time. The `tune.step` array tracks what's been done, but there's no status - steps are simply present or not. Running tune again will re-execute all steps.
+
 ## See Also
 
 - [GEAR](../GEAR/README.md) - `gear::read()` RAW decoder

@@ -1,4 +1,9 @@
-# BASE - Web server + JWT Auth Service
+# BASE Makefile - Web server + JWT Auth Service
+#
+# Targets:
+#   make      Build base server
+#   make test Run tests (placeholder)
+#   make tidy Clean build artifacts
 
 CXX = g++
 CC = gcc
@@ -35,9 +40,17 @@ LIB_OBJS = $(TMP_DIR)/http.o $(TMP_DIR)/crypto.o $(TMP_DIR)/jwt.o \
 LIB_TARGET = $(TMP_DIR)/base.a
 HOST_TARGET = tmp/base
 
-.PHONY: all clean
+.PHONY: all test tidy help
 
 all: $(HOST_TARGET)
+
+help:
+	@echo "BASE Build System"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make      Build base server"
+	@echo "  make test Run tests"
+	@echo "  make tidy Clean build artifacts"
 
 $(TMP_DIR):
 	@mkdir -p $(TMP_DIR)
@@ -69,5 +82,8 @@ $(TMP_DIR)/mailgun.o: $(SRC_DIR)/plug/mailgun.cpp $(INC_DIR)/mail.hpp | $(TMP_DI
 $(TMP_DIR)/console.o: $(SRC_DIR)/plug/console.cpp $(INC_DIR)/mail.hpp | $(TMP_DIR)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
-clean:
-	rm -rf $(TMP_DIR)
+test:
+	@echo "BASE: No tests implemented yet"
+
+tidy:
+	rm -rf $(TMP_DIR) tmp/base

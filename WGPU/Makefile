@@ -23,9 +23,17 @@ DAWN_INC = -I./inc \
 # Add depot_tools to PATH for gclient
 export PATH := $(CURDIR)/$(DEPOT_TOOLS):$(PATH)
 
-.PHONY: make tidy deps
+.PHONY: all test tidy deps help
 
-make: $(DAWN_A)
+help:
+	@echo "WGPU Build System"
+	@echo ""
+	@echo "Targets:"
+	@echo "  make      Build Dawn library"
+	@echo "  make test Run tests"
+	@echo "  make tidy Clean build artifacts"
+
+all: $(DAWN_A)
 
 # Compile our wrapper
 $(DAWN_O): src/dawn.cpp inc/dawn.hpp | $(BUILD_DIR)/src/dawn/native/libdawn_native.a
@@ -63,6 +71,9 @@ deps:
 		cd $(DAWN_SRC) && cp scripts/standalone.gclient .gclient && gclient sync; \
 		touch $(DAWN_SRC)/.gclient_done; \
 	fi
+
+test:
+	@echo "WGPU: No tests implemented yet"
 
 tidy:
 	rm -rf $(BUILD_DIR) $(DAWN_A) tmp/

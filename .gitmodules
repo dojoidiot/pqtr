@@ -1,6 +1,3 @@
-[submodule "PIPE/lib/opencv"]
-	path = PIPE/lib/opencv
-	url = https://github.com/opencv/opencv.git
 [submodule "LABS/lib/imgui"]
 	path = LABS/lib/imgui
 	url = https://github.com/ocornut/imgui.git

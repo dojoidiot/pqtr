@@ -4,22 +4,14 @@
 #      bash test.sh clean  - full rebuild
 set -e
 
-printf "Setting up emsdk... "
-source LABS/env.sh > /dev/null 2>&1
-echo "done"
-
 if [ "$1" = "clean" ]; then
     printf "Cleaning... "
-    rm -rf LABS/tmp BASE/tmp
+    make tidy
     echo "done"
 fi
 
-printf "Building LABS... "
-make -s -C LABS -f Makefile.wasm
-echo "done"
-
-printf "Building BASE... "
-make -s -C BASE
+printf "Building... "
+make -s
 echo "done"
 
 mkdir -p BASE/var/BASE BASE/var/LABS

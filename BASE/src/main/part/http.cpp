@@ -1,11 +1,13 @@
 // http.cpp - HTTP service handlers
+//
+// NOTE: Use printf+fflush for logging, NOT iostream. httplib runs handlers
+// in worker threads where cout/cerr buffer unpredictably.
 
 #include "base.hpp"
 #include "itag.hpp"
 #include <sodium.h>
 #include <ctime>
 #include <cstdio>
-#include <iostream>
 #include <sys/stat.h>
 #include <dirent.h>
 #include <cerrno>
@@ -41,22 +43,22 @@ bool Service::init() {
 
     // Try to load existing signing keys from database
     if (m_store.getSigningKeys(m_signing_pubkey, m_signing_privkey)) {
-        std::cerr << "[init] Signing keys loaded from database" << std::endl;
+        printf("[init] Signing keys loaded from database\n"); fflush(stdout);
         return true;
     }
 
     // Generate new signing keypair
-    std::cerr << "[init] Generating new signing keys..." << std::endl;
+    printf("[init] Generating new signing keys...\n"); fflush(stdout);
     if (!crypto::generateKeypair(m_signing_pubkey, m_signing_privkey)) {
-        std::cerr << "[init] FAIL: Could not generate signing keys" << std::endl;
+        printf("[init] FAIL: Could not generate signing keys\n"); fflush(stdout);
         return false;
     }
 
     // Persist keys to database
     if (m_store.setSigningKeys(m_signing_pubkey, m_signing_privkey)) {
-        std::cerr << "[init] Signing keys saved to database" << std::endl;
+        printf("[init] Signing keys saved to database\n"); fflush(stdout);
     } else {
-        std::cerr << "[init] WARNING: Could not save signing keys!" << std::endl;
+        printf("[init] WARNING: Could not save signing keys!\n"); fflush(stdout);
     }
 
     return true;
@@ -65,11 +67,11 @@ bool Service::init() {
 rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     rpc::RegisterResponse resp{};
 
-    std::cerr << "[register] email=" << req.email << std::endl;
+    printf("[register] email=%s\n", req.email.c_str()); fflush(stdout);
 
     // Rate limit check
     if (!m_store.checkOtpRateLimit(req.email)) {
-        std::cerr << "[register] FAIL: rate limit exceeded" << std::endl;
+        printf("[register] FAIL: rate limit exceeded\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
@@ -78,12 +80,12 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     auto existing = m_store.getUserByEmail(req.email);
     if (existing) {
         if (existing->locked) {
-            std::cerr << "[register] FAIL: user locked" << std::endl;
+            printf("[register] FAIL: user locked\n"); fflush(stdout);
             resp.ok = false;
             return resp;
         }
         // Existing user - send login OTP
-        std::cerr << "[register] existing user, forwarding to login" << std::endl;
+        printf("[register] existing user, forwarding to login\n"); fflush(stdout);
         auto login_resp = handleLogin({req.email});
         resp.ok = login_resp.ok;
         resp.expires = login_resp.expires;
@@ -109,21 +111,21 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
 
     // Store new OTP
     if (!m_store.createOtp(otp)) {
-        std::cerr << "[register] FAIL: createOtp failed" << std::endl;
+        printf("[register] FAIL: createOtp failed\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
 
     // Send OTP email
-    std::cerr << "[register] sending OTP..." << std::endl;
+    printf("[register] sending OTP...\n"); fflush(stdout);
     if (!m_mailer.sendOtp(req.email, otp_code)) {
-        std::cerr << "[register] FAIL: sendOtp failed" << std::endl;
+        printf("[register] FAIL: sendOtp failed\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
         resp.ok = false;
         return resp;
     }
 
-    std::cerr << "[register] OK" << std::endl;
+    printf("[register] OK\n"); fflush(stdout);
     resp.ok = true;
     resp.expires = 600;
     return resp;
@@ -132,20 +134,26 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
 rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     rpc::VerifyResponse resp{};
 
+    printf("[verify] email=%s otp=%s (len=%zu)\n", req.email.c_str(), req.otp.c_str(), req.otp.size()); fflush(stdout);
+
     // Rate limit check - prevent brute force OTP guessing
     if (!m_store.checkVerifyRateLimit(req.email)) {
+        printf("[verify] FAIL: rate limit exceeded\n"); fflush(stdout);
         return resp;  // Too many attempts
     }
 
     // Get OTP
     auto otp = m_store.getOtp(req.email);
     if (!otp) {
+        printf("[verify] FAIL: no OTP found for email=%s\n", req.email.c_str()); fflush(stdout);
         return resp;  // No OTP found
     }
+    printf("[verify] DB has code=%s (len=%zu)\n", otp->code.c_str(), otp->code.size()); fflush(stdout);
 
     // Check expiration
     int64_t now = static_cast<int64_t>(std::time(nullptr));
     if (otp->expires_at < now) {
+        printf("[verify] FAIL: OTP expired\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
         return resp;  // Expired
     }
@@ -156,8 +164,11 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     // Verify OTP code (constant-time comparison)
     if (otp->code.size() != req.otp.size() ||
         sodium_memcmp(otp->code.c_str(), req.otp.c_str(), otp->code.size()) != 0) {
+        printf("[verify] FAIL: wrong OTP code\n"); fflush(stdout);
         return resp;  // Wrong code
     }
+
+    printf("[verify] OTP valid\n"); fflush(stdout);
 
     // Clear rate limit on successful verification
     m_store.clearVerifyAttempts(req.email);
@@ -230,11 +241,11 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
 rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     rpc::LoginResponse resp{};
 
-    std::cerr << "[login] email=" << req.email << std::endl;
+    printf("[login] email=%s\n", req.email.c_str()); fflush(stdout);
 
     // Rate limit check
     if (!m_store.checkOtpRateLimit(req.email)) {
-        std::cerr << "[login] FAIL: rate limit exceeded" << std::endl;
+        printf("[login] FAIL: rate limit exceeded\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
@@ -242,14 +253,14 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     // Check if user exists
     auto existing = m_store.getUserByEmail(req.email);
     if (!existing) {
-        std::cerr << "[login] FAIL: user not found" << std::endl;
+        printf("[login] FAIL: user not found\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
 
     // Check if account is locked
     if (existing->locked) {
-        std::cerr << "[login] FAIL: user locked" << std::endl;
+        printf("[login] FAIL: user locked\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
@@ -273,21 +284,21 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
 
     // Store new OTP
     if (!m_store.createOtp(otp)) {
-        std::cerr << "[login] FAIL: createOtp failed" << std::endl;
+        printf("[login] FAIL: createOtp failed\n"); fflush(stdout);
         resp.ok = false;
         return resp;
     }
 
     // Send OTP email
-    std::cerr << "[login] sending OTP..." << std::endl;
+    printf("[login] sending OTP...\n"); fflush(stdout);
     if (!m_mailer.sendOtp(req.email, otp_code)) {
-        std::cerr << "[login] FAIL: sendOtp failed" << std::endl;
+        printf("[login] FAIL: sendOtp failed\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
         resp.ok = false;
         return resp;
     }
 
-    std::cerr << "[login] OK" << std::endl;
+    printf("[login] OK\n"); fflush(stdout);
     resp.ok = true;
     resp.expires = 600;
     return resp;
@@ -450,19 +461,19 @@ bool Service::verifyBootstrapToken(const std::string& token) {
 rpc::ListResponse Service::handleList(const rpc::ListRequest& req) {
     rpc::ListResponse resp{};
 
-    std::cerr << "[list] jwt_len=" << req.jwt.size() << " name=" << req.name << std::endl;
+    printf("[list] jwt_len=%zu name=%s\n", req.jwt.size(), req.name.c_str()); fflush(stdout);
 
     // Verify JWT and extract itag
     auto claims = jwt::decode(req.jwt, m_signing_pubkey);
     if (!claims) {
-        std::cerr << "[list] FAIL: JWT decode failed" << std::endl;
+        printf("[list] FAIL: JWT decode failed\n"); fflush(stdout);
         return resp;
     }
     if (!itag::valid(claims->itag)) {
-        std::cerr << "[list] FAIL: invalid itag=" << claims->itag << std::endl;
+        printf("[list] FAIL: invalid itag=%s\n", claims->itag.c_str()); fflush(stdout);
         return resp;
     }
-    std::cerr << "[list] itag=" << claims->itag << std::endl;
+    printf("[list] itag=%s\n", claims->itag.c_str()); fflush(stdout);
 
     if (m_data_area.empty()) {
         resp.ok = true;

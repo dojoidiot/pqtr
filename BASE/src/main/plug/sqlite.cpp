@@ -4,6 +4,7 @@
 #include <sqlite3.h>
 #include <cstring>
 #include <ctime>
+#include <iostream>
 
 namespace base {
 
@@ -299,7 +300,10 @@ public:
         int64_t cutoff = static_cast<int64_t>(std::time(nullptr)) - 600;  // 10 min window
         const char* sql = "SELECT COUNT(*) FROM rate_limits WHERE email = ? AND action = 'otp' AND timestamp > ?;";
         sqlite3_stmt* stmt = nullptr;
-        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) return false;
+        if (sqlite3_prepare_v2(m_db, sql, -1, &stmt, nullptr) != SQLITE_OK) {
+            std::cerr << "[sqlite] checkOtpRateLimit prepare failed" << std::endl;
+            return false;
+        }
 
         sqlite3_bind_text(stmt, 1, email.c_str(), -1, SQLITE_TRANSIENT);
         sqlite3_bind_int64(stmt, 2, cutoff);
@@ -373,6 +377,10 @@ public:
 
         sqlite3_step(stmt);
         sqlite3_finalize(stmt);
+    }
+
+    void clearAllRateLimits() override {
+        sqlite3_exec(m_db, "DELETE FROM rate_limits;", nullptr, nullptr, nullptr);
     }
 
     bool getSigningKeys(std::vector<uint8_t>& pubkey, std::vector<uint8_t>& privkey) override {
