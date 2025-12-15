@@ -43,13 +43,13 @@ namespace jwt {
 
 namespace rpc {
     struct RegisterRequest { std::string email; };
-    struct RegisterResponse { bool ok; int expires; };
+    struct RegisterResponse { bool ok; int expires; std::string error; };
 
     struct VerifyRequest { std::string email; std::string otp; };
-    struct VerifyResponse { std::string jwt; std::string refresh_token; std::string user_id; std::string itag; std::string role; };
+    struct VerifyResponse { std::string jwt; std::string refresh_token; std::string user_id; std::string itag; std::string role; std::string error; };
 
     struct LoginRequest { std::string email; };
-    struct LoginResponse { bool ok; int expires; };
+    struct LoginResponse { bool ok; int expires; std::string error; };
 
     struct RefreshRequest { std::string refresh_token; };
     struct RefreshResponse { std::string jwt; };

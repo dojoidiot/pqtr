@@ -1,0 +1,4 @@
+# SSH keys
+etc/ssh/*.skey*
+etc/ssh/*.pub
+etc/ssh/*-cert.pub

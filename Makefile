@@ -1,25 +1,41 @@
 # PQTR Makefile
-#
-# Usage:
-#   make        Build all projects
-#   make test   Build and run test server (calls test.sh)
-#   make tidy   Clean all build artifacts
+.PHONY: all pack test tidy labs base
 
-.PHONY: all test tidy labs base
+PACK_DIR = tmp/pack
 
-all: labs base
+# Build and pack
+all: labs base pack
 
+# Build LABS (WebAssembly app)
 labs:
+	@echo "=== Building LABS ==="
 	$(MAKE) -C LABS
 
+# Build BASE (native server)
 base:
+	@echo "=== Building BASE ==="
 	$(MAKE) -C BASE
 
-test:
-	@./test.sh
+# Pack deployment package
+pack: labs base
+	@echo "=== Packing ==="
+	@mkdir -p $(PACK_DIR)/bin $(PACK_DIR)/etc $(PACK_DIR)/www $(PACK_DIR)/var/BASE $(PACK_DIR)/var/LABS
+	@cp BASE/tmp/base $(PACK_DIR)/bin/
+	@cp BASE/bin/base.sh $(PACK_DIR)/bin/
+	@cp BASE/etc/*.json $(PACK_DIR)/etc/ 2>/dev/null || true
+	@cp LABS/tmp/wasm/* $(PACK_DIR)/www/
+	@echo "Packed to $(PACK_DIR)/"
 
+# Run tests
+test:
+	@echo "=== LABS Unit Tests ==="
+	$(MAKE) -C LABS test
+	@echo "=== BASE Unit Tests ==="
+	$(MAKE) -C BASE test
+
+# Clean all
 tidy:
-	$(MAKE) -C LABS tidy 2>/dev/null || true
-	$(MAKE) -C BASE tidy 2>/dev/null || true
-	rm -rf tmp/test
-	rm -f BASE/www/labs.html BASE/www/labs.js BASE/www/labs.wasm
+	@echo "=== Tidying ==="
+	$(MAKE) -C LABS tidy || true
+	$(MAKE) -C BASE tidy || true
+	rm -rf tmp

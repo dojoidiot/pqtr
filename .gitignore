@@ -16,8 +16,13 @@ __pycache__/
 # Environment
 .env-*
 
-# WGPU build dependencies
-WGPU/lib/depot_tools/
+# Ignore all subdirectories in lib/ by default
+lib/*/
+
+# Dawn build artifacts (inside submodule)
+LABS/lib/dawn/build/
+LABS/lib/dawn/install/
+LABS/lib/dawn/out/
 
 # Dark (external project)
 dark/

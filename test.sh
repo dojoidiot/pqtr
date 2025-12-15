@@ -1,5 +1,5 @@
 #!/bin/bash
-# test.sh - Build and run in test mode
+# test.sh - Build, pack, and run in test mode
 # Use: bash test.sh        - incremental build
 #      bash test.sh clean  - full rebuild
 set -e
@@ -10,11 +10,9 @@ if [ "$1" = "clean" ]; then
     echo "done"
 fi
 
-printf "Building... "
-make -s
+printf "Building and packing... "
+make
 echo "done"
-
-mkdir -p BASE/var/BASE BASE/var/LABS
 
 echo ""
 echo "http://127.0.0.1:4040"
@@ -22,4 +20,4 @@ echo ""
 echo "Test mode: Enter any email, OTP prints to console"
 echo ""
 
-BASE/tmp/base --info-file BASE/etc/test.json --data-area BASE/var --wasm-root LABS/tmp/wasm --test
+tmp/pack/bin/base --info-file tmp/pack/etc/test.json --data-area tmp/pack/var --wasm-root tmp/pack/www --test

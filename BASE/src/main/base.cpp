@@ -17,7 +17,6 @@ namespace {
 struct Config {
     std::string host;
     int port = 0;
-    std::string jrpc_path;
     std::string boot_path;
     std::string admin_email;
     std::string boot_email;
@@ -106,7 +105,6 @@ bool loadConfig(const std::string& path, Config& cfg) {
 
     if (!(s = getString("host")).empty()) cfg.host = s;
     if ((i = getInt("port")) > 0) cfg.port = i;
-    if (!(s = getString("jrpc_path")).empty()) cfg.jrpc_path = s;
     if (!(s = getString("boot_path")).empty()) cfg.boot_path = s;
     if (!(s = getString("admin_email")).empty()) cfg.admin_email = s;
     if (!(s = getString("boot_email")).empty()) cfg.boot_email = s;
@@ -253,10 +251,6 @@ int main(int argc, char* argv[]) {
         std::cerr << "[BASE] Error: port required in config" << std::endl;
         return 1;
     }
-    if (cfg.jrpc_path.empty()) {
-        std::cerr << "[BASE] Error: jrpc_path required in config" << std::endl;
-        return 1;
-    }
     if (cfg.sqlite_file.empty()) {
         std::cerr << "[BASE] Error: sqlite.file required in config" << std::endl;
         return 1;
@@ -347,11 +341,18 @@ int main(int argc, char* argv[]) {
 
     httplib::Server svr;
 
-    svr.Post(cfg.jrpc_path, [&service](const httplib::Request& req, httplib::Response& res) {
+    svr.Post("/jrpc", [&service](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Content-Type", "application/json");
         const std::string& body = req.body;
         std::string id = extractId(body);
         std::string method = extractString(body, "method");
+
+        // Get JWT from Authorization header for all authenticated requests
+        std::string jwt;
+        std::string auth = req.get_header_value("Authorization");
+        if (auth.rfind("Bearer ", 0) == 0) {
+            jwt = auth.substr(7);
+        }
 
         // NOTE: Use printf+fflush, NOT iostream. httplib runs handlers in worker
         // threads where cout/cerr buffer unpredictably and logs may never appear.
@@ -371,12 +372,16 @@ int main(int argc, char* argv[]) {
         std::string p_otp = extractString(body, "otp");
         std::string p_refresh = extractString(body, "refresh_token");
         std::string p_user_id = extractString(body, "user_id");
-        std::string p_jwt = extractString(body, "jwt");
         std::string p_role = extractString(body, "role");
 
         if (method == "register") {
             if (p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing email"), "application/json"); return; }
             auto resp = service.handleRegister({p_email});
+            if (!resp.ok) {
+                const std::string& err_msg = resp.error.empty() ? "Registration failed" : resp.error;
+                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
+                return;
+            }
             std::ostringstream r; r << "{\"ok\":" << (resp.ok ? "true" : "false");
             if (resp.ok) r << ",\"expires\":" << resp.expires;
             r << "}";
@@ -385,7 +390,12 @@ int main(int argc, char* argv[]) {
         } else if (method == "verify") {
             if (p_email.empty() || p_otp.empty()) { res.set_content(jrpcError(id, -32602, "Missing email or otp"), "application/json"); return; }
             auto resp = service.handleVerify({p_email, p_otp});
-            if (resp.jwt.empty()) { res.set_content(jrpcError(id, -32001, "Verification failed"), "application/json"); return; }
+            if (resp.jwt.empty()) {
+                const std::string& err_msg = resp.error.empty() ? "Verification failed: Unspecified error in handleVerify" : resp.error;
+                printf("[JRPC] verify FAIL: %s\n", err_msg.c_str()); fflush(stdout);
+                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
+                return;
+            }
             std::ostringstream r;
             r << "{\"jwt\":" << jsonString(resp.jwt) << ",\"refresh_token\":" << jsonString(resp.refresh_token)
               << ",\"user_id\":" << jsonString(resp.user_id) << ",\"itag\":" << jsonString(resp.itag)
@@ -395,6 +405,11 @@ int main(int argc, char* argv[]) {
         } else if (method == "login") {
             if (p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing email"), "application/json"); return; }
             auto resp = service.handleLogin({p_email});
+            if (!resp.ok) {
+                const std::string& err_msg = resp.error.empty() ? "Login failed" : resp.error;
+                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
+                return;
+            }
             std::ostringstream r; r << "{\"ok\":" << (resp.ok ? "true" : "false");
             if (resp.ok) r << ",\"expires\":" << resp.expires;
             r << "}";
@@ -407,8 +422,8 @@ int main(int argc, char* argv[]) {
             res.set_content(jrpcResult(id, "{\"jwt\":" + jsonString(resp.jwt) + "}"), "application/json");
 
         } else if (method == "find") {
-            if (p_jwt.empty() || p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or email"), "application/json"); return; }
-            auto resp = service.handleFind({p_jwt, p_email});
+            if (jwt.empty() || p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or email"), "application/json"); return; }
+            auto resp = service.handleFind({jwt, p_email});
             if (resp.user_id.empty()) { res.set_content(jrpcError(id, -32001, "Not found"), "application/json"); return; }
             std::ostringstream r;
             r << "{\"user_id\":" << jsonString(resp.user_id) << ",\"email\":" << jsonString(resp.email)
@@ -417,33 +432,33 @@ int main(int argc, char* argv[]) {
             res.set_content(jrpcResult(id, r.str()), "application/json");
 
         } else if (method == "give") {
-            if (p_jwt.empty() || p_user_id.empty() || p_role.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleGive({p_jwt, p_user_id, p_role});
+            if (jwt.empty() || p_user_id.empty() || p_role.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
+            auto resp = service.handleGive({jwt, p_user_id, p_role});
             res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
 
         } else if (method == "take") {
-            if (p_jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleTake({p_jwt, p_user_id});
+            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
+            auto resp = service.handleTake({jwt, p_user_id});
             res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
 
         } else if (method == "lock") {
-            if (p_jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleLock({p_jwt, p_user_id});
+            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
+            auto resp = service.handleLock({jwt, p_user_id});
             res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
 
         } else if (method == "free") {
-            if (p_jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleFree({p_jwt, p_user_id});
+            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
+            auto resp = service.handleFree({jwt, p_user_id});
             res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
 
         } else if (method == "drop") {
-            if (p_jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleDrop({p_jwt, p_user_id});
+            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
+            auto resp = service.handleDrop({jwt, p_user_id});
             res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
 
         } else if (method == "info") {
-            if (p_jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
-            auto resp = service.handleInfo({p_jwt});
+            if (jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
+            auto resp = service.handleInfo({jwt});
             if (resp.total_users == 0 && resp.users_none == 0) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
             std::ostringstream r;
             r << "{\"total_users\":" << resp.total_users << ",\"users_none\":" << resp.users_none
@@ -453,8 +468,8 @@ int main(int argc, char* argv[]) {
 
         } else if (method == "list") {
             std::string p_name = extractString(body, "name");  // Optional
-            if (p_jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
-            auto resp = service.handleList({p_jwt, p_name});
+            if (jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
+            auto resp = service.handleList({jwt, p_name});
             if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
             std::ostringstream r;
             r << "{\"items\":[";
@@ -467,8 +482,8 @@ int main(int argc, char* argv[]) {
 
         } else if (method == "test") {
             std::string p_name = extractString(body, "name");
-            if (p_jwt.empty() || p_name.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or name"), "application/json"); return; }
-            auto resp = service.handleTest({p_jwt, p_name});
+            if (jwt.empty() || p_name.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or name"), "application/json"); return; }
+            auto resp = service.handleTest({jwt, p_name});
             if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
             res.set_content(jrpcResult(id, std::string("{\"exists\":") + (resp.exists ? "true" : "false") + "}"), "application/json");
 
@@ -513,7 +528,7 @@ int main(int argc, char* argv[]) {
         std::cout << "[BASE] Boot: " << cfg.boot_path << std::endl;
     }
 
-    std::cout << "[BASE] JRPC: " << cfg.jrpc_path << std::endl;
+    std::cout << "[BASE] JRPC: /jrpc" << std::endl;
 
     // Binary push endpoint: POST /push?name=xxx&file=xxx with Authorization header
     svr.Post("/push", [&service](const httplib::Request& req, httplib::Response& res) {
@@ -526,6 +541,7 @@ int main(int argc, char* argv[]) {
             jwt = auth.substr(7);
         }
         if (jwt.empty()) {
+            res.status = 401;
             res.set_content("{\"ok\":false,\"error\":\"Missing authorization\"}", "application/json");
             return;
         }
@@ -534,18 +550,26 @@ int main(int argc, char* argv[]) {
         std::string name = req.get_param_value("name");
         std::string file = req.get_param_value("file");
         if (name.empty() || file.empty()) {
+            res.status = 400;
             res.set_content("{\"ok\":false,\"error\":\"Missing name or file param\"}", "application/json");
             return;
         }
 
         // Binary body
         if (req.body.empty()) {
+            res.status = 400;
             res.set_content("{\"ok\":false,\"error\":\"Empty body\"}", "application/json");
             return;
         }
 
         auto resp = service.handlePush({jwt, name, file, req.body});
         if (!resp.ok) {
+            // Check if it's an auth error
+            if (resp.error == "Unauthorized" || resp.error.find("Invalid") != std::string::npos) {
+                res.status = 401;
+            } else {
+                res.status = 400;
+            }
             res.set_content("{\"ok\":false,\"error\":\"" + resp.error + "\"}", "application/json");
             return;
         }

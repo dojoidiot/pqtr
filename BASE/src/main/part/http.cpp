@@ -73,6 +73,7 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     if (!m_store.checkOtpRateLimit(req.email)) {
         printf("[register] FAIL: rate limit exceeded\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "Rate limit exceeded. Please wait a moment.";
         return resp;
     }
 
@@ -82,6 +83,7 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
         if (existing->locked) {
             printf("[register] FAIL: user locked\n"); fflush(stdout);
             resp.ok = false;
+            resp.error = "This account is locked.";
             return resp;
         }
         // Existing user - send login OTP
@@ -89,6 +91,7 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
         auto login_resp = handleLogin({req.email});
         resp.ok = login_resp.ok;
         resp.expires = login_resp.expires;
+        resp.error = login_resp.error;
         return resp;
     }
 
@@ -113,6 +116,7 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
     if (!m_store.createOtp(otp)) {
         printf("[register] FAIL: createOtp failed\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "Database error. Could not create login request.";
         return resp;
     }
 
@@ -122,6 +126,7 @@ rpc::RegisterResponse Service::handleRegister(const rpc::RegisterRequest& req) {
         printf("[register] FAIL: sendOtp failed\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
         resp.ok = false;
+        resp.error = "Failed to send login code.";
         return resp;
     }
 
@@ -139,14 +144,16 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     // Rate limit check - prevent brute force OTP guessing
     if (!m_store.checkVerifyRateLimit(req.email)) {
         printf("[verify] FAIL: rate limit exceeded\n"); fflush(stdout);
-        return resp;  // Too many attempts
+        resp.error = "Too many attempts. Please wait a moment.";
+        return resp;
     }
 
     // Get OTP
     auto otp = m_store.getOtp(req.email);
     if (!otp) {
         printf("[verify] FAIL: no OTP found for email=%s\n", req.email.c_str()); fflush(stdout);
-        return resp;  // No OTP found
+        resp.error = "No pending login found for that email. Please try again.";
+        return resp;
     }
     printf("[verify] DB has code=%s (len=%zu)\n", otp->code.c_str(), otp->code.size()); fflush(stdout);
 
@@ -155,7 +162,8 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     if (otp->expires_at < now) {
         printf("[verify] FAIL: OTP expired\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
-        return resp;  // Expired
+        resp.error = "Your one-time code has expired. Please try again.";
+        return resp;
     }
 
     // Record this verify attempt before checking (prevents timing attacks)
@@ -165,7 +173,8 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     if (otp->code.size() != req.otp.size() ||
         sodium_memcmp(otp->code.c_str(), req.otp.c_str(), otp->code.size()) != 0) {
         printf("[verify] FAIL: wrong OTP code\n"); fflush(stdout);
-        return resp;  // Wrong code
+        resp.error = "The code you entered is incorrect.";
+        return resp;
     }
 
     printf("[verify] OTP valid\n"); fflush(stdout);
@@ -189,6 +198,7 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
         user.created_at = now;
 
         if (!m_store.createUser(user)) {
+            resp.error = "Failed to create new user account.";
             return resp;
         }
 
@@ -205,6 +215,7 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
         // Login - get existing user
         auto existing = m_store.getUserByEmail(req.email);
         if (!existing) {
+            resp.error = "Could not find user account.";
             return resp;
         }
         user = *existing;
@@ -215,6 +226,7 @@ rpc::VerifyResponse Service::handleVerify(const rpc::VerifyRequest& req) {
     std::string token_hash = crypto::hashToken(refresh_token);
 
     if (!m_store.storeRefreshToken(user.id, token_hash)) {
+        resp.error = "Failed to store session.";
         return resp;
     }
 
@@ -247,6 +259,7 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     if (!m_store.checkOtpRateLimit(req.email)) {
         printf("[login] FAIL: rate limit exceeded\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "Rate limit exceeded. Please wait a moment.";
         return resp;
     }
 
@@ -255,6 +268,7 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     if (!existing) {
         printf("[login] FAIL: user not found\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "User account not found.";
         return resp;
     }
 
@@ -262,6 +276,7 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     if (existing->locked) {
         printf("[login] FAIL: user locked\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "This account is locked.";
         return resp;
     }
 
@@ -286,6 +301,7 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
     if (!m_store.createOtp(otp)) {
         printf("[login] FAIL: createOtp failed\n"); fflush(stdout);
         resp.ok = false;
+        resp.error = "Database error. Could not create login request.";
         return resp;
     }
 
@@ -295,6 +311,7 @@ rpc::LoginResponse Service::handleLogin(const rpc::LoginRequest& req) {
         printf("[login] FAIL: sendOtp failed\n"); fflush(stdout);
         m_store.deleteOtp(req.email);
         resp.ok = false;
+        resp.error = "Failed to send login code.";
         return resp;
     }
 

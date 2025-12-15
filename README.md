@@ -154,17 +154,24 @@ All metadata is indexed from JSON sidecars and camera EXIF data. You can downloa
 
 | Project | Purpose |
 |---------|---------|
-| [GEAR](GEAR/README.md) | Camera gear — RAW decoding, metadata, scene-linear normalization |
-| [LUTE](LUTE/README.md) | Camera profiles — learns gear manufacturer's color science |
-| [DRUM](DRUM/README.md) | Dynamic range — optimization for high-contrast scenes |
-| [VIBE](VIBE/README.md) | Creative styles — 51 adjustable dials for photographer expression |
-| [PIPE](PIPE/README.md) | Pipeline library — coordinates HEAD [GEAR] → BODY [LUTE,DRUM,VIBE] -> TAIL [POST] |
-| [POST](POST/README.md) | Distribution — platform plugins for Instagram, Email, SMS, etc. |
-| [WGPU](WGPU/README.md) | GPU compute — WebGPU/WGSL shaders for fast processing |
-| [LABS](LABS/README.md) | WASM app — Anywhere, any time, creating and editing vibes |
-| [BASE](BASE/README.md) | Web server — JWT auth + static site for pqtr.ai |
+| [LABS](LABS/README.md) | WASM application — the main PQTR interface, runs anywhere |
+| [BASE](BASE/README.md) | Web server — JWT auth + file storage for pqtr.ai |
+| [ZONE](ZONE/README.md) | Server management — hardening scripts for production nodes |
 
-Reference documentation is in [docs/](docs/).
+### LABS Internal Modules
+
+The pipeline modules are part of LABS (`LABS/src/main/`). Documentation in `LABS/doc/`:
+
+| Module | Doc | Purpose |
+|--------|-----|---------|
+| `gear/` | [gear.md](LABS/doc/gear.md) | RAW decoding, metadata extraction, scene-linear normalization |
+| `lute/` | [lute.md](LABS/doc/lute.md) | Camera profiles — learns manufacturer color science |
+| `drum/` | [drum.md](LABS/doc/drum.md) | Dynamic range optimization for high-contrast scenes |
+| `pipe/` | [pipe.md](LABS/doc/pipe.md) | Pipeline coordination — HEAD → BODY → TAIL |
+| `post/` | [post.md](LABS/doc/post.md) | Output formatting and distribution |
+| `wgpu/` | [wgpu.md](LABS/doc/wgpu.md) | GPU compute — WebGPU/WGSL shaders |
+| `vibe/` | [vibe.md](LABS/doc/vibe.md) | Creative styles — photographer expression |
+| `labs/` | — | UI and application logic (ImGui) |
 
 ## Code Standards
 
@@ -180,7 +187,7 @@ PROJECT/
 │   ├── test/     # Tests
 │   │   └── dawn/ # GPU shader tests (Dawn backend)
 │   └── wgsl/     # WGSL compute shaders
-├── lib/          # Dependencies (git submodules)
+├── lib/          # Dependencies (git submodules) are placed here. These dependencies are permitted to have their own dependencies (e.g., submodules) nested within their respective `lib/` directories, respecting their internal structure.
 ├── tmp/          # Build artifacts (gitignored)
 ├── var/          # Runtime data (gitignored)
 ├── etc/          # Configuration files
@@ -200,9 +207,8 @@ Every project has exactly **one Makefile** with these standard targets:
 
 Example:
 ```bash
-cd PIPE
-make        # Build lib/pipe.a
-make test   # Run WGSL shader tests
+cd LABS
+make        # Build WASM app
 make tidy   # Remove tmp/ and build outputs
 ```
 
@@ -246,12 +252,20 @@ One root `.gitignore` for the entire project:
 | `*.db`, `*.log`, `*.pid` | Runtime files |
 | `__pycache__/`, `.venv/` | Python artifacts |
 | `.env-*` | Environment files |
-| `WGPU/lib/depot_tools/` | Dawn build dependency |
-| `dark/` | External darktable project |
 
 No project-specific `.gitignore` files — all rules in root.
 
 ## Development
+
+### Build System
+
+The build system is designed with a **Wasm-first** principle. The primary target of the project is the `LABS` WebAssembly application, and the default `make` process is configured to support this.
+
+-   **Wasm-focused Libraries:** The core logic libraries, `GEAR` and `PIPE`, are compiled to WebAssembly-compatible archives (`.a` files containing LLVM bitcode) using the Emscripten toolchain (`em++`, `emar`). This allows them to be correctly linked by other Wasm-based projects like `LABS`.
+
+-   **Native Components:** The `BASE` server is an exception and is built as a standard native executable using `g++`, as it is intended to run server-side.
+
+-   **Orchestration:** The root `Makefile` manages the build process. Running `make` from the root directory will build both the `LABS` Wasm application and the native `BASE` server. The dependency chain (`GEAR` → `PIPE` → `LABS`) is handled automatically.
 
 **Prerequisites:** g++, make, git, autotools (for libsodium build)
 

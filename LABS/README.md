@@ -122,16 +122,16 @@ BASE/var/LABS/<itag>/pipe/<raw_name>/
 
 ```bash
 # From repository root
-make           # Wire + build + deploy to BASE/www
+make           # Build LABS + BASE, pack to tmp/pack/
+bash test.sh   # Build and run local server
 
 # Or from LABS directory
-make -f Makefile.wasm
-make -f Makefile.wasm deploy
+make           # Build WASM app to tmp/wasm/
 ```
 
 ## Output
 
-Built files are deployed to `BASE/www/`:
+Built files go to `tmp/wasm/`:
 - `labs.html` - Entry point
 - `labs.js` - Emscripten glue code
 - `labs.wasm` - WebAssembly binary
@@ -139,21 +139,32 @@ Built files are deployed to `BASE/www/`:
 ## Testing
 
 ```bash
-cd BASE/www && python3 -m http.server 8080
-# Open http://localhost:8080/main.html
+# From repository root
+bash test.sh   # Builds and starts server on http://127.0.0.1:4040
 ```
 
 ## Structure
 
 ```
 LABS/
+├── inc/                  # Public headers
 ├── lib/
 │   ├── imgui/            # ImGui library
 │   ├── glfw/             # GLFW (Emscripten maps to JS)
-│   └── ImGuiFileDialog/  # File dialog
-├── src/wasm/
-│   ├── login.cpp         # Login/account UI
-│   └── shell.html        # HTML wrapper
-├── tmp/wasm/             # Build output (gitignored)
-└── Makefile.wasm
+│   ├── emsdk/            # Emscripten SDK
+│   └── dawn/             # WebGPU implementation
+├── src/
+│   ├── main/             # Implementation
+│   │   ├── gear/         # RAW decoding
+│   │   ├── lute/         # Camera profiles
+│   │   ├── drum/         # Dynamic range
+│   │   ├── pipe/         # Pipeline coordination
+│   │   ├── post/         # Output formatting
+│   │   ├── wgpu/         # GPU compute
+│   │   └── labs/         # UI and app logic
+│   ├── html/             # HTML shell template
+│   ├── wgsl/             # WGSL compute shaders
+│   └── test/             # Tests
+├── tmp/                  # Build output (gitignored)
+└── Makefile
 ```
