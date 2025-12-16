@@ -25,7 +25,10 @@ INC = -Ilib/imgui -Ilib/imgui/backends \
       -Iinc/pipe \
       -Ilib \
       -Ilib/glfw/deps \
+      -I$(SRC_DIR)/labs \
       -I$(SRC_DIR)/labs/part \
+      -I$(SRC_DIR)/labs/pane \
+      -I$(SRC_DIR)/labs/tile \
       -I$(SRC_DIR)/gear
 
 OUT_JS = $(OUT_DIR)/labs.js

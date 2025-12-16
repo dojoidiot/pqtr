@@ -13,9 +13,6 @@
 [submodule "BASE/lib/libsodium"]
 	path = BASE/lib/libsodium
 	url = https://github.com/jedisct1/libsodium.git
-[submodule "LABS/lib/emsdk"]
-	path = LABS/lib/emsdk
-	url = https://github.com/emscripten-core/emsdk.git
 [submodule "LABS/lib/dawn"]
 	path = LABS/lib/dawn
 	url = https://dawn.googlesource.com/dawn

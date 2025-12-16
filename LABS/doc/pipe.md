@@ -7,44 +7,25 @@ Processing pipeline for PQTR. Link-based architecture where projects contribute 
 **No fidelity loss until POST.**
 
 ```
-GEAR → LUTE → DRUM → VIBE → POST
+HEAD → LUTE → DRUM → VIBE → POST
  ↑       ↑       ↑       ↑      ↑
  │       │       │       │      └── 8-bit output here (lossy OK)
  └───────┴───────┴───────┴──────── Full precision (float32)
 ```
 
-All processing maintains full floating-point precision. Quantization to 8-bit only happens at the final POST stage. This prevents accumulation of rounding errors through the pipeline.
+All processing maintains full floating-point precision. Quantization to 8-bit only happens at the final POST stage.
 
-| Stage | Precision | Fidelity |
-|-------|-----------|----------|
-| GEAR | float32 | Lossless (from RAW) |
-| LUTE | float32 | Lossless |
-| DRUM | float32 | Lossless |
-| VIBE | float32 | Lossless |
-| POST | uint8 | Lossy (final output) |
-
-**Display vs Output**: `wgpu.view` may quantize for screen display, but this is temporary and not saved. Only `wgpu.post` writes the final 8-bit output.
+| Stage | Precision | Purpose |
+|-------|-----------|---------|
+| HEAD | float32 | RAW decode to linear RGB |
+| LUTE | float32 | Camera profile |
+| DRUM | float32 | Dynamic range |
+| VIBE | float32 | Style processing |
+| POST | uint8 | Final output |
 
 ## How PIPE Works
 
-PIPE is a chain of Links. Data flows through each Link in sequence, transforming as it goes.
-
-### Data Flow
-
-```
-                        ┌─────────────────────────────────────────────────────────┐
-                        │                         PIPE                             │
-                        │                                                          │
-  RAW file ──►  Data ──►│──► Link ──► Link ──► Link ──► Link ──► Link ──►│──► Data ──► Output
-               (in)     │    GEAR     WGPU     LUTE     VIBE     WGPU    │    (out)
-                        │    decode   open     profile  style    shut    │
-                        │                                                          │
-                        │    Page:    Page:    Page:    Page:    Page:            │
-                        │    raw buf  Bayer*   Ctx*     Ctx*     Ctx*    Output*  │
-                        │                                                          │
-                        │    Info accumulates metadata through each link ──────►  │
-                        └─────────────────────────────────────────────────────────┘
-```
+PIPE is a chain of Links. Data flows through each Link in sequence.
 
 ### Core Concept
 
@@ -62,91 +43,121 @@ Data out = link.flow(in);  // Page transformed, Info accumulated
 
 | Component | What it is | How it changes |
 |-----------|------------|----------------|
-| **Page** | Buffer pointer (`void*`) | Replaced at each Link (raw → Bayer → GPU → output) |
+| **Page** | Buffer pointer (`void*`) | Replaced at each Link |
 | **Info** | Metadata tree (Node) | Accumulated - each Link adds its metadata |
 
-Info is a tree of key-value pairs (dials, text, arrays) that travels with the image through the pipeline.
+## Execution Flows
 
-## Model
+The pipe has two execution flows:
+
+### tune flow - Learning
 
 ```
-Data = Page (buffer) + Info (metadata)
-Link = processing unit with flow(Data) → Data
-Pipe = chain of Links
+RAW ──► HEAD ──► LUTE.tune ──► DRUM.tune ──► VIBE.tune ──► POST
+                    │              │              │
+                    ▼              ▼              ▼
+              learns from    learns from    learns from
+              camera JPEG    camera JPEG    camera JPEG
 ```
 
-**Page** flows through as buffer pointer (CPU or GPU).
-**Info** accumulates metadata as tree structure.
+Phase 1: LUTE and DRUM process on the on-camera JPEG
+Phase 2: Default VIBE optimisation to get the 0 vibe settings
 
-## Core Links (RAW Processing)
+### exec flow - Production
 
-Built-in links for the standard RAW processing pipeline. All run on GPU via WGSL compute shaders.
-
-| Link | Info Params | Purpose |
-|------|-------------|---------|
-| `pipe::blc()` | `black_level`, `white_level` | Black level correction (normalize Bayer) |
-| `pipe::wb()` | `wb_r`, `wb_g`, `wb_b`, `bayer_pattern` | White balance (per-channel gains) |
-| `pipe::demosaic()` | `bayer_pattern` | Bayer → RGB (bilinear interpolation) |
-| `pipe::cst()` | `color_matrix[9]` | Color space transform (3x3 matrix) |
-| `pipe::crop()` | `crop_left`, `crop_top`, `crop_width`, `crop_height` | Active area extraction |
-
-### Core Pipeline
-
-```cpp
-auto pipe = pipe::make();
-pipe->link(gear::read());      // RAW → Bayer + Info
-pipe->link(wgpu::open());      // CPU → GPU
-pipe->link(pipe::blc());       // Black level correction
-pipe->link(pipe::wb());        // White balance
-pipe->link(pipe::demosaic());  // Bayer → RGB
-pipe->link(pipe::cst());       // Color matrix
-pipe->link(pipe::crop());      // Active area crop
-pipe->link(wgpu::shut());      // GPU → CPU
+```
+RAW ──► HEAD ──► LUTE.exec ──► DRUM.exec ──► VIBE.exec ──► POST
+                    │              │              │
+                    ▼              ▼              ▼
+               applies         applies        applies
+               profile         DRO            style
 ```
 
-GEAR populates Info with all parameters. Core links read from Info automatically.
+Uses tuned parameters from pipe.json body.
 
-## Project Link Contributions
+## pipe.json Format
 
-| Project | Link | Input Page | Output Page |
-|---------|------|------------|-------------|
-| GEAR | `gear::read()` | raw file buffer | BayerBuffer* |
-| WGPU | `wgpu::open()` | BayerBuffer* | Context* (GPU) |
-| LUTE | `lute::tune()` | Context* | Context* (learns profile) |
-| LUTE | `lute::view()` | Context* | Context* (applies profile) |
-| DRUM | `drum::tune()` | Context* | Context* (learns DRO) |
-| DRUM | `drum::view()` | Context* | Context* (applies DRO) |
-| VIBE | `vibe::tune()` | Context* | Context* (learns style) |
-| VIBE | `vibe::view()` | Context* | Context* (applies style) |
-| WGPU | `wgpu::shut()` | Context* | OutputBuffer* |
+The pipe configuration stored as `<basename>.pipe.json`. Source of truth for the tune process.
 
-## Pipe Configurations
+### Structure
 
-### tune pipe - Learning
-
-```cpp
-auto tune = pipe::make();
-tune->link(gear::read());    // raw → Bayer (CPU)
-tune->link(wgpu::open());    // Bayer → GPU
-tune->link(lute::tune());    // learn camera profile
-tune->link(vibe::tune());    // learn style
-tune->link(wgpu::shut());    // GPU → output (CPU)
+```json
+{
+  "pipe": "1.0",
+  "head": {
+    "file": "DSC01234.ARW",
+    "gear_model": "ILCE-7M3",
+    "width": 6000,
+    "height": 4000
+  },
+  "body": {
+    "lute": {},
+    "drum": {},
+    "vibe": [
+      {}
+    ]
+  },
+  "tail": ["head", "lute", "drum", "vibe", "diff"],
+  "vibe-list": [
+    {
+      "file": "DSC01234.ARW",
+      "name": "Beach sunset",
+      "find": "golden hour waves"
+    }
+  ]
+}
 ```
 
-Outputs learned parameters in Info.
+| Field | Type | Description |
+|-------|------|-------------|
+| `pipe` | string | Version identifier |
+| `head` | object | Camera info from GEAR |
+| `body.lute` | object | Camera profile parameters |
+| `body.drum` | object | Dynamic range parameters |
+| `body.vibe` | array | Vibe settings (index 0 = default) |
+| `tail` | array | Stage outputs to produce (head, lute, drum, vibe, diff) |
+| `vibe-list` | array | Source files with metadata |
 
-### view pipe - Production
+**Note:** `<basename>.png` is always produced. `tail` controls which intermediate stage outputs are saved.
 
-```cpp
-auto view = pipe::make();
-view->link(gear::read());    // raw → Bayer (CPU)
-view->link(wgpu::open());    // Bayer → GPU
-view->link(lute::view());    // apply camera profile
-view->link(vibe::view());    // apply style
-view->link(wgpu::shut());    // GPU → output (CPU)
+### Vibe List
+
+Multiple images can be added for comparison:
+
+```json
+"vibe-list": [
+  {
+    "file": "DSC01234.ARW",
+    "name": "Beach sunset",
+    "find": "golden hour waves"
+  },
+  {
+    "file": "DSC01235.ARW",
+    "name": "Beach portrait",
+    "find": "golden hour person"
+  }
+]
 ```
 
-Outputs processed pixels.
+The default vibe (index 0) comes from tuning against the on-camera JPEG.
+
+### Sidecar Files
+
+```
+<basename>.ARW           # Source RAW
+<basename>.pipe.json     # Pipe configuration
+<basename>.0.jpg         # On-camera JPEG (tune target)
+<basename>.png           # Final output (always)
+```
+
+Stage outputs (if in tail array):
+```
+<basename>.head.png      # "head" - after HEAD stage
+<basename>.lute.png      # "lute" - after LUTE stage
+<basename>.drum.png      # "drum" - after DRUM stage
+<basename>.vibe.0.png    # "vibe" - after VIBE stage (default vibe)
+<basename>.diff.png      # "diff" - difference vs .0.jpg
+```
 
 ## API
 
@@ -154,8 +165,8 @@ Outputs processed pixels.
 
 ```cpp
 namespace pipe {
-    using Page = void*;       // Buffer pointer
-    using Info = Node;        // Metadata tree
+    using Page = void*;
+    using Info = Node;
     using Name = std::string;
 
     class Data {
@@ -172,7 +183,6 @@ namespace pipe {
     class Pipe {
         virtual Pipe& link(Hold<Link> link) = 0;
         virtual Data flow(Data in) = 0;
-        virtual Link* find(const Name& name) = 0;
     };
 
     Hold<Pipe> make();
@@ -188,9 +198,6 @@ float v = info.dial("key");       // get float
 info.text("key", "value");        // set string
 Name s = info.text("key");        // get string
 
-info.data("key", floats, count);  // set array
-const float* a = info.data("key");// get array
-
 Node& child = info.make("child"); // create child node
 Node* found = info.find("child"); // find child node
 
@@ -198,177 +205,109 @@ Name json = info.save();          // serialize
 info.load(json);                  // deserialize
 ```
 
-## Contributing a Link
+## Link Contributions
+
+| Project | Link | Purpose |
+|---------|------|---------|
+| GEAR | `gear::read()` | RAW → Bayer + Info |
+| HEAD | `head::flow()` | Bayer → Linear RGB (blc, wb, demosaic, cst, crop) |
+| LUTE | `lute::tune()` | Learn camera profile |
+| LUTE | `lute::exec()` | Apply camera profile |
+| DRUM | `drum::tune()` | Learn dynamic range |
+| DRUM | `drum::exec()` | Apply dynamic range |
+| VIBE | `vibe::tune()` | Learn style |
+| VIBE | `vibe::exec()` | Apply style |
+
+## Rules
+
+1. Everything is a Link - no processing code outside Links
+2. Tune Links write results to Info
+3. Exec Links read parameters from Info
+4. pipe.json is the source of truth
+5. Full precision until POST
+
+## WASI Build (pipe.wasm)
+
+Headless WASM module for server-side processing via wasmtime.
+
+### Output
+
+```
+tmp/pack/lib/pipe.wasm
+```
+
+### Sources (processing only, no UI)
+
+```
+src/main/gear/*.cpp
+src/main/lute/*.cpp
+src/main/pipe/*.cpp
+src/wasi/main.cpp       # WASI entry point (to create)
+```
+
+### WASI Entry Point
 
 ```cpp
-// myproject.hpp
-namespace myproject {
-    pipe::Hold<pipe::Link> link();
-}
+// src/wasi/main.cpp
+#include "gear.hpp"
+#include "pipe.hpp"
 
-// myproject.cpp
-class MyLink : public pipe::Link {
-public:
-    pipe::Name name() const override { return "myproject"; }
-    pipe::Name type() const override { return "process"; }
-
-    pipe::Data flow(pipe::Data in) override {
-        // Get input
-        auto* input = static_cast<InputType*>(in.page);
-
-        // Process
-        auto* output = process(input);
-
-        // Return
-        pipe::Data out;
-        out.page = output;
-        out.info = std::move(in.info);
-        out.info.text("processed_by", "myproject");
-        return out;
-    }
-};
-
-pipe::Hold<pipe::Link> link() {
-    return pipe::Hold<pipe::Link>(new MyLink());
+int main(int argc, char** argv) {
+    // Read RAW from stdin or file arg
+    // Run GEAR decode
+    // Run PIPE processing
+    // Write result to stdout
+    return 0;
 }
 ```
 
-## Structure
+### Makefile Target
 
-```
-PIPE/
-├── inc/pipe.hpp           # Public API
-├── src/main/
-│   ├── pipe.cpp           # Pipe implementation
-│   └── link/              # Core processing links
-│       ├── blc.cpp        # Black level correction
-│       ├── wb.cpp         # White balance
-│       ├── demosaic.cpp   # Bayer → RGB
-│       ├── cst.cpp        # Color space transform
-│       └── crop.cpp       # Active area crop
-├── src/wgsl/              # GPU compute shaders
-│   ├── blc.wgsl
-│   ├── wb.wgsl
-│   ├── demosaic.wgsl
-│   ├── cst.wgsl
-│   └── crop.wgsl
-├── src/test/
-│   └── pipe.cpp           # Tests
-└── README.md
+```make
+WASI_SDK = /opt/wasi-sdk
+WASI_CC = $(WASI_SDK)/bin/clang++
+WASI_FLAGS = -std=c++17 -O2 --target=wasm32-wasi
+
+PIPE_SRCS = $(shell find src/main -name '*.cpp' ! -path '*/labs/*' ! -path '*/wgpu/*')
+PIPE_SRCS += src/wasi/main.cpp
+
+wasi: tmp/pack/lib/pipe.wasm
+
+tmp/pack/lib/pipe.wasm: $(PIPE_SRCS)
+	@mkdir -p tmp/pack/lib
+	$(WASI_CC) $(WASI_FLAGS) -Iinc -Iinc/gear -Iinc/pipe $(PIPE_SRCS) -o $@
 ```
 
-## Building
+### Install wasi-sdk
 
 ```bash
-g++ -std=c++17 -I./inc src/main/pipe.cpp src/main/part/pipe/node.cpp -c
+cd /opt
+wget https://github.com/WebAssembly/wasi-sdk/releases/download/wasi-sdk-21/wasi-sdk-21.0-linux.tar.gz
+tar xf wasi-sdk-21.0-linux.tar.gz
+ln -s wasi-sdk-21.0 wasi-sdk
 ```
 
-## pipe.json Format
+### BASE Integration
 
-The pipe configuration is stored as `<basename>.pipe.json` alongside the RAW file. This is the source of truth for the tune process.
+```cpp
+wasmtime::Engine engine;
+wasmtime::Module module = Module::from_file(engine, "lib/pipe.wasm");
 
-### Structure
-
-```json
-{
-  "info": {
-    "file": "DSC01234.ARW",
-    ...camera metadata after GEAR
-  },
-  "tune": {
-    "step": ["gear", "lute", ...]
-  }
+void handle_pipe_request(Request& req) {
+    auto instance = Instance::create(engine, module);
+    // Pass RAW data via WASI stdin or memory
+    // Run _start
+    // Read result from WASI stdout or memory
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `info.file` | string | Source RAW filename |
-| `info.*` | various | Camera metadata (populated by GEAR) |
-| `tune.step` | array | Completed tune steps |
+### Architecture
 
-### Lifecycle
-
-**1. After Load RAW** - Initial creation:
-
-```json
-{
-  "info": {
-    "file": "DSC01234.ARW"
-  },
-  "tune": {
-    "step": []
-  }
-}
 ```
-
-**2. After GEAR step** - Camera metadata added:
-
-```json
-{
-  "info": {
-    "file": "DSC01234.ARW",
-    "camera_model": "ILCE-7M3",
-    "width": 6000,
-    "height": 4000
-  },
-  "tune": {
-    "step": ["gear"]
-  }
-}
+Browser                         Server (BASE)
+   │                               │
+   └─ labs.wasm (GUI)              ├─ wasmtime + pipe.wasm
+       └─ fetch ──────────────────►│
+           "process DSC001.ARW"    └─ GEAR → PIPE → result
+                                       └─ store to pipe dir
 ```
-
-**3. After LUTE step** - Camera profile learned:
-
-```json
-{
-  "info": {
-    "file": "DSC01234.ARW",
-    "camera_model": "ILCE-7M3",
-    "width": 6000,
-    "height": 4000
-  },
-  "tune": {
-    "step": ["gear", "lute"],
-    "lute": {
-      ...learned camera profile parameters
-    }
-  }
-}
-```
-
-**4. After VIBE step** - Style learned:
-
-```json
-{
-  "info": { ... },
-  "tune": {
-    "step": ["gear", "lute", "vibe"],
-    "lute": { ... },
-    "vibe": {
-      ...51 dial values
-    }
-  }
-}
-```
-
-### Sidecar Files
-
-All sidecars follow `<basename>.<type>` naming:
-
-| File | Content |
-|------|---------|
-| `<basename>.ARW` | Source RAW file |
-| `<basename>.pipe.json` | Pipe configuration (source of truth) |
-| `<basename>.png` | Camera preview (tune target) |
-
-### Re-running
-
-The pipe can be re-run at any time. The `tune.step` array tracks what's been done, but there's no status - steps are simply present or not. Running tune again will re-execute all steps.
-
-## See Also
-
-- [GEAR](gear.md) - `gear::read()` RAW decoder
-- [WGPU](wgpu.md) - `wgpu::open()/shut()` GPU lifecycle
-- [LUTE](lute.md) - `lute::tune()/view()` camera profiles
-- [VIBE](vibe.md) - `vibe::tune()/view()` style processing

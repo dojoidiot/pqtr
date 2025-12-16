@@ -117,7 +117,6 @@ namespace pipe
 
         virtual Name name() const = 0;
         virtual Name type() const = 0;
-
         virtual Data flow(Data in) = 0;
     };
 
@@ -179,5 +178,19 @@ namespace pipe
     // Pipeline data (Page) passes through unchanged at full precision.
 
     Hold<Link> view();
+
+    // ============================================================
+    // Utility - Image encoding/decoding
+    // ============================================================
+
+    std::vector<uint8_t> encodePng(const uint8_t* rgb, int width, int height);
+
+    struct JpegResult {
+        int width;
+        int height;
+        std::vector<uint8_t> rgb;  // RGB8, empty on failure
+    };
+
+    JpegResult decodeJpeg(const uint8_t* data, size_t size);
 
 } // namespace pipe

@@ -6,7 +6,7 @@ WebAssembly application for PQTR. The anywhere, anytime interface for creating a
 
 ## How LABS Works
 
-LABS is the browser-based frontend for PQTR. It compiles C++ to WebAssembly and runs in any modern browser. All communication between components happens through a note-driven event system.
+LABS is the browser-based frontend for PQTR. It compiles C++ to WebAssembly and runs in any modern browser. Implements the [PIPE](doc/pipe.md) processing model.
 
 ### Architecture
 
@@ -45,13 +45,13 @@ LABS is the browser-based frontend for PQTR. It compiles C++ to WebAssembly and 
 
 | Pane | Purpose |
 |------|---------|
-| **LABS** | Pipeline list, file selection, current RAW |
+| **LABS** | Pipeline list, file browser, pipe.json tree view |
 | **Note** | Event log showing all notes (debug view) |
-| **Tune** | Pipeline stages: GEAR → LUTE → DRUM → DONE |
+| **Tune** | Pipeline stages: HEAD → LUTE → DRUM → DIFF |
 
 ### Note System
 
-All communication happens through notes. Components post events, others listen and respond. No shared state beyond the note queue.
+All communication happens through notes. Components post events, others listen and respond.
 
 ```cpp
 postNote("event.name", "data");     // Post an event
@@ -65,29 +65,10 @@ checkNote("event.name");            // Check and consume an event
 | `raws.load` | filename | RAW file loaded from disk |
 | `push.start` | filename | Push to BASE begins |
 | `push.done` | base_name | Push succeeded |
-| `push.error` | message | Push failed |
 | `pipe.select` | pipe_name | Pipeline selected |
 | `tune.start` | pipe_name | Tune button clicked |
-| `tune.begin` | pipe_name | Tune pipeline starting |
 | `tune.done` | pipe_name | Tune pipeline complete |
-| `auth.expired` | - | JWT invalid, return to login |
-
-### Tune Pipeline
-
-When user clicks Tune, this pipeline executes:
-
-```
-gear.load    → Load RAW file
-wgpu.open    → Init GPU
-pipe.view    → GEAR stage image
-lute.tune    → Apply camera profile
-pipe.view    → LUTE stage image
-drum.tune    → Apply dynamic range
-pipe.view    → DRUM stage image (= DONE)
-pipe.make    → Create tune.json
-pipe.save    → Create final PNG
-wgpu.shut    → Shutdown GPU
-```
+| `drop.done` | pipe_name | Pipe deleted from server |
 
 ### Data Flow
 
@@ -97,7 +78,6 @@ wgpu.shut    → Shutdown GPU
 4. **ImGui renders** to WebGL canvas at 60fps
 5. **User actions** post notes, handlers respond
 6. **BASE calls** are triggered by note handlers
-7. **State cleared** after each operation completes
 
 ### Login Flow
 
@@ -108,25 +88,34 @@ User ──► Email ──► OTP ──► BASE/verify ──► JWT ──►
                                   labs.open note ──► list pipelines
 ```
 
-### BASE Storage
+## BASE Storage
 
 ```
-BASE/var/LABS/<itag>/pipe/<raw_name>/
-├── <raw_name>.ARW           # Original RAW
-├── <raw_name>.png           # Gear view (embedded preview)
-├── <raw_name>.tune.json     # Tune sidecar
-└── <raw_name>.tune.png      # Final output
+BASE/var/LABS/<itag>/
+├── gear/                           # LUTE tune data per gear/style
+│   └── <gear name>/
+│       └── <style name>.lute.json
+└── pipe/                           # User's pipe projects
+    └── <basename>/
+        ├── <basename>.ARW          # Source RAW
+        ├── <basename>.pipe.json    # Pipe configuration
+        ├── <basename>.0.jpg        # On-camera JPEG
+        ├── <basename>.png          # Final output
+        ├── <basename>.head.png     # HEAD stage
+        ├── <basename>.lute.png     # LUTE stage
+        ├── <basename>.drum.png     # DRUM stage
+        └── <basename>.diff.png     # Diff image
 ```
 
 ## Building
 
 ```bash
+# From LABS directory
+make           # Build WASM app to tmp/wasm/
+
 # From repository root
 make           # Build LABS + BASE, pack to tmp/pack/
 bash test.sh   # Build and run local server
-
-# Or from LABS directory
-make           # Build WASM app to tmp/wasm/
 ```
 
 ## Output
@@ -148,23 +137,30 @@ bash test.sh   # Builds and starts server on http://127.0.0.1:4040
 ```
 LABS/
 ├── inc/                  # Public headers
+│   ├── gear.hpp          # RAW decoding
+│   ├── pipe.hpp          # Pipeline types
+│   └── lute.hpp          # Camera profiles
 ├── lib/
 │   ├── imgui/            # ImGui library
 │   ├── glfw/             # GLFW (Emscripten maps to JS)
-│   ├── emsdk/            # Emscripten SDK
 │   └── dawn/             # WebGPU implementation
 ├── src/
-│   ├── main/             # Implementation
-│   │   ├── gear/         # RAW decoding
-│   │   ├── lute/         # Camera profiles
-│   │   ├── drum/         # Dynamic range
-│   │   ├── pipe/         # Pipeline coordination
-│   │   ├── post/         # Output formatting
-│   │   ├── wgpu/         # GPU compute
-│   │   └── labs/         # UI and app logic
+│   ├── main/
+│   │   ├── gear/         # GEAR - RAW decoding
+│   │   ├── lute/         # LUTE - Camera profiles
+│   │   ├── pipe/         # PIPE - Pipeline coordination
+│   │   └── labs/         # LABS - UI and app logic
+│   │       ├── part/     # State, REST, tasks, notes
+│   │       └── view/     # Login, OTP, desktop screens
 │   ├── html/             # HTML shell template
-│   ├── wgsl/             # WGSL compute shaders
 │   └── test/             # Tests
+├── doc/
+│   └── pipe.md           # PIPE processing model
 ├── tmp/                  # Build output (gitignored)
 └── Makefile
 ```
+
+## See Also
+
+- [PIPE](doc/pipe.md) - Processing pipeline model
+- [BASE](../BASE/README.md) - Backend server

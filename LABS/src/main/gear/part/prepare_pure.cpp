@@ -4,13 +4,9 @@
 
 #include <gear/sony_pure.h>
 #include <tool.hpp>
+#include <pipe.hpp>
 #include <iostream>
 #include <cstring>
-
-// stb_image for JPEG decoding (replaces cv::imdecode)
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_JPEG
-#include "stb_image.h"
 
 namespace sony {
 namespace pure {
@@ -587,22 +583,18 @@ Result decode(pqtr::Sink& source) {
         return result;
     }
 
-    // Extract preview JPEG using stb_image
+    // Extract preview JPEG
     if (preview_offset != 0 && preview_length != 0 &&
         preview_offset + preview_length <= static_cast<size_t>(file_size)) {
 
-        int w, h, channels;
-        unsigned char* img = stbi_load_from_memory(
-            &file_data[preview_offset], preview_length, &w, &h, &channels, 3);
+        auto jpeg = pipe::decodeJpeg(&file_data[preview_offset], preview_length);
 
-        if (img) {
-            result.preview.width = w;
-            result.preview.height = h;
-            result.preview.data.resize(w * h * 3);
-            memcpy(result.preview.data.data(), img, w * h * 3);
-            stbi_image_free(img);
-            meta.preview_width = w;
-            meta.preview_height = h;
+        if (!jpeg.rgb.empty()) {
+            result.preview.width = jpeg.width;
+            result.preview.height = jpeg.height;
+            result.preview.data = std::move(jpeg.rgb);
+            meta.preview_width = jpeg.width;
+            meta.preview_height = jpeg.height;
         } else {
             meta.preview_width = meta.preview_height = 0;
         }

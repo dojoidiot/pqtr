@@ -60,49 +60,49 @@ pipe::Data decode(const char* raw_data, size_t raw_size) {
     // Output Page = Bayer buffer
     out.page = buf;
 
-    // Output Info = metadata (MUST fields per GEAR contract)
-    out.info.text("decoder", "gear_sony_arw2_pure");
-    out.info.text("make", meta.camera_make);
-    out.info.text("model", meta.camera_model);
+    // Output Info = metadata (all under gear_ prefix)
+    out.info.text("gear_decoder", "sony_arw2_pure");
+    out.info.text("gear_make", meta.camera_make);
+    out.info.text("gear_model", meta.camera_model);
 
-    out.info.dial("width", static_cast<float>(buf->width));
-    out.info.dial("height", static_cast<float>(buf->height));
-    out.info.dial("black_level", static_cast<float>(meta.black_level));
-    out.info.dial("white_level", static_cast<float>(meta.white_level));
-    out.info.dial("orientation", static_cast<float>(meta.orientation));
+    out.info.dial("gear_width", static_cast<float>(buf->width));
+    out.info.dial("gear_height", static_cast<float>(buf->height));
+    out.info.dial("gear_black_level", static_cast<float>(meta.black_level));
+    out.info.dial("gear_white_level", static_cast<float>(meta.white_level));
+    out.info.dial("gear_orientation", static_cast<float>(meta.orientation));
 
-    out.info.dial("iso", meta.iso);
-    out.info.dial("shutter", meta.shutter_speed);
-    out.info.dial("aperture", meta.aperture);
-    out.info.dial("focal_length", meta.focal_length);
-    out.info.text("lens", meta.lens_model);
+    out.info.dial("gear_iso", meta.iso);
+    out.info.dial("gear_shutter", meta.shutter_speed);
+    out.info.dial("gear_aperture", meta.aperture);
+    out.info.dial("gear_focal_length", meta.focal_length);
+    out.info.text("gear_lens", meta.lens_model);
 
     // White balance (normalized to green=1.0)
     float wb_g = (meta.wb_rggb[1] + meta.wb_rggb[2]) / 2.0f;
     if (wb_g > 0) {
-        out.info.dial("wb_r", meta.wb_rggb[0] / wb_g);
-        out.info.dial("wb_g", 1.0f);
-        out.info.dial("wb_b", meta.wb_rggb[3] / wb_g);
+        out.info.dial("gear_wb_r", meta.wb_rggb[0] / wb_g);
+        out.info.dial("gear_wb_g", 1.0f);
+        out.info.dial("gear_wb_b", meta.wb_rggb[3] / wb_g);
     }
 
     // Color matrix (3x3, row-major)
-    out.info.data("color_matrix", meta.color_matrix, 9);
+    out.info.data("gear_color_matrix", meta.color_matrix, 9);
 
     // Bayer pattern
-    out.info.dial("bayer_pattern", static_cast<float>(meta.bayer_pattern));
+    out.info.dial("gear_bayer_pattern", static_cast<float>(meta.bayer_pattern));
 
     // Crop params (for downstream links if needed)
-    out.info.dial("crop_left", static_cast<float>(meta.crop_left));
-    out.info.dial("crop_top", static_cast<float>(meta.crop_top));
-    out.info.dial("crop_width", static_cast<float>(meta.crop_width));
-    out.info.dial("crop_height", static_cast<float>(meta.crop_height));
+    out.info.dial("gear_crop_left", static_cast<float>(meta.crop_left));
+    out.info.dial("gear_crop_top", static_cast<float>(meta.crop_top));
+    out.info.dial("gear_crop_width", static_cast<float>(meta.crop_width));
+    out.info.dial("gear_crop_height", static_cast<float>(meta.crop_height));
 
-    // Creative style info
-    out.info.text("creative_style", meta.creative_style);
-    out.info.text("dro", meta.dro);
-    out.info.dial("contrast", static_cast<float>(meta.contrast));
-    out.info.dial("saturation", static_cast<float>(meta.saturation));
-    out.info.dial("sharpness", static_cast<float>(meta.sharpness));
+    // Creative style info (what camera used for preview)
+    out.info.text("gear_creative_style", meta.creative_style);
+    out.info.text("gear_dro", meta.dro);
+    out.info.dial("gear_contrast", static_cast<float>(meta.contrast));
+    out.info.dial("gear_saturation", static_cast<float>(meta.saturation));
+    out.info.dial("gear_sharpness", static_cast<float>(meta.sharpness));
 
     // Distortion params if available
     if (meta.has_distortion_params) {
@@ -110,12 +110,12 @@ pipe::Data decode(const char* raw_data, size_t raw_size) {
         for (int i = 0; i < meta.distortion_knot_count; i++) {
             dp[i] = static_cast<float>(meta.distortion_params[i]);
         }
-        out.info.data("distortion", dp, meta.distortion_knot_count);
+        out.info.data("gear_distortion", dp, meta.distortion_knot_count);
     }
 
     // Preview dimensions in Info (actual data is in BayerBuffer)
-    out.info.dial("preview_width", static_cast<float>(buf->preview_width));
-    out.info.dial("preview_height", static_cast<float>(buf->preview_height));
+    out.info.dial("gear_preview_width", static_cast<float>(buf->preview_width));
+    out.info.dial("gear_preview_height", static_cast<float>(buf->preview_height));
 
     return out;
 }
