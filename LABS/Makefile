@@ -25,10 +25,10 @@ INC = -Ilib/imgui -Ilib/imgui/backends \
       -Iinc/pipe \
       -Ilib \
       -Ilib/glfw/deps \
-      -I$(SRC_DIR)/labs \
-      -I$(SRC_DIR)/labs/part \
-      -I$(SRC_DIR)/labs/pane \
-      -I$(SRC_DIR)/labs/tile \
+      -I$(SRC_DIR)/desk \
+      -I$(SRC_DIR)/desk/part \
+      -I$(SRC_DIR)/desk/pane \
+      -I$(SRC_DIR)/desk/tile \
       -I$(SRC_DIR)/gear
 
 OUT_JS = $(OUT_DIR)/labs.js
@@ -50,6 +50,7 @@ TEST_INC = -Iinc -Isrc/test/gear -Isrc/test/pipe -Isrc/test/vibe $(DAWN_INC)
 TEST_GEAR = $(TEST_DIR)/test_gear
 TEST_PIPE = $(TEST_DIR)/test_pipe
 TEST_VIBE = $(TEST_DIR)/test_vibe
+TEST_FLOW = $(TEST_DIR)/test_flow
 
 # === Targets ===
 
@@ -75,9 +76,9 @@ $(OBJ_DIR)/lib/%.o: lib/%.cpp
 	$(EMXX) $(EMFLAGS) $(INC) -c $< -o $@
 
 # === Tests (native) ===
-test: $(TEST_GEAR)
-	@echo "=== GEAR Tests ==="
-	@cd $(shell pwd) && $(TEST_GEAR) || true
+test: $(TEST_FLOW)
+	@echo "=== FLOW Test ==="
+	@cd $(shell pwd) && $(TEST_FLOW) || true
 
 # GEAR test
 $(TEST_GEAR): src/test/gear/test_dawn.cpp src/test/gear/pipe.cpp src/main/wgpu/wgpu.cpp | $(DAWN_LIB)
@@ -88,6 +89,24 @@ $(TEST_GEAR): src/test/gear/test_dawn.cpp src/test/gear/pipe.cpp src/main/wgpu/w
 $(DAWN_LIB):
 	@echo "Dawn not built. Run: cd lib && ./dawn.sh"
 	@exit 1
+
+# FLOW test
+FLOW_SRCS = src/test/flow/flow.cpp \
+            src/main/flow/flow.cpp \
+            src/main/flow/part/tree.cpp \
+            src/main/flow/part/load.cpp \
+            src/main/flow/part/swap.cpp \
+            src/main/flow/part/png.cpp \
+            src/main/flow/part/jpg.cpp \
+            src/main/flow/part/sony.cpp \
+            src/main/pipe/pipe.cpp \
+            src/main/pipe/part/pipe/node.cpp \
+            src/main/pipe/part/pipe/jpeg.cpp
+
+$(TEST_FLOW): $(FLOW_SRCS)
+	@mkdir -p $(TEST_DIR)
+	@mkdir -p tmp/var/flow
+	$(CXX) $(CXXFLAGS) -Iinc $^ -o $@
 
 tidy:
 	rm -rf tmp
