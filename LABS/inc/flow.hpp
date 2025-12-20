@@ -108,8 +108,8 @@ namespace flow
         virtual size_t viewSize() = 0; // size of view buffer in bytes
 
         // GPU processing
-        virtual Task open(void *device, void *pipeline) = 0; // start GPU job
-        virtual Done shut() = 0;                              // wait and read back
+        virtual Task open(void *device) = 0;
+        virtual Done shut() = 0;
     };
 
     // ============================================================================
@@ -131,8 +131,5 @@ namespace flow
     //   BIN->PNG/JPG: data is w*h*3 RGB, size ignored
     //   PNG/JPG->BIN: data is compressed, size is data length, w/h extracted from image
     std::vector<uint8_t> swap(uint8_t *data, size_t size, int w, int h, Swap into);
-
-    // Lens distortion correction (operates on RGB float data, w*h*3)
-    void warp(float *rgb, int w, int h, const float *params, int count);
 
 }

@@ -17,7 +17,7 @@ namespace flow
     LoadResult load(const std::string &name, const uint8_t *bits, size_t size);
 
     // GPU helpers (from head.cpp)
-    Task headOpen(Tree &info, uint16_t *data, void *device, void *pipeline);
+    Task headOpen(Tree &info, uint16_t *data, void *device);
     Done headShut();
 
     // -------------------------------------------------------------------------
@@ -44,9 +44,9 @@ namespace flow
         uint8_t *view() override { return view_.data(); }
         size_t viewSize() override { return view_.size(); }
 
-        Task open(void *device, void *pipeline) override
+        Task open(void *device) override
         {
-            return headOpen(*info_, data_.data(), device, pipeline);
+            return headOpen(*info_, data_.data(), device);
         }
 
         Done shut() override

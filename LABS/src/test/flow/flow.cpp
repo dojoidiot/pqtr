@@ -1,4 +1,4 @@
-// flow test - load RAW, process with Head, save outputs
+// flow test - load RAW, process with GPU, save outputs
 //
 // Usage: ./flow [input.ARW]
 // Output:
@@ -22,7 +22,6 @@ namespace dawn
     wgpu::Instance instance();
     wgpu::Adapter adapter(wgpu::Instance instance);
     wgpu::Device device(wgpu::Adapter adapter);
-    wgpu::ComputePipeline pipeline(wgpu::Device device, const char *wgsl);
 }
 
 static std::vector<uint8_t> read_file(const char *path)
@@ -36,12 +35,6 @@ static std::vector<uint8_t> read_file(const char *path)
     fread(data.data(), 1, size, f);
     fclose(f);
     return data;
-}
-
-static std::string read_text(const char *path)
-{
-    auto data = read_file(path);
-    return std::string(data.begin(), data.end());
 }
 
 static std::string basename(const std::string &path)
@@ -125,7 +118,7 @@ int main(int argc, char **argv)
     }
 
     // =========================================================================
-    // Head: GPU RAW processing
+    // GPU RAW processing
     // =========================================================================
 
     std::cout << "\nInitializing WebGPU..." << std::endl;
@@ -142,19 +135,8 @@ int main(int argc, char **argv)
 
     std::cout << "WebGPU ready" << std::endl;
 
-    // Load shader
-    std::string wgsl = read_text("src/wgsl/gear/head.wgsl");
-    if (wgsl.empty())
-    {
-        std::cerr << "Failed to read head.wgsl" << std::endl;
-        return 1;
-    }
-
-    wgpu::ComputePipeline pipe = dawn::pipeline(device, wgsl.c_str());
-    std::cout << "Pipeline created" << std::endl;
-
-    // GPU processing
-    flow::Task task = f->open(&device, &pipe);
+    // GPU processing (pipelines created internally, warp applied if distortion data present)
+    flow::Task task = f->open(&device);
 
     std::cout << "Processing " << task.width() << "x" << task.height() << "..." << std::endl;
 
@@ -162,35 +144,6 @@ int main(int argc, char **argv)
     flow::Done result = f->shut();
 
     std::cout << "Done: " << result.width << "x" << result.height << std::endl;
-
-    // Apply lens distortion correction (after demosaic)
-    if (root.test("maker"))
-    {
-        flow::Stem &maker = root.next("maker");
-        if (maker.test("distortion"))
-        {
-            std::string distStr = maker.leaf("distortion").text();
-            // Parse distortion params
-            std::vector<float> params;
-            size_t pos = 0;
-            while (pos < distStr.size())
-            {
-                size_t end = distStr.find(',', pos);
-                if (end == std::string::npos)
-                    end = distStr.size();
-                std::string num = distStr.substr(pos, end - pos);
-                size_t start = num.find_first_not_of(" \t");
-                if (start != std::string::npos)
-                    params.push_back(std::stof(num.substr(start)));
-                pos = end + 1;
-            }
-            if (!params.empty())
-            {
-                flow::warp(result.rgb.data(), result.width, result.height, params.data(), static_cast<int>(params.size()));
-                std::cout << "Applied distortion correction (" << params.size() << " knots)" << std::endl;
-            }
-        }
-    }
 
     // Convert linear RGB to sRGB 8-bit
     size_t pixels = static_cast<size_t>(result.width) * result.height;
