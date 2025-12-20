@@ -8,7 +8,6 @@
 //   tmp/var/flow/{name}.head.png   - GPU-processed linear RGB
 
 #include "flow.hpp"
-#include "head.hpp"
 
 #include <dawn/webgpu_cpp.h>
 
@@ -155,13 +154,13 @@ int main(int argc, char **argv)
     std::cout << "Pipeline created" << std::endl;
 
     // Create Head and process
-    head::Head head(&device, &pipe);
-    head::Task task = head.open(f->info(), f->data());
+    flow::Head head(&device, &pipe);
+    flow::Task task = head.open(f->info(), f->data());
 
     std::cout << "Processing " << task.width() << "x" << task.height() << "..." << std::endl;
 
     task.post();
-    head::Done result = head.shut();
+    flow::Done result = head.shut();
 
     std::cout << "Done: " << result.width << "x" << result.height << std::endl;
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -82,6 +83,39 @@ namespace flow
         virtual uint16_t *data() = 0;  // raw bayer data (width * height)
         virtual uint8_t *view() = 0;   // preview RGB (from embedded JPEG)
         virtual size_t viewSize() = 0; // size of view buffer in bytes
+    };
+
+    // ============================================================================
+    // Head - GPU RAW processing (PIMPL)
+    // ============================================================================
+
+    // Final CPU result
+    struct Done
+    {
+        std::vector<float> rgb; // interleaved RGB, linear scene-referred
+        int width = 0;
+        int height = 0;
+    };
+
+    // GPU processing job
+    class Task
+    {
+    public:
+        ~Task();
+        void post();        // dispatch GPU work
+        void *view() const; // GPU buffer (valid after post)
+        int width() const;
+        int height() const;
+    };
+
+    // RAW to linear RGB processor
+    class Head
+    {
+    public:
+        Head(void *device_ptr, void *pipeline_ptr);
+        ~Head();
+        Task open(Tree &info, uint16_t *data);
+        Done shut();
     };
 
     // ============================================================================

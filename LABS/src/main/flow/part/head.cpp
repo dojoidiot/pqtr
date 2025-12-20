@@ -2,13 +2,12 @@
 //
 // All implementation details hidden here. Uses static maps for PIMPL storage.
 
-#include "head.hpp"
 #include "flow.hpp"
 #include <dawn/webgpu_cpp.h>
 #include <cstring>
 #include <unordered_map>
 
-namespace head
+namespace flow
 {
 
     // =========================================================================
@@ -127,7 +126,7 @@ namespace head
         }
     }
 
-    Task Head::open(flow::Tree &info, uint16_t *data)
+    Task Head::open(Tree &info, uint16_t *data)
     {
         Task task;
         auto it = g_heads.find(this);
@@ -135,10 +134,10 @@ namespace head
             return task;
 
         HeadData &hd = *it->second;
-        flow::Stem &root = info.root();
+        Stem &root = info.root();
 
-        int w = static_cast<int>(root.leaf(flow::WIDTH).dial());
-        int h = static_cast<int>(root.leaf(flow::HEIGHT).dial());
+        int w = static_cast<int>(root.leaf(WIDTH).dial());
+        int h = static_cast<int>(root.leaf(HEIGHT).dial());
         if (w <= 0 || h <= 0)
             return task;
 
@@ -146,8 +145,8 @@ namespace head
         HeadUniforms u{};
         u.width = static_cast<uint32_t>(w);
         u.height = static_cast<uint32_t>(h);
-        u.black_level = root.leaf(flow::BLACK).dial();
-        u.white_level = root.leaf(flow::WHITE).dial();
+        u.black_level = root.leaf(BLACK).dial();
+        u.white_level = root.leaf(WHITE).dial();
         if (u.white_level <= u.black_level)
         {
             u.black_level = 512;
@@ -158,10 +157,10 @@ namespace head
         u.wb_b = 1.0f;
         if (root.test("maker"))
         {
-            flow::Stem &maker = root.next("maker");
+            Stem &maker = root.next("maker");
             if (maker.test("white_balance"))
             {
-                flow::Stem &wb = maker.next("white_balance");
+                Stem &wb = maker.next("white_balance");
                 if (wb.test("r"))
                     u.wb_r = wb.leaf("r").dial();
                 if (wb.test("b"))
@@ -181,7 +180,7 @@ namespace head
 
         if (root.test("maker"))
         {
-            flow::Stem &maker = root.next("maker");
+            Stem &maker = root.next("maker");
             if (maker.test("color_matrix"))
             {
                 std::string matStr = maker.leaf("color_matrix").text();
@@ -314,4 +313,4 @@ namespace head
         return out;
     }
 
-} // namespace head
+} // namespace flow
