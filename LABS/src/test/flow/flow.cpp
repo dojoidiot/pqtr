@@ -153,14 +153,13 @@ int main(int argc, char **argv)
     wgpu::ComputePipeline pipe = dawn::pipeline(device, wgsl.c_str());
     std::cout << "Pipeline created" << std::endl;
 
-    // Create Head and process
-    flow::Head head(&device, &pipe);
-    flow::Task task = head.open(f->info(), f->data());
+    // GPU processing
+    flow::Task task = f->open(&device, &pipe);
 
     std::cout << "Processing " << task.width() << "x" << task.height() << "..." << std::endl;
 
     task.post();
-    flow::Done result = head.shut();
+    flow::Done result = f->shut();
 
     std::cout << "Done: " << result.width << "x" << result.height << std::endl;
 

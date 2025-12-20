@@ -1,11 +1,10 @@
-// head.cpp - Head implementation
+// head.cpp - GPU RAW processing
 //
-// All implementation details hidden here. Uses static maps for PIMPL storage.
+// Implements headOpen/headShut for Flow::open/shut
 
 #include "flow.hpp"
 #include <dawn/webgpu_cpp.h>
 #include <cstring>
-#include <unordered_map>
 
 namespace flow
 {
@@ -30,7 +29,7 @@ namespace flow
     };
 
     // =========================================================================
-    // Internal storage (hidden from header)
+    // Internal storage
     // =========================================================================
 
     struct TaskData
@@ -48,32 +47,20 @@ namespace flow
         bool is_posted = false;
     };
 
-    struct HeadData
-    {
-        wgpu::Device device;
-        wgpu::ComputePipeline pipeline;
-        TaskData *current = nullptr;
-    };
-
-    // Single active task (API supports one at a time)
-    static TaskData *g_active_task = nullptr;
-    static std::unordered_map<const Head *, HeadData *> g_heads;
+    static TaskData *g_task = nullptr;
 
     // =========================================================================
     // Task implementation
     // =========================================================================
 
-    Task::~Task()
-    {
-        // Cleanup is handled by Head::shut()
-    }
+    Task::~Task() {}
 
     void Task::post()
     {
-        if (!g_active_task || g_active_task->is_posted)
+        if (!g_task || g_task->is_posted)
             return;
 
-        TaskData &t = *g_active_task;
+        TaskData &t = *g_task;
         wgpu::CommandEncoder enc = t.device.CreateCommandEncoder();
         wgpu::ComputePassEncoder pass = enc.BeginComputePass();
         pass.SetPipeline(t.pipeline);
@@ -86,56 +73,30 @@ namespace flow
         t.is_posted = true;
     }
 
-    void *Task::view() const
+    void *Task::buff() const
     {
-        if (!g_active_task)
+        if (!g_task)
             return nullptr;
-        return const_cast<wgpu::Buffer *>(&g_active_task->rgb_buf);
+        return const_cast<wgpu::Buffer *>(&g_task->rgb_buf);
     }
 
-    int Task::width() const
-    {
-        return g_active_task ? g_active_task->w : 0;
-    }
-
-    int Task::height() const
-    {
-        return g_active_task ? g_active_task->h : 0;
-    }
+    int Task::width() const { return g_task ? g_task->w : 0; }
+    int Task::height() const { return g_task ? g_task->h : 0; }
 
     // =========================================================================
-    // Head implementation
+    // headOpen - start GPU processing
     // =========================================================================
 
-    Head::Head(void *device_ptr, void *pipeline_ptr)
-    {
-        auto *data = new HeadData();
-        data->device = *static_cast<wgpu::Device *>(device_ptr);
-        data->pipeline = *static_cast<wgpu::ComputePipeline *>(pipeline_ptr);
-        g_heads[this] = data;
-    }
-
-    Head::~Head()
-    {
-        auto it = g_heads.find(this);
-        if (it != g_heads.end())
-        {
-            delete it->second->current;
-            delete it->second;
-            g_heads.erase(it);
-        }
-    }
-
-    Task Head::open(Tree &info, uint16_t *data)
+    Task headOpen(Tree &info, uint16_t *data, void *device_ptr, void *pipeline_ptr)
     {
         Task task;
-        auto it = g_heads.find(this);
-        if (it == g_heads.end() || !data)
+        if (!data || !device_ptr || !pipeline_ptr)
             return task;
 
-        HeadData &hd = *it->second;
-        Stem &root = info.root();
+        wgpu::Device device = *static_cast<wgpu::Device *>(device_ptr);
+        wgpu::ComputePipeline pipeline = *static_cast<wgpu::ComputePipeline *>(pipeline_ptr);
 
+        Stem &root = info.root();
         int w = static_cast<int>(root.leaf(WIDTH).dial());
         int h = static_cast<int>(root.leaf(HEIGHT).dial());
         if (w <= 0 || h <= 0)
@@ -207,73 +168,72 @@ namespace flow
         }
 
         // Create TaskData
-        auto *td = new TaskData();
-        td->device = hd.device;
-        td->pipeline = hd.pipeline;
-        td->w = w;
-        td->h = h;
+        delete g_task;
+        g_task = new TaskData();
+        g_task->device = device;
+        g_task->pipeline = pipeline;
+        g_task->w = w;
+        g_task->h = h;
 
         size_t bayer_size = static_cast<size_t>(w) * h * sizeof(uint16_t);
         size_t rgb_size = static_cast<size_t>(w) * h * 3 * sizeof(float);
-        td->rgb_size = rgb_size;
+        g_task->rgb_size = rgb_size;
 
         wgpu::BufferDescriptor desc{};
 
         desc.size = bayer_size;
         desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopyDst;
-        td->bayer_buf = td->device.CreateBuffer(&desc);
+        g_task->bayer_buf = device.CreateBuffer(&desc);
 
         desc.size = rgb_size;
         desc.usage = wgpu::BufferUsage::Storage | wgpu::BufferUsage::CopySrc;
-        td->rgb_buf = td->device.CreateBuffer(&desc);
+        g_task->rgb_buf = device.CreateBuffer(&desc);
 
         desc.size = sizeof(HeadUniforms);
         desc.usage = wgpu::BufferUsage::Uniform | wgpu::BufferUsage::CopyDst;
-        td->uniform_buf = td->device.CreateBuffer(&desc);
+        g_task->uniform_buf = device.CreateBuffer(&desc);
 
         desc.size = rgb_size;
         desc.usage = wgpu::BufferUsage::CopyDst | wgpu::BufferUsage::MapRead;
-        td->readback_buf = td->device.CreateBuffer(&desc);
+        g_task->readback_buf = device.CreateBuffer(&desc);
 
-        wgpu::Queue queue = td->device.GetQueue();
-        queue.WriteBuffer(td->bayer_buf, 0, data, bayer_size);
-        queue.WriteBuffer(td->uniform_buf, 0, &u, sizeof(u));
+        wgpu::Queue queue = device.GetQueue();
+        queue.WriteBuffer(g_task->bayer_buf, 0, data, bayer_size);
+        queue.WriteBuffer(g_task->uniform_buf, 0, &u, sizeof(u));
 
-        wgpu::BindGroupLayout layout = td->pipeline.GetBindGroupLayout(0);
+        wgpu::BindGroupLayout layout = pipeline.GetBindGroupLayout(0);
 
         wgpu::BindGroupEntry entries[3]{};
         entries[0].binding = 0;
-        entries[0].buffer = td->bayer_buf;
+        entries[0].buffer = g_task->bayer_buf;
         entries[0].size = bayer_size;
         entries[1].binding = 1;
-        entries[1].buffer = td->rgb_buf;
+        entries[1].buffer = g_task->rgb_buf;
         entries[1].size = rgb_size;
         entries[2].binding = 2;
-        entries[2].buffer = td->uniform_buf;
+        entries[2].buffer = g_task->uniform_buf;
         entries[2].size = sizeof(HeadUniforms);
 
         wgpu::BindGroupDescriptor bgDesc{};
         bgDesc.layout = layout;
         bgDesc.entryCount = 3;
         bgDesc.entries = entries;
-        td->bind_group = td->device.CreateBindGroup(&bgDesc);
-
-        // Store (hd.current and g_active_task are the same)
-        delete hd.current;
-        hd.current = td;
-        g_active_task = td;
+        g_task->bind_group = device.CreateBindGroup(&bgDesc);
 
         return task;
     }
 
-    Done Head::shut()
+    // =========================================================================
+    // headShut - wait and read back result
+    // =========================================================================
+
+    Done headShut()
     {
         Done out;
-        auto it = g_heads.find(this);
-        if (it == g_heads.end() || !it->second->current)
+        if (!g_task)
             return out;
 
-        TaskData &t = *it->second->current;
+        TaskData &t = *g_task;
 
         if (!t.is_posted)
         {
@@ -306,9 +266,8 @@ namespace flow
         std::memcpy(out.rgb.data(), mapped, t.rgb_size);
         t.readback_buf.Unmap();
 
-        delete it->second->current;
-        it->second->current = nullptr;
-        g_active_task = nullptr;
+        delete g_task;
+        g_task = nullptr;
 
         return out;
     }

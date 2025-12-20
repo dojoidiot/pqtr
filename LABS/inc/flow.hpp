@@ -72,21 +72,7 @@ namespace flow
     };
 
     // ============================================================================
-    // Flow - RAW image container
-    // ============================================================================
-
-    class Flow
-    {
-    public:
-        virtual ~Flow() = default;
-        virtual Tree &info() = 0;      // metadata tree
-        virtual uint16_t *data() = 0;  // raw bayer data (width * height)
-        virtual uint8_t *view() = 0;   // preview RGB (from embedded JPEG)
-        virtual size_t viewSize() = 0; // size of view buffer in bytes
-    };
-
-    // ============================================================================
-    // Head - GPU RAW processing (PIMPL)
+    // GPU processing types
     // ============================================================================
 
     // Final CPU result
@@ -103,19 +89,27 @@ namespace flow
     public:
         ~Task();
         void post();        // dispatch GPU work
-        void *view() const; // GPU buffer (valid after post)
+        void *buff() const; // GPU buffer (valid after post)
         int width() const;
         int height() const;
     };
 
-    // RAW to linear RGB processor
-    class Head
+    // ============================================================================
+    // Flow - RAW image container
+    // ============================================================================
+
+    class Flow
     {
     public:
-        Head(void *device_ptr, void *pipeline_ptr);
-        ~Head();
-        Task open(Tree &info, uint16_t *data);
-        Done shut();
+        virtual ~Flow() = default;
+        virtual Tree &info() = 0;      // metadata tree
+        virtual uint16_t *data() = 0;  // raw bayer data (width * height)
+        virtual uint8_t *view() = 0;   // preview RGB (from embedded JPEG)
+        virtual size_t viewSize() = 0; // size of view buffer in bytes
+
+        // GPU processing
+        virtual Task open(void *device, void *pipeline) = 0; // start GPU job
+        virtual Done shut() = 0;                              // wait and read back
     };
 
     // ============================================================================
