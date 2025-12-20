@@ -40,8 +40,11 @@ CXX = g++
 CXXFLAGS = -std=c++17 -Wall -O2
 
 DAWN_DIR = lib/dawn/install
+DAWN_BUILD = lib/dawn/build
 DAWN_INC = -I$(DAWN_DIR)/include
 DAWN_LIB = $(DAWN_DIR)/lib/libwebgpu_dawn.a
+DAWN_NATIVE_LIBS = $(DAWN_BUILD)/src/dawn/native/libdawn_native.a \
+                   $(DAWN_BUILD)/src/dawn/libdawn_proc.a
 
 TEST_DIR = tmp/test
 TEST_INC = -Iinc -Isrc/test/gear -Isrc/test/pipe -Isrc/test/vibe $(DAWN_INC)
@@ -99,14 +102,19 @@ FLOW_SRCS = src/test/flow/flow.cpp \
             src/main/flow/part/png.cpp \
             src/main/flow/part/jpg.cpp \
             src/main/flow/part/sony.cpp \
+            src/main/flow/part/warp.cpp \
+            src/main/flow/part/head.cpp \
+            src/main/wgpu/wgpu.cpp \
             src/main/pipe/pipe.cpp \
             src/main/pipe/part/pipe/node.cpp \
             src/main/pipe/part/pipe/jpeg.cpp
 
-$(TEST_FLOW): $(FLOW_SRCS)
+DAWN_NATIVE_INC = -Ilib/dawn/include
+
+$(TEST_FLOW): $(FLOW_SRCS) | $(DAWN_LIB)
 	@mkdir -p $(TEST_DIR)
 	@mkdir -p tmp/var/flow
-	$(CXX) $(CXXFLAGS) -Iinc $^ -o $@
+	$(CXX) $(CXXFLAGS) -Iinc $(DAWN_INC) $(DAWN_NATIVE_INC) $^ $(DAWN_NATIVE_LIBS) $(DAWN_LIB) -lpthread -ldl -o $@
 
 tidy:
 	rm -rf tmp

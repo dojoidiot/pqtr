@@ -15,88 +15,96 @@
 namespace flow
 {
 
-// ============================================================================
-// Field Keys
-// ============================================================================
+    // ============================================================================
+    // Field Keys
+    // ============================================================================
 
-constexpr const char* NAME   = "name";
-constexpr const char* WIDTH  = "width";
-constexpr const char* HEIGHT = "height";
-constexpr const char* BLACK  = "black";
-constexpr const char* WHITE  = "white";
+    constexpr const char *NAME = "name";
+    constexpr const char *WIDTH = "width";
+    constexpr const char *HEIGHT = "height";
+    constexpr const char *BLACK = "black";
+    constexpr const char *WHITE = "white";
 
-// ============================================================================
-// Tree - hierarchical metadata (PIMPL)
-// ============================================================================
+    // ============================================================================
+    // Tree - hierarchical metadata (PIMPL)
+    // ============================================================================
 
-// Base class for tree nodes
-class Node
-{
-public:
-    virtual ~Node() = default;
-};
+    // Base class for tree nodes
+    class Node
+    {
+    public:
+        virtual ~Node() = default;
+    };
 
-// Leaf node - holds a single value (dial or text)
-class Leaf : public Node
-{
-public:
-    virtual float dial() = 0;               // get numeric value
-    virtual void dial(float val) = 0;       // set numeric value
-    virtual std::string& text() = 0;        // get string value
-    virtual void text(std::string& val) = 0; // set string value
-    virtual bool live() = 0;                // true if value has been set
-};
+    // Leaf node - holds a single value (dial or text)
+    class Leaf : public Node
+    {
+    public:
+        virtual float dial() = 0;                // get numeric value
+        virtual void dial(float val) = 0;        // set numeric value
+        virtual std::string &text() = 0;         // get string value
+        virtual void text(std::string &val) = 0; // set string value
+        virtual bool live() = 0;                 // true if value has been set
+    };
 
-// Stem node - holds child nodes (branches and leaves)
-class Stem : public Node
-{
-public:
-    virtual Stem& next(const std::string& name) = 0;  // get/create child stem
-    virtual Leaf& leaf(const std::string& name) = 0;  // get/create child leaf
-    virtual Node* find(const std::string& name) = 0;  // find child (null if missing)
-    virtual size_t size() const = 0;                  // number of children
-    virtual bool test(const std::string& name) const = 0; // check if child exists
-    virtual void tidy() = 0;                          // remove empty children
-    virtual std::vector<std::string> list() = 0;      // list child names
-};
+    // Stem node - holds child nodes (branches and leaves)
+    class Stem : public Node
+    {
+    public:
+        virtual Stem &next(const std::string &name) = 0;      // get/create child stem
+        virtual Leaf &leaf(const std::string &name) = 0;      // get/create child leaf
+        virtual Node *find(const std::string &name) = 0;      // find child (null if missing)
+        virtual size_t size() const = 0;                      // number of children
+        virtual bool test(const std::string &name) const = 0; // check if child exists
+        virtual void tidy() = 0;                              // remove empty children
+        virtual std::vector<std::string> list() = 0;          // list child names
+    };
 
-// Tree root - owns the hierarchy
-class Tree
-{
-public:
-    virtual ~Tree() = default;
-    virtual Stem& root() = 0;           // get root stem
-    virtual std::string json() = 0;     // serialize to JSON
-    virtual void read(std::string json) = 0; // deserialize from JSON
-};
+    // Tree root - owns the hierarchy
+    class Tree
+    {
+    public:
+        virtual ~Tree() = default;
+        virtual Stem &root() = 0;                // get root stem
+        virtual std::string json() = 0;          // serialize to JSON
+        virtual void read(std::string json) = 0; // deserialize from JSON
+    };
 
-// ============================================================================
-// Flow - RAW image container
-// ============================================================================
+    // ============================================================================
+    // Flow - RAW image container
+    // ============================================================================
 
-class Flow
-{
-public:
-    virtual ~Flow() = default;
-    virtual Tree& info() = 0;       // metadata tree
-    virtual uint16_t* data() = 0;   // raw bayer data (width * height)
-    virtual uint8_t* view() = 0;    // preview RGB (from embedded JPEG)
-    virtual size_t viewSize() = 0;  // size of view buffer in bytes
-};
+    class Flow
+    {
+    public:
+        virtual ~Flow() = default;
+        virtual Tree &info() = 0;      // metadata tree
+        virtual uint16_t *data() = 0;  // raw bayer data (width * height)
+        virtual uint8_t *view() = 0;   // preview RGB (from embedded JPEG)
+        virtual size_t viewSize() = 0; // size of view buffer in bytes
+    };
 
-// ============================================================================
-// Factory & Utilities
-// ============================================================================
+    // ============================================================================
+    // Factory & Utilities
+    // ============================================================================
 
-// Load RAW file into Flow container
-std::unique_ptr<Flow> make(std::string name, uint16_t* bits, size_t size);
+    // Load RAW file into Flow container
+    std::unique_ptr<Flow> make(std::string name, uint16_t *bits, size_t size);
 
-// Format conversion
-enum Swap { JPG, PNG, BIN };
+    // Format conversion
+    enum Swap
+    {
+        JPG,
+        PNG,
+        BIN
+    };
 
-// Convert between formats:
-//   BIN->PNG/JPG: data is w*h*3 RGB, size ignored
-//   PNG/JPG->BIN: data is compressed, size is data length, w/h extracted from image
-std::vector<uint8_t> swap(uint8_t* data, size_t size, int w, int h, Swap to);
+    // Convert between formats:
+    //   BIN->PNG/JPG: data is w*h*3 RGB, size ignored
+    //   PNG/JPG->BIN: data is compressed, size is data length, w/h extracted from image
+    std::vector<uint8_t> swap(uint8_t *data, size_t size, int w, int h, Swap into);
+
+    // Lens distortion correction (operates on RGB float data, w*h*3)
+    void warp(float *rgb, int w, int h, const float *params, int count);
 
 }

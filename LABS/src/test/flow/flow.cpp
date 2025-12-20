@@ -1,29 +1,48 @@
-// flow test - load RAW and save sidecar
+// flow test - load RAW, process with Head, save outputs
 //
 // Usage: ./flow [input.ARW]
-// Output: tmp/var/flow/{name}.flow.json
+// Output:
+//   tmp/var/flow/{name}.flow.json  - metadata
+//   tmp/var/flow/{name}.neg        - raw bayer
+//   tmp/var/flow/{name}.jpg        - embedded preview
+//   tmp/var/flow/{name}.head.png   - GPU-processed linear RGB
 
 #include "flow.hpp"
+#include "head.hpp"
+
+#include <dawn/webgpu_cpp.h>
 
 #include <fstream>
 #include <iostream>
 #include <cstdio>
+#include <cmath>
+
+// Dawn helper functions (defined in wgpu.cpp)
+namespace dawn
+{
+    wgpu::Instance instance();
+    wgpu::Adapter adapter(wgpu::Instance instance);
+    wgpu::Device device(wgpu::Adapter adapter);
+    wgpu::ComputePipeline pipeline(wgpu::Device device, const char *wgsl);
+}
 
 static std::vector<uint8_t> read_file(const char *path)
 {
     FILE *f = fopen(path, "rb");
-    if (!f)
-        return {};
-
+    if (!f) return {};
     fseek(f, 0, SEEK_END);
     size_t size = ftell(f);
     fseek(f, 0, SEEK_SET);
-
     std::vector<uint8_t> data(size);
     fread(data.data(), 1, size, f);
     fclose(f);
-
     return data;
+}
+
+static std::string read_text(const char *path)
+{
+    auto data = read_file(path);
+    return std::string(data.begin(), data.end());
 }
 
 static std::string basename(const std::string &path)
@@ -33,6 +52,17 @@ static std::string basename(const std::string &path)
     size_t start = (slash == std::string::npos) ? 0 : slash + 1;
     size_t end = (dot == std::string::npos || dot < start) ? path.size() : dot;
     return path.substr(start, end - start);
+}
+
+// Linear to sRGB gamma
+static uint8_t linear_to_srgb(float v)
+{
+    v = std::max(0.0f, std::min(1.0f, v));
+    if (v <= 0.0031308f)
+        v = v * 12.92f;
+    else
+        v = 1.055f * std::pow(v, 1.0f / 2.4f) - 0.055f;
+    return static_cast<uint8_t>(v * 255.0f + 0.5f);
 }
 
 int main(int argc, char **argv)
@@ -69,7 +99,6 @@ int main(int argc, char **argv)
     std::ofstream out(jsonpath);
     out << f->info().json() << std::endl;
     out.close();
-
     std::cout << "Saved: " << jsonpath << std::endl;
 
     // Output neg (raw bayer data)
@@ -83,24 +112,110 @@ int main(int argc, char **argv)
         std::cout << "Saved: " << negpath << " (" << pixels * 2 << " bytes)" << std::endl;
     }
 
-    // Output preview JPEG
-    auto &viewNode = root.next("view");
-    int vw = static_cast<int>(viewNode.leaf(flow::WIDTH).dial());
-    int vh = static_cast<int>(viewNode.leaf(flow::HEIGHT).dial());
-
-    if (vw > 0 && vh > 0 && f->view())
+    // Output preview JPEG (raw bytes preserved from ARW)
+    if (f->view() && f->viewSize() > 0)
     {
-        auto jpg = flow::swap(f->view(), 0, vw, vh, flow::JPG);
-        if (!jpg.empty())
+        std::string jpgpath = "tmp/var/flow/" + name + ".jpg";
+        FILE *fp = fopen(jpgpath.c_str(), "wb");
+        if (fp)
         {
-            std::string jpgpath = "tmp/var/flow/" + name + ".jpg";
-            FILE *fp = fopen(jpgpath.c_str(), "wb");
-            if (fp)
+            fwrite(f->view(), 1, f->viewSize(), fp);
+            fclose(fp);
+            std::cout << "Saved: " << jpgpath << " (" << f->viewSize() << " bytes)" << std::endl;
+        }
+    }
+
+    // =========================================================================
+    // Head: GPU RAW processing
+    // =========================================================================
+
+    std::cout << "\nInitializing WebGPU..." << std::endl;
+
+    wgpu::Instance inst = dawn::instance();
+    wgpu::Adapter adapt = dawn::adapter(inst);
+    wgpu::Device device = dawn::device(adapt);
+
+    if (!device)
+    {
+        std::cerr << "Failed to create WebGPU device" << std::endl;
+        return 1;
+    }
+
+    std::cout << "WebGPU ready" << std::endl;
+
+    // Load shader
+    std::string wgsl = read_text("src/wgsl/gear/head.wgsl");
+    if (wgsl.empty())
+    {
+        std::cerr << "Failed to read head.wgsl" << std::endl;
+        return 1;
+    }
+
+    wgpu::ComputePipeline pipe = dawn::pipeline(device, wgsl.c_str());
+    std::cout << "Pipeline created" << std::endl;
+
+    // Create Head and process
+    head::Head head(&device, &pipe);
+    head::Task task = head.open(f->info(), f->data());
+
+    std::cout << "Processing " << task.width() << "x" << task.height() << "..." << std::endl;
+
+    task.post();
+    head::Done result = head.shut();
+
+    std::cout << "Done: " << result.width << "x" << result.height << std::endl;
+
+    // Apply lens distortion correction (after demosaic)
+    if (root.test("maker"))
+    {
+        flow::Stem &maker = root.next("maker");
+        if (maker.test("distortion"))
+        {
+            std::string distStr = maker.leaf("distortion").text();
+            // Parse distortion params
+            std::vector<float> params;
+            size_t pos = 0;
+            while (pos < distStr.size())
             {
-                fwrite(jpg.data(), 1, jpg.size(), fp);
-                fclose(fp);
-                std::cout << "Saved: " << jpgpath << " (" << jpg.size() << " bytes)" << std::endl;
+                size_t end = distStr.find(',', pos);
+                if (end == std::string::npos)
+                    end = distStr.size();
+                std::string num = distStr.substr(pos, end - pos);
+                size_t start = num.find_first_not_of(" \t");
+                if (start != std::string::npos)
+                    params.push_back(std::stof(num.substr(start)));
+                pos = end + 1;
             }
+            if (!params.empty())
+            {
+                flow::warp(result.rgb.data(), result.width, result.height, params.data(), static_cast<int>(params.size()));
+                std::cout << "Applied distortion correction (" << params.size() << " knots)" << std::endl;
+            }
+        }
+    }
+
+    // Convert linear RGB to sRGB 8-bit
+    size_t pixels = static_cast<size_t>(result.width) * result.height;
+    std::vector<uint8_t> rgb8(pixels * 3);
+
+    for (size_t i = 0; i < pixels; i++)
+    {
+        rgb8[i * 3 + 0] = linear_to_srgb(result.rgb[i * 3 + 0]);
+        rgb8[i * 3 + 1] = linear_to_srgb(result.rgb[i * 3 + 1]);
+        rgb8[i * 3 + 2] = linear_to_srgb(result.rgb[i * 3 + 2]);
+    }
+
+    // Encode PNG
+    auto png = flow::swap(rgb8.data(), 0, result.width, result.height, flow::PNG);
+    if (!png.empty())
+    {
+        std::string pngpath = "tmp/var/flow/" + name + ".head.png";
+        FILE *fp = fopen(pngpath.c_str(), "wb");
+        if (fp)
+        {
+            fwrite(png.data(), 1, png.size(), fp);
+            fclose(fp);
+            std::cout << "Saved: " << pngpath << " (" << png.size() << " bytes)" << std::endl;
         }
     }
 

@@ -8,6 +8,12 @@
 #include <sstream>
 #include <iomanip>
 
+// Forward declare warp (lens distortion correction)
+namespace flow
+{
+    void warp(uint16_t *data, int w, int h, const float *params, int count);
+}
+
 // Forward declare sony decoder
 namespace sony
 {
@@ -168,6 +174,7 @@ namespace flow
         {
             Text distStr = formatArray(distortion, distCount);
             maker.leaf("distortion").text(distStr);
+            // Note: distortion correction applied after demosaic, not on Bayer
         }
 
         Text decoder = pi.text("gear_decoder");

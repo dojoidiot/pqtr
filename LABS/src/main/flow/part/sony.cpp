@@ -483,11 +483,12 @@ pipe::Flow decode(const char* raw_data, size_t raw_size) {
         std::memcpy(dst, src, crop_width * sizeof(uint16_t));
     }
 
-    // Extract preview JPEG
+    // Extract preview JPEG (preserve raw bytes, decode for dimensions only)
     if (preview_off && preview_len && preview_off + preview_len <= raw_size) {
         auto jpeg = flow::decodeJpeg(&f[preview_off], preview_len);
         if (!jpeg.rgb.empty()) {
-            buf->preview = std::move(jpeg.rgb);
+            // Store raw JPEG bytes instead of decoded RGB
+            buf->preview.assign(&f[preview_off], &f[preview_off + preview_len]);
             buf->preview_width = jpeg.width;
             buf->preview_height = jpeg.height;
         }
