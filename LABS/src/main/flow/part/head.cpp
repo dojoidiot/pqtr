@@ -3,12 +3,21 @@
 // Creates pipelines internally, runs head + warp passes
 
 #include "flow.hpp"
+#include "lute.hpp"
 #include <dawn/webgpu_cpp.h>
 #include <cstring>
 #include <vector>
+#include <map>
+#include <iostream>
 
 namespace flow
 {
+
+    // Forward declarations from lute.cpp
+    void luteLearn(const Done &head, const uint8_t *jpeg, size_t jpegSize,
+                   const std::string &cameraKey);
+    Done luteDiff(const Done &head, const uint8_t *jpeg, size_t jpegSize,
+                  const std::string &cameraKey);
 
     // =========================================================================
     // Embedded shaders
@@ -237,6 +246,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         size_t rgb_size = 0;
         bool has_warp = false;
         bool is_posted = false;
+
+        // Tune mode
+        bool is_tune = false;
+        std::vector<uint8_t> view_data;  // embedded JPEG
+        std::string camera_key;           // profile key
     };
 
     static TaskData *g_task = nullptr;
@@ -293,6 +307,156 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     int Task::width() const { return g_task ? g_task->w : 0; }
     int Task::height() const { return g_task ? g_task->h : 0; }
+
+    Done Task::done()
+    {
+        Done out;
+        if (!g_task)
+            return out;
+
+        TaskData &t = *g_task;
+
+        if (!t.is_posted)
+        {
+            wgpu::CommandEncoder enc = t.device.CreateCommandEncoder();
+
+            {
+                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
+                pass.SetPipeline(t.head_pipe);
+                pass.SetBindGroup(0, t.head_bg);
+                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
+                pass.End();
+            }
+
+            if (t.has_warp)
+            {
+                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
+                pass.SetPipeline(t.warp_pipe);
+                pass.SetBindGroup(0, t.warp_bg);
+                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
+                pass.End();
+                enc.CopyBufferToBuffer(t.rgb2_buf, 0, t.readback_buf, 0, t.rgb_size);
+            }
+            else
+            {
+                enc.CopyBufferToBuffer(t.rgb_buf, 0, t.readback_buf, 0, t.rgb_size);
+            }
+
+            wgpu::CommandBuffer cmd = enc.Finish();
+            t.device.GetQueue().Submit(1, &cmd);
+        }
+
+        bool mapped = false;
+        t.readback_buf.MapAsync(
+            wgpu::MapMode::Read, 0, t.rgb_size,
+            wgpu::CallbackMode::AllowSpontaneous,
+            [&](wgpu::MapAsyncStatus, wgpu::StringView) { mapped = true; });
+
+        wgpu::Instance instance = t.device.GetAdapter().GetInstance();
+        while (!mapped)
+            instance.ProcessEvents();
+
+        out.width = t.w;
+        out.height = t.h;
+        out.rgb.resize(t.w * t.h * 3);
+
+        const float *data = static_cast<const float *>(t.readback_buf.GetConstMappedRange());
+        std::memcpy(out.rgb.data(), data, t.rgb_size);
+        t.readback_buf.Unmap();
+
+        // Tune mode: learn camera profile from flat + JPEG
+        // (downsamples HEAD to JPEG size, learns resolution-independent LUT)
+        if (t.is_tune && !t.view_data.empty() && !t.camera_key.empty())
+        {
+            luteLearn(out, t.view_data.data(), t.view_data.size(), t.camera_key);
+        }
+
+        delete g_task;
+        g_task = nullptr;
+
+        return out;
+    }
+
+    Done Task::diff()
+    {
+        Done out;
+        if (!g_task)
+            return out;
+
+        TaskData &t = *g_task;
+
+        // Need JPEG data for diff
+        if (t.view_data.empty())
+        {
+            // No JPEG - just return empty
+            delete g_task;
+            g_task = nullptr;
+            return out;
+        }
+
+        // Stash view data before done() clears task
+        std::vector<uint8_t> view_copy = t.view_data;
+
+        // Run GPU work and get HEAD result
+        if (!t.is_posted)
+        {
+            wgpu::CommandEncoder enc = t.device.CreateCommandEncoder();
+
+            {
+                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
+                pass.SetPipeline(t.head_pipe);
+                pass.SetBindGroup(0, t.head_bg);
+                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
+                pass.End();
+            }
+
+            if (t.has_warp)
+            {
+                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
+                pass.SetPipeline(t.warp_pipe);
+                pass.SetBindGroup(0, t.warp_bg);
+                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
+                pass.End();
+                enc.CopyBufferToBuffer(t.rgb2_buf, 0, t.readback_buf, 0, t.rgb_size);
+            }
+            else
+            {
+                enc.CopyBufferToBuffer(t.rgb_buf, 0, t.readback_buf, 0, t.rgb_size);
+            }
+
+            wgpu::CommandBuffer cmd = enc.Finish();
+            t.device.GetQueue().Submit(1, &cmd);
+        }
+
+        // Read back HEAD result
+        bool mapped = false;
+        t.readback_buf.MapAsync(
+            wgpu::MapMode::Read, 0, t.rgb_size,
+            wgpu::CallbackMode::AllowSpontaneous,
+            [&](wgpu::MapAsyncStatus, wgpu::StringView) { mapped = true; });
+
+        wgpu::Instance instance = t.device.GetAdapter().GetInstance();
+        while (!mapped)
+            instance.ProcessEvents();
+
+        Done head;
+        head.width = t.w;
+        head.height = t.h;
+        head.rgb.resize(t.w * t.h * 3);
+
+        const float *data = static_cast<const float *>(t.readback_buf.GetConstMappedRange());
+        std::memcpy(head.rgb.data(), data, t.rgb_size);
+        t.readback_buf.Unmap();
+
+        // Get camera key before deleting task
+        std::string camera_key = t.is_tune ? t.camera_key : "";
+
+        delete g_task;
+        g_task = nullptr;
+
+        // Compute spectral diff (apply LUT if camera_key provided and profile exists)
+        return luteDiff(head, view_copy.data(), view_copy.size(), camera_key);
+    }
 
     // =========================================================================
     // Helper: create pipeline
@@ -517,69 +681,49 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     // =========================================================================
-    // headShut
+    // headTune - same as headOpen but with tune mode enabled
     // =========================================================================
 
-    Done headShut()
+    Task headTune(Tree &info, uint16_t *data, uint8_t *view, size_t viewSize, void *device_ptr)
     {
-        Done out;
+        // First, set up the task like headOpen
+        Task task = headOpen(info, data, device_ptr);
+
         if (!g_task)
-            return out;
+            return task;
 
-        TaskData &t = *g_task;
+        // Enable tune mode
+        g_task->is_tune = true;
 
-        if (!t.is_posted)
+        // Copy view data (embedded JPEG)
+        if (view && viewSize > 0)
         {
-            wgpu::CommandEncoder enc = t.device.CreateCommandEncoder();
-
-            {
-                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
-                pass.SetPipeline(t.head_pipe);
-                pass.SetBindGroup(0, t.head_bg);
-                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
-                pass.End();
-            }
-
-            if (t.has_warp)
-            {
-                wgpu::ComputePassEncoder pass = enc.BeginComputePass();
-                pass.SetPipeline(t.warp_pipe);
-                pass.SetBindGroup(0, t.warp_bg);
-                pass.DispatchWorkgroups((t.w + 7) / 8, (t.h + 7) / 8, 1);
-                pass.End();
-                enc.CopyBufferToBuffer(t.rgb2_buf, 0, t.readback_buf, 0, t.rgb_size);
-            }
-            else
-            {
-                enc.CopyBufferToBuffer(t.rgb_buf, 0, t.readback_buf, 0, t.rgb_size);
-            }
-
-            wgpu::CommandBuffer cmd = enc.Finish();
-            t.device.GetQueue().Submit(1, &cmd);
+            g_task->view_data.assign(view, view + viewSize);
         }
 
-        bool done = false;
-        t.readback_buf.MapAsync(
-            wgpu::MapMode::Read, 0, t.rgb_size,
-            wgpu::CallbackMode::AllowSpontaneous,
-            [&](wgpu::MapAsyncStatus, wgpu::StringView) { done = true; });
+        // Build camera key from metadata
+        Stem &root = info.root();
+        std::string make, model, style;
 
-        wgpu::Instance instance = t.device.GetAdapter().GetInstance();
-        while (!done)
-            instance.ProcessEvents();
+        if (root.test("maker"))
+        {
+            Stem &maker = root.next("maker");
+            if (maker.test("make"))
+                make = maker.leaf("make").text();
+            if (maker.test("model"))
+                model = maker.leaf("model").text();
+            if (maker.test("creative_style"))
+                style = maker.leaf("creative_style").text();
+        }
 
-        out.width = t.w;
-        out.height = t.h;
-        out.rgb.resize(t.w * t.h * 3);
+        // Fallback defaults
+        if (make.empty()) make = "Unknown";
+        if (model.empty()) model = "Camera";
+        if (style.empty()) style = "Standard";
 
-        const float *mapped = static_cast<const float *>(t.readback_buf.GetConstMappedRange());
-        std::memcpy(out.rgb.data(), mapped, t.rgb_size);
-        t.readback_buf.Unmap();
+        g_task->camera_key = make + "_" + model + "_" + style;
 
-        delete g_task;
-        g_task = nullptr;
-
-        return out;
+        return task;
     }
 
 } // namespace flow

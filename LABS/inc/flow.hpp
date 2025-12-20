@@ -89,6 +89,8 @@ namespace flow
     public:
         ~Task();
         void post();        // dispatch GPU work
+        Done done();        // read back result (call after post)
+        Done diff();        // spectral diff (HEAD vs JPEG, same size as JPEG)
         void *buff() const; // GPU buffer (valid after post)
         int width() const;
         int height() const;
@@ -108,8 +110,8 @@ namespace flow
         virtual size_t viewSize() = 0; // size of view buffer in bytes
 
         // GPU processing
-        virtual Task open(void *device) = 0;
-        virtual Done shut() = 0;
+        virtual Task head(void *device) = 0;  // RAW → scene-linear RGB
+        virtual Task tune(void *device) = 0;  // head + learn camera profile
     };
 
     // ============================================================================

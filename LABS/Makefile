@@ -54,6 +54,7 @@ TEST_GEAR = $(TEST_DIR)/test_gear
 TEST_PIPE = $(TEST_DIR)/test_pipe
 TEST_VIBE = $(TEST_DIR)/test_vibe
 TEST_FLOW = $(TEST_DIR)/test_flow
+TEST_LUTE = $(TEST_DIR)/test_lute
 
 # === Targets ===
 
@@ -104,6 +105,8 @@ FLOW_SRCS = src/test/flow/flow.cpp \
             src/main/flow/part/sony.cpp \
             src/main/flow/part/warp.cpp \
             src/main/flow/part/head.cpp \
+            src/main/flow/part/lute.cpp \
+            src/main/lute/lute.cpp \
             src/main/wgpu/wgpu.cpp \
             src/main/pipe/pipe.cpp \
             src/main/pipe/part/pipe/node.cpp \
@@ -115,6 +118,33 @@ $(TEST_FLOW): $(FLOW_SRCS) | $(DAWN_LIB)
 	@mkdir -p $(TEST_DIR)
 	@mkdir -p tmp/var/flow
 	$(CXX) $(CXXFLAGS) -Iinc $(DAWN_INC) $(DAWN_NATIVE_INC) $^ $(DAWN_NATIVE_LIBS) $(DAWN_LIB) -lpthread -ldl -o $@
+
+# LUTE test (camera profile learning)
+LUTE_SRCS = src/test/lute/lute.cpp \
+            src/main/lute/lute.cpp \
+            src/main/flow/flow.cpp \
+            src/main/flow/part/tree.cpp \
+            src/main/flow/part/load.cpp \
+            src/main/flow/part/swap.cpp \
+            src/main/flow/part/png.cpp \
+            src/main/flow/part/jpg.cpp \
+            src/main/flow/part/sony.cpp \
+            src/main/flow/part/warp.cpp \
+            src/main/flow/part/head.cpp \
+            src/main/flow/part/lute.cpp \
+            src/main/wgpu/wgpu.cpp \
+            src/main/pipe/pipe.cpp \
+            src/main/pipe/part/pipe/node.cpp \
+            src/main/pipe/part/pipe/jpeg.cpp
+
+$(TEST_LUTE): $(LUTE_SRCS) | $(DAWN_LIB)
+	@mkdir -p $(TEST_DIR)
+	@mkdir -p tmp/var/flow
+	$(CXX) $(CXXFLAGS) -Iinc $(DAWN_INC) $(DAWN_NATIVE_INC) $^ $(DAWN_NATIVE_LIBS) $(DAWN_LIB) -lpthread -ldl -o $@
+
+lute: $(TEST_LUTE)
+	@echo "=== LUTE Test ==="
+	@cd $(shell pwd) && $(TEST_LUTE) || true
 
 tidy:
 	rm -rf tmp
