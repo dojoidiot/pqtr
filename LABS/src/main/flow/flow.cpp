@@ -18,7 +18,7 @@ namespace flow
 
     // GPU helpers (from head.cpp)
     Task headOpen(Tree &info, uint16_t *data, void *device);
-    Done headShut();
+    Task headTune(Tree &info, uint16_t *data, uint8_t *view, size_t viewSize, void *device);
 
     // -------------------------------------------------------------------------
     // FlowImpl
@@ -44,14 +44,14 @@ namespace flow
         uint8_t *view() override { return view_.data(); }
         size_t viewSize() override { return view_.size(); }
 
-        Task open(void *device) override
+        Task head(void *device) override
         {
             return headOpen(*info_, data_.data(), device);
         }
 
-        Done shut() override
+        Task tune(void *device) override
         {
-            return headShut();
+            return headTune(*info_, data_.data(), view_.data(), view_.size(), device);
         }
     };
 

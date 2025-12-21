@@ -14,10 +14,14 @@ printf "Building and packing... "
 make
 echo "done"
 
+# Create test var area (separate from pack)
+mkdir -p tmp/test/var/BASE
+mkdir -p tmp/test/var/LABS
+
 echo ""
 echo "http://127.0.0.1:4040"
 echo ""
 echo "Test mode: Enter any email, OTP prints to console"
 echo ""
 
-tmp/pack/bin/base --info-file tmp/pack/etc/test.json --data-area tmp/pack/var --wasm-root tmp/pack/www --test
+tmp/pack/bin/base --info-file tmp/pack/etc/test.json --data-area tmp/test/var/ --wasm-root tmp/pack/www --test

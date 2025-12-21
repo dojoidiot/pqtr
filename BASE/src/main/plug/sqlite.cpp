@@ -1,6 +1,6 @@
 // sqlite.cpp - SQLite implementation of Store interface
 
-#include "data.hpp"
+#include "base.hpp"
 #include <sqlite3.h>
 #include <cstring>
 #include <ctime>

@@ -48,7 +48,7 @@ void uploadPreviewTexture() {
 
 // Run HEAD pipeline: blc → wb → demosaic → cst → crop
 // Takes GEAR output, produces scene-linear RGB
-void runHeadPipeline(pipe::Data& data) {
+void runHeadPipeline(pipe::Flow& flow) {
     // Build HEAD pipe
     auto head = pipe::make();
     head->link(pipe::blc());
@@ -58,17 +58,17 @@ void runHeadPipeline(pipe::Data& data) {
     head->link(pipe::crop());
 
     // Run HEAD pipeline
-    data = head->flow(std::move(data));
+    flow = head->flow(std::move(flow));
 
     // Check for error
-    if (data.info.text("error")[0] != '\0') {
-        LOG(data.info.text("error").c_str());
+    if (flow.info.text("error")[0] != '\0') {
+        LOG(flow.info.text("error").c_str());
         return;
     }
 
     // Extract RGB output
     struct RgbF32 { float* data; int width; int height; };
-    auto* rgb = static_cast<RgbF32*>(data.page);
+    auto* rgb = static_cast<RgbF32*>(flow.data);
     if (!rgb || !rgb->data) {
         LOG("HEAD: no output data");
         return;
@@ -86,7 +86,7 @@ void runHeadPipeline(pipe::Data& data) {
     // Clean up pipe output
     delete[] rgb->data;
     delete rgb;
-    data.page = nullptr;
+    flow.data = nullptr;
 
     char msg[64];
     snprintf(msg, sizeof(msg), "HEAD done: %dx%d", g_state.head_width, g_state.head_height);

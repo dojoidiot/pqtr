@@ -36,10 +36,9 @@ struct RgbF32 {
 class BlcLink : public Link {
 public:
     Name name() const override { return "blc"; }
-    Name type() const override { return "head"; }
 
-    Data flow(Data in) override {
-        auto* bayer = static_cast<gear::sony::BayerBuffer*>(in.page);
+    Flow flow(Flow in) override {
+        auto* bayer = static_cast<gear::sony::BayerBuffer*>(in.data);
         if (!bayer || bayer->data.empty()) {
             in.info.text("error", "blc: no input data");
             return in;
@@ -74,7 +73,7 @@ public:
         // Clean up input
         delete bayer;
 
-        in.page = out;
+        in.data = out;
         return in;
     }
 };
@@ -89,10 +88,9 @@ public:
 class WbLink : public Link {
 public:
     Name name() const override { return "wb"; }
-    Name type() const override { return "head"; }
 
-    Data flow(Data in) override {
-        auto* bayer = static_cast<BayerF32*>(in.page);
+    Flow flow(Flow in) override {
+        auto* bayer = static_cast<BayerF32*>(in.data);
         if (!bayer || !bayer->data) {
             in.info.text("error", "wb: no input data");
             return in;
@@ -149,10 +147,9 @@ public:
 class DemosaicLink : public Link {
 public:
     Name name() const override { return "demosaic"; }
-    Name type() const override { return "head"; }
 
-    Data flow(Data in) override {
-        auto* bayer = static_cast<BayerF32*>(in.page);
+    Flow flow(Flow in) override {
+        auto* bayer = static_cast<BayerF32*>(in.data);
         if (!bayer || !bayer->data) {
             in.info.text("error", "demosaic: no input data");
             return in;
@@ -230,7 +227,7 @@ public:
         delete[] bayer->data;
         delete bayer;
 
-        in.page = rgb;
+        in.data = rgb;
         return in;
     }
 };
@@ -245,10 +242,9 @@ public:
 class CstLink : public Link {
 public:
     Name name() const override { return "cst"; }
-    Name type() const override { return "head"; }
 
-    Data flow(Data in) override {
-        auto* rgb = static_cast<RgbF32*>(in.page);
+    Flow flow(Flow in) override {
+        auto* rgb = static_cast<RgbF32*>(in.data);
         if (!rgb || !rgb->data) {
             in.info.text("error", "cst: no input data");
             return in;
@@ -292,10 +288,9 @@ public:
 class CropLink : public Link {
 public:
     Name name() const override { return "crop"; }
-    Name type() const override { return "head"; }
 
-    Data flow(Data in) override {
-        auto* rgb = static_cast<RgbF32*>(in.page);
+    Flow flow(Flow in) override {
+        auto* rgb = static_cast<RgbF32*>(in.data);
         if (!rgb || !rgb->data) {
             in.info.text("error", "crop: no input data");
             return in;
@@ -340,7 +335,7 @@ public:
         delete[] rgb->data;
         delete rgb;
 
-        in.page = out;
+        in.data = out;
         return in;
     }
 };

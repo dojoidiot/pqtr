@@ -107,6 +107,141 @@ static std::vector<uint8_t> deflate_store(const uint8_t* data, size_t len) {
     return out;
 }
 
+// ============================================================
+// PNG Decoder
+// ============================================================
+
+static uint32_t read_be32(const uint8_t* p) {
+    return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3];
+}
+
+// Inflate stored blocks only (matching our encoder)
+static bool inflate_store(const uint8_t* src, size_t srcLen, std::vector<uint8_t>& out) {
+    if (srcLen < 6) return false;
+
+    // Skip zlib header (2 bytes)
+    size_t pos = 2;
+
+    while (pos < srcLen - 4) {  // Leave room for adler32
+        uint8_t header = src[pos++];
+        bool final = header & 1;
+        int type = (header >> 1) & 3;
+
+        if (type != 0) return false;  // Only stored blocks supported
+
+        if (pos + 4 > srcLen) return false;
+        uint16_t len = src[pos] | (src[pos+1] << 8);
+        pos += 4;  // Skip LEN and NLEN
+
+        if (pos + len > srcLen - 4) return false;
+        out.insert(out.end(), src + pos, src + pos + len);
+        pos += len;
+
+        if (final) break;
+    }
+    return true;
+}
+
+// Paeth predictor
+static uint8_t paeth(uint8_t a, uint8_t b, uint8_t c) {
+    int p = a + b - c;
+    int pa = p > a ? p - a : a - p;
+    int pb = p > b ? p - b : b - p;
+    int pc = p > c ? p - c : c - p;
+    if (pa <= pb && pa <= pc) return a;
+    if (pb <= pc) return b;
+    return c;
+}
+
+ImageResult decodePng(const uint8_t* data, size_t size) {
+    ImageResult result = {0, 0, {}};
+
+    // Check PNG signature
+    const uint8_t sig[] = {137, 80, 78, 71, 13, 10, 26, 10};
+    if (size < 8 || memcmp(data, sig, 8) != 0) return result;
+
+    size_t pos = 8;
+    int width = 0, height = 0, bitDepth = 0, colorType = 0;
+    std::vector<uint8_t> compressed;
+
+    while (pos + 12 <= size) {
+        uint32_t len = read_be32(data + pos);
+        const uint8_t* type = data + pos + 4;
+        const uint8_t* chunk = data + pos + 8;
+
+        if (memcmp(type, "IHDR", 4) == 0 && len >= 13) {
+            width = read_be32(chunk);
+            height = read_be32(chunk + 4);
+            bitDepth = chunk[8];
+            colorType = chunk[9];
+            // Only support 8-bit RGB (type 2) or RGBA (type 6)
+            if (bitDepth != 8 || (colorType != 2 && colorType != 6)) return result;
+        } else if (memcmp(type, "IDAT", 4) == 0) {
+            compressed.insert(compressed.end(), chunk, chunk + len);
+        } else if (memcmp(type, "IEND", 4) == 0) {
+            break;
+        }
+
+        pos += 12 + len;
+    }
+
+    if (width == 0 || height == 0 || compressed.empty()) return result;
+
+    // Decompress
+    std::vector<uint8_t> raw;
+    if (!inflate_store(compressed.data(), compressed.size(), raw)) return result;
+
+    int channels = (colorType == 6) ? 4 : 3;
+    size_t rowBytes = width * channels;
+    if (raw.size() < static_cast<size_t>(height) * (1 + rowBytes)) return result;
+
+    // Unfilter and convert to RGB
+    result.width = width;
+    result.height = height;
+    result.rgb.resize(width * height * 3);
+
+    std::vector<uint8_t> prev(rowBytes, 0);
+    std::vector<uint8_t> curr(rowBytes);
+
+    for (int y = 0; y < height; y++) {
+        size_t rowStart = y * (1 + rowBytes);
+        uint8_t filter = raw[rowStart];
+        const uint8_t* src = raw.data() + rowStart + 1;
+
+        // Apply filter
+        for (size_t x = 0; x < rowBytes; x++) {
+            uint8_t a = (x >= static_cast<size_t>(channels)) ? curr[x - channels] : 0;
+            uint8_t b = prev[x];
+            uint8_t c = (x >= static_cast<size_t>(channels)) ? prev[x - channels] : 0;
+
+            switch (filter) {
+                case 0: curr[x] = src[x]; break;  // None
+                case 1: curr[x] = src[x] + a; break;  // Sub
+                case 2: curr[x] = src[x] + b; break;  // Up
+                case 3: curr[x] = src[x] + ((a + b) >> 1); break;  // Average
+                case 4: curr[x] = src[x] + paeth(a, b, c); break;  // Paeth
+                default: return {0, 0, {}};
+            }
+        }
+
+        // Copy to output (RGB only)
+        uint8_t* dst = result.rgb.data() + y * width * 3;
+        for (int x = 0; x < width; x++) {
+            dst[x*3+0] = curr[x*channels+0];
+            dst[x*3+1] = curr[x*channels+1];
+            dst[x*3+2] = curr[x*channels+2];
+        }
+
+        std::swap(prev, curr);
+    }
+
+    return result;
+}
+
+// ============================================================
+// PNG Encoder
+// ============================================================
+
 std::vector<uint8_t> encodePng(const uint8_t* rgb, int width, int height) {
     std::vector<uint8_t> out;
 

@@ -14,8 +14,8 @@ HOST_TARGET = tmp/base
 SODIUM_LIB = lib/libsodium/src/libsodium/.libs/libsodium.a
 SQLITE_OBJ = $(TMP_DIR)/sqlite3.o
 
-INCLUDES = -Iinc -Ilib/libsodium/src/libsodium/include -Ilib/sqlite -Ilib/cpp-httplib
-LIB_OBJS = $(TMP_DIR)/http.o $(TMP_DIR)/crypto.o $(TMP_DIR)/jwt.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o $(TMP_DIR)/console.o
+INCLUDES = -Isrc/main -Ilib/libsodium/src/libsodium/include -Ilib/sqlite -Ilib/cpp-httplib
+LIB_OBJS = $(TMP_DIR)/http.o $(TMP_DIR)/crypto.o $(TMP_DIR)/jwt.o $(TMP_DIR)/conf.o $(TMP_DIR)/jrpc.o $(TMP_DIR)/rest.o $(TMP_DIR)/wasm.o $(TMP_DIR)/sqlite.o $(TMP_DIR)/mailgun.o $(TMP_DIR)/console.o
 
 # Default Goal: Build the native executable.
 $(HOST_TARGET): src/main/base.cpp $(LIB_TARGET) $(SODIUM_LIB)

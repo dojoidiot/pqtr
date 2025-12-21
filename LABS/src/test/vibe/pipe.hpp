@@ -5,7 +5,15 @@
 
 #pragma once
 
-#include <wgpu.hpp>
+#include <dawn/webgpu_cpp.h>
+
+// Dawn helper functions (defined in wgpu.cpp)
+namespace dawn {
+    wgpu::Instance instance();
+    wgpu::Adapter adapter(wgpu::Instance instance);
+    wgpu::Device device(wgpu::Adapter adapter);
+    wgpu::ComputePipeline pipeline(wgpu::Device device, const char* wgsl);
+}
 #include <vector>
 #include <string>
 #include <cstdint>
@@ -51,10 +59,10 @@ namespace dawn_pipe
         Dims dims() const { return dims_; }
 
     private:
-        dawn::Instance instance_;
-        dawn::Adapter adapter_;
-        dawn::Device device_;
-        dawn::ComputePipeline pipeline_;
+        wgpu::Instance instance_;
+        wgpu::Adapter adapter_;
+        wgpu::Device device_;
+        wgpu::ComputePipeline pipeline_;
 
         wgpu::Buffer input_buffer_;
         wgpu::Buffer output_buffer_;

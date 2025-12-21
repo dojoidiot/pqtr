@@ -184,7 +184,7 @@ void createPipeJson(const char* pipe_name, const char* raw_filename);
 
 // Texture functions
 void uploadPreviewTexture();
-void runHeadPipeline(pipe::Data& data);
+void runHeadPipeline(pipe::Flow& data);
 void createHeadTexture();
 
 // REST functions

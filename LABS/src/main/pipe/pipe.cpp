@@ -1,7 +1,7 @@
 // pipe.cpp - Pipe implementation
 //
-// Simple link chain: Pipe manages Links, each transforms Data.
-// Data = Page (GPU context) + Info (metadata tree)
+// Simple link chain: Pipe manages Links, each transforms Flow.
+// Flow = Data (GPU context) + Info (metadata tree)
 
 #include <pipe.hpp>
 
@@ -20,8 +20,8 @@ public:
         return *this;
     }
 
-    Data flow(Data in) override {
-        Data current = std::move(in);
+    Flow flow(Flow in) override {
+        Flow current = std::move(in);
         for (auto& lk : m_links) {
             current = lk->flow(std::move(current));
         }
@@ -34,21 +34,6 @@ public:
 
     Link& link(size_t i) override {
         return *m_links[i];
-    }
-
-    Link* find(const Name& name) override {
-        for (auto& lk : m_links) {
-            if (lk->name() == name) return lk.get();
-        }
-        return nullptr;
-    }
-
-    List<Link*> type(const Name& t) override {
-        List<Link*> result;
-        for (auto& lk : m_links) {
-            if (lk->type() == t) result.push_back(lk.get());
-        }
-        return result;
     }
 };
 

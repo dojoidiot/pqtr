@@ -1,187 +1,11 @@
 // base.cpp - BASE server entry point
 
 #include "base.hpp"
-#include "httplib.h"
 #include <iostream>
 #include <cstdio>
-#include <fstream>
-#include <sstream>
-#include <cstdlib>
-#include <cstring>
-#include <memory>
 #include <sys/stat.h>
 #include <cerrno>
-
-namespace {
-
-struct Config {
-    std::string host;
-    int port = 0;
-    std::string boot_path;
-    std::string admin_email;
-    std::string boot_email;
-    std::string otp_from;
-    std::string otp_text;
-    // sqlite
-    std::string sqlite_file;
-    // mailgun
-    std::string mailgun_otp_skey;      // sending key from config (keyring lookup name)
-    std::string mailgun_secret;        // secret from keyring (looked up by otp_skey)
-    std::string mailgun_domain;
-    std::string mailgun_region;
-};
-
-std::string loadSecret(const std::string& path) {
-    std::ifstream f(path);
-    if (!f.is_open()) return "";
-    std::string secret;
-    std::getline(f, secret);
-    // Trim trailing whitespace/newline
-    while (!secret.empty() && (secret.back() == '\n' || secret.back() == '\r' || secret.back() == ' '))
-        secret.pop_back();
-    return secret;
-}
-
-bool loadConfig(const std::string& path, Config& cfg) {
-    std::ifstream f(path);
-    if (!f.is_open()) return false;
-
-    std::stringstream buf;
-    buf << f.rdbuf();
-    std::string json = buf.str();
-
-    auto getString = [&json](const std::string& key) -> std::string {
-        std::string search = "\"" + key + "\"";
-        size_t pos = json.find(search);
-        if (pos == std::string::npos) return "";
-        pos = json.find(':', pos);
-        if (pos == std::string::npos) return "";
-        pos = json.find('"', pos);
-        if (pos == std::string::npos) return "";
-        pos++;
-        std::string result;
-        while (pos < json.size() && json[pos] != '"') {
-            if (json[pos] == '\\' && pos + 1 < json.size()) {
-                pos++;
-                if (json[pos] == 'n') { result += '\n'; pos++; continue; }
-                if (json[pos] == 'r') { result += '\r'; pos++; continue; }
-                if (json[pos] == 't') { result += '\t'; pos++; continue; }
-            }
-            result += json[pos++];
-        }
-        return result;
-    };
-
-    auto getInt = [&json](const std::string& key) -> int {
-        std::string search = "\"" + key + "\"";
-        size_t pos = json.find(search);
-        if (pos == std::string::npos) return 0;
-        pos = json.find(':', pos);
-        if (pos == std::string::npos) return 0;
-        pos++;
-        while (pos < json.size() && !isdigit(json[pos]) && json[pos] != '-') pos++;
-        return std::atoi(json.c_str() + pos);
-    };
-
-    auto getNestedString = [&json](const std::string& obj, const std::string& key) -> std::string {
-        size_t obj_pos = json.find("\"" + obj + "\"");
-        if (obj_pos == std::string::npos) return "";
-        std::string sub = json.substr(obj_pos);
-        std::string search = "\"" + key + "\"";
-        size_t pos = sub.find(search);
-        if (pos == std::string::npos) return "";
-        pos = sub.find(':', pos);
-        if (pos == std::string::npos) return "";
-        pos = sub.find('"', pos);
-        if (pos == std::string::npos) return "";
-        pos++;
-        std::string result;
-        while (pos < sub.size() && sub[pos] != '"') result += sub[pos++];
-        return result;
-    };
-
-    std::string s;
-    int i;
-
-    if (!(s = getString("host")).empty()) cfg.host = s;
-    if ((i = getInt("port")) > 0) cfg.port = i;
-    if (!(s = getString("boot_path")).empty()) cfg.boot_path = s;
-    if (!(s = getString("admin_email")).empty()) cfg.admin_email = s;
-    if (!(s = getString("boot_email")).empty()) cfg.boot_email = s;
-    if (!(s = getString("otp_from")).empty()) cfg.otp_from = s;
-    if (!(s = getString("otp_text")).empty()) cfg.otp_text = s;
-
-    // sqlite.file
-    if (!(s = getNestedString("sqlite", "file")).empty()) cfg.sqlite_file = s;
-
-    // mailgun.domain, mailgun.region, mailgun.otp_skey (keyring lookup name)
-    if (!(s = getNestedString("mailgun", "domain")).empty()) cfg.mailgun_domain = s;
-    if (!(s = getNestedString("mailgun", "region")).empty()) cfg.mailgun_region = s;
-    if (!(s = getNestedString("mailgun", "otp_skey")).empty()) cfg.mailgun_otp_skey = s;
-
-    return true;
-}
-
-std::string jsonString(const std::string& s) {
-    std::string out = "\"";
-    for (char c : s) {
-        if (c == '"') out += "\\\"";
-        else if (c == '\\') out += "\\\\";
-        else if (c == '\n') out += "\\n";
-        else out += c;
-    }
-    return out + "\"";
-}
-
-std::string extractString(const std::string& json, const std::string& key) {
-    std::string search = "\"" + key + "\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return "";
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return "";
-    pos = json.find('"', pos);
-    if (pos == std::string::npos) return "";
-    pos++;
-    std::string result;
-    while (pos < json.size() && json[pos] != '"') {
-        if (json[pos] == '\\' && pos + 1 < json.size()) {
-            pos++;
-            if (json[pos] == 'n') result += '\n';
-            else result += json[pos];
-        } else {
-            result += json[pos];
-        }
-        pos++;
-    }
-    return result;
-}
-
-std::string extractId(const std::string& json) {
-    std::string search = "\"id\"";
-    size_t pos = json.find(search);
-    if (pos == std::string::npos) return "null";
-    pos = json.find(':', pos);
-    if (pos == std::string::npos) return "null";
-    pos++;
-    while (pos < json.size() && (json[pos] == ' ' || json[pos] == '\t')) pos++;
-    if (pos >= json.size()) return "null";
-    if (json[pos] == '"') return jsonString(extractString(json, "id"));
-    if (json[pos] == 'n') return "null";
-    std::string num;
-    while (pos < json.size() && (isdigit(json[pos]) || json[pos] == '-')) num += json[pos++];
-    return num.empty() ? "null" : num;
-}
-
-std::string jrpcResult(const std::string& id, const std::string& result) {
-    return "{\"jsonrpc\":\"2.0\",\"result\":" + result + ",\"id\":" + id + "}";
-}
-
-std::string jrpcError(const std::string& id, int code, const std::string& message) {
-    return "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":" + std::to_string(code) +
-           ",\"message\":" + jsonString(message) + "},\"id\":" + id + "}";
-}
-
-} // anonymous namespace
+#include <cstring>
 
 int main(int argc, char* argv[]) {
     std::string config_path;
@@ -189,6 +13,7 @@ int main(int argc, char* argv[]) {
     std::string wasm_root;
     bool test_mode = false;
 
+    // Parse arguments
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "-h" || arg == "--help") {
@@ -222,22 +47,22 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    Config cfg;
-    if (!loadConfig(config_path, cfg)) {
+    // Load configuration
+    base::Config cfg;
+    if (!base::loadConfig(config_path, cfg)) {
         std::cerr << "[BASE] Error: Failed to load config: " << config_path << std::endl;
         return 1;
     }
     std::cout << "[BASE] Config: " << config_path << std::endl;
 
-    // Load mailgun secret from file (otp_skey is the file path)
-    std::string s;
+    // Load mailgun secret from file
     if (!cfg.mailgun_otp_skey.empty()) {
         std::string secret_path = cfg.mailgun_otp_skey;
-        // If relative path, resolve relative to data_area
         if (!secret_path.empty() && secret_path[0] != '/') {
             secret_path = data_area + secret_path;
         }
-        if (!(s = loadSecret(secret_path)).empty()) {
+        std::string s = base::loadSecret(secret_path);
+        if (!s.empty()) {
             cfg.mailgun_secret = s;
         }
     }
@@ -255,10 +80,9 @@ int main(int argc, char* argv[]) {
         std::cerr << "[BASE] Error: sqlite.file required in config" << std::endl;
         return 1;
     }
-    // Mailgun config only required if not in test mode
     if (!test_mode) {
         if (cfg.mailgun_otp_skey.empty()) {
-            std::cerr << "[BASE] Error: mailgun.otp_skey required in config (path to secret file)" << std::endl;
+            std::cerr << "[BASE] Error: mailgun.otp_skey required in config" << std::endl;
             return 1;
         }
         if (cfg.mailgun_secret.empty()) {
@@ -283,6 +107,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Initialize database
     std::string db_path = data_area + cfg.sqlite_file;
     auto store = base::createStore(db_path);
     if (!store) {
@@ -291,12 +116,12 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "[BASE] Database: " << db_path << std::endl;
 
-    // In test mode, clear rate limits on startup to avoid lockouts during dev
     if (test_mode) {
         store->clearAllRateLimits();
         std::cout << "[BASE] Rate limits: cleared (test mode)" << std::endl;
     }
 
+    // Initialize mailer
     std::unique_ptr<base::Mailer> mailer;
     if (test_mode) {
         mailer = base::createConsoleMailer();
@@ -306,6 +131,7 @@ int main(int argc, char* argv[]) {
         std::cout << "[BASE] Mailer: " << cfg.mailgun_domain << " (" << cfg.mailgun_region << ")" << std::endl;
     }
 
+    // Initialize service
     base::Service service(*store, *mailer);
     if (!service.init()) {
         std::cerr << "[BASE] Error: Failed to initialize service" << std::endl;
@@ -313,7 +139,7 @@ int main(int argc, char* argv[]) {
     }
     service.setDataArea(data_area);
 
-    // Initialize var directory structure
+    // Create data directories
     if (!data_area.empty()) {
         std::string labs_dir = data_area + "LABS";
         if (mkdir(labs_dir.c_str(), 0755) == 0) {
@@ -330,6 +156,7 @@ int main(int argc, char* argv[]) {
         std::cout << "[BASE] Admin: " << cfg.admin_email << std::endl;
     }
 
+    // Bootstrap admin if needed
     if (!cfg.boot_email.empty() && store->countUsersByRole("PQTR") == 0) {
         std::cout << "[BASE] No admin found, sending bootstrap to " << cfg.boot_email << std::endl;
         if (service.sendBootstrapEmail(cfg.boot_email)) {
@@ -339,170 +166,33 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // Setup HTTP server
     httplib::Server svr;
 
+    // JRPC endpoint
     svr.Post("/jrpc", [&service](const httplib::Request& req, httplib::Response& res) {
         res.set_header("Content-Type", "application/json");
-        const std::string& body = req.body;
-        std::string id = extractId(body);
-        std::string method = extractString(body, "method");
-
-        // Get JWT from Authorization header for all authenticated requests
-        std::string jwt;
         std::string auth = req.get_header_value("Authorization");
-        if (auth.rfind("Bearer ", 0) == 0) {
-            jwt = auth.substr(7);
-        }
-
-        // NOTE: Use printf+fflush, NOT iostream. httplib runs handlers in worker
-        // threads where cout/cerr buffer unpredictably and logs may never appear.
-        printf("[JRPC] method=%s\n", method.c_str());
-        fflush(stdout);
-
-        if (body.find("\"jsonrpc\"") == std::string::npos || body.find("\"2.0\"") == std::string::npos) {
-            res.set_content(jrpcError(id, -32600, "Invalid Request"), "application/json");
-            return;
-        }
-        if (method.empty()) {
-            res.set_content(jrpcError(id, -32600, "Missing method"), "application/json");
-            return;
-        }
-
-        std::string p_email = extractString(body, "email");
-        std::string p_otp = extractString(body, "otp");
-        std::string p_refresh = extractString(body, "refresh_token");
-        std::string p_user_id = extractString(body, "user_id");
-        std::string p_role = extractString(body, "role");
-
-        if (method == "register") {
-            if (p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing email"), "application/json"); return; }
-            auto resp = service.handleRegister({p_email});
-            if (!resp.ok) {
-                const std::string& err_msg = resp.error.empty() ? "Registration failed" : resp.error;
-                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
-                return;
-            }
-            std::ostringstream r; r << "{\"ok\":" << (resp.ok ? "true" : "false");
-            if (resp.ok) r << ",\"expires\":" << resp.expires;
-            r << "}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "verify") {
-            if (p_email.empty() || p_otp.empty()) { res.set_content(jrpcError(id, -32602, "Missing email or otp"), "application/json"); return; }
-            auto resp = service.handleVerify({p_email, p_otp});
-            if (resp.jwt.empty()) {
-                const std::string& err_msg = resp.error.empty() ? "Verification failed: Unspecified error in handleVerify" : resp.error;
-                printf("[JRPC] verify FAIL: %s\n", err_msg.c_str()); fflush(stdout);
-                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
-                return;
-            }
-            std::ostringstream r;
-            r << "{\"jwt\":" << jsonString(resp.jwt) << ",\"refresh_token\":" << jsonString(resp.refresh_token)
-              << ",\"user_id\":" << jsonString(resp.user_id) << ",\"itag\":" << jsonString(resp.itag)
-              << ",\"role\":" << jsonString(resp.role) << "}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "login") {
-            if (p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing email"), "application/json"); return; }
-            auto resp = service.handleLogin({p_email});
-            if (!resp.ok) {
-                const std::string& err_msg = resp.error.empty() ? "Login failed" : resp.error;
-                res.set_content(jrpcError(id, -32001, err_msg), "application/json");
-                return;
-            }
-            std::ostringstream r; r << "{\"ok\":" << (resp.ok ? "true" : "false");
-            if (resp.ok) r << ",\"expires\":" << resp.expires;
-            r << "}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "refresh") {
-            if (p_refresh.empty()) { res.set_content(jrpcError(id, -32602, "Missing refresh_token"), "application/json"); return; }
-            auto resp = service.handleRefresh({p_refresh});
-            if (resp.jwt.empty()) { res.set_content(jrpcError(id, -32001, "Refresh failed"), "application/json"); return; }
-            res.set_content(jrpcResult(id, "{\"jwt\":" + jsonString(resp.jwt) + "}"), "application/json");
-
-        } else if (method == "find") {
-            if (jwt.empty() || p_email.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or email"), "application/json"); return; }
-            auto resp = service.handleFind({jwt, p_email});
-            if (resp.user_id.empty()) { res.set_content(jrpcError(id, -32001, "Not found"), "application/json"); return; }
-            std::ostringstream r;
-            r << "{\"user_id\":" << jsonString(resp.user_id) << ",\"email\":" << jsonString(resp.email)
-              << ",\"tier\":" << jsonString(resp.tier) << ",\"role\":" << jsonString(resp.role)
-              << ",\"locked\":" << (resp.locked ? "true" : "false") << ",\"created_at\":" << resp.created_at << "}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "give") {
-            if (jwt.empty() || p_user_id.empty() || p_role.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleGive({jwt, p_user_id, p_role});
-            res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
-
-        } else if (method == "take") {
-            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleTake({jwt, p_user_id});
-            res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
-
-        } else if (method == "lock") {
-            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleLock({jwt, p_user_id});
-            res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
-
-        } else if (method == "free") {
-            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleFree({jwt, p_user_id});
-            res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
-
-        } else if (method == "drop") {
-            if (jwt.empty() || p_user_id.empty()) { res.set_content(jrpcError(id, -32602, "Missing params"), "application/json"); return; }
-            auto resp = service.handleDrop({jwt, p_user_id});
-            res.set_content(jrpcResult(id, std::string("{\"ok\":") + (resp.ok ? "true" : "false") + "}"), "application/json");
-
-        } else if (method == "info") {
-            if (jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
-            auto resp = service.handleInfo({jwt});
-            if (resp.total_users == 0 && resp.users_none == 0) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
-            std::ostringstream r;
-            r << "{\"total_users\":" << resp.total_users << ",\"users_none\":" << resp.users_none
-              << ",\"users_play\":" << resp.users_play << ",\"users_hero\":" << resp.users_hero
-              << ",\"users_pqtr\":" << resp.users_pqtr << "}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "list") {
-            std::string p_name = extractString(body, "name");  // Optional
-            if (jwt.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt"), "application/json"); return; }
-            auto resp = service.handleList({jwt, p_name});
-            if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
-            std::ostringstream r;
-            r << "{\"items\":[";
-            for (size_t i = 0; i < resp.items.size(); i++) {
-                if (i > 0) r << ",";
-                r << "\"" << resp.items[i] << "\"";
-            }
-            r << "]}";
-            res.set_content(jrpcResult(id, r.str()), "application/json");
-
-        } else if (method == "test") {
-            std::string p_name = extractString(body, "name");
-            if (jwt.empty() || p_name.empty()) { res.set_content(jrpcError(id, -32602, "Missing jwt or name"), "application/json"); return; }
-            auto resp = service.handleTest({jwt, p_name});
-            if (!resp.ok) { res.set_content(jrpcError(id, -32001, "Unauthorized"), "application/json"); return; }
-            res.set_content(jrpcResult(id, std::string("{\"exists\":") + (resp.exists ? "true" : "false") + "}"), "application/json");
-
-        } else {
-            res.set_content(jrpcError(id, -32601, "Method not found"), "application/json");
-        }
+        res.set_content(base::jrpc::handle(service, req.body, auth), "application/json");
     });
+    std::cout << "[BASE] JRPC: /jrpc" << std::endl;
 
+    // Bootstrap endpoint
     if (!cfg.boot_path.empty()) {
         svr.Post(cfg.boot_path, [&service, &cfg, &store](const httplib::Request& req, httplib::Response& res) {
             res.set_header("Content-Type", "application/json");
             std::string body_plain = req.has_param("body-plain") ? req.get_param_value("body-plain") : req.body;
 
+            // Extract 64-char hex token
             std::string token;
             for (size_t i = 0; i + 64 <= body_plain.size(); ++i) {
                 bool valid = true;
                 for (size_t j = 0; j < 64; ++j) {
                     char c = body_plain[i + j];
-                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) { valid = false; break; }
+                    if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+                        valid = false;
+                        break;
+                    }
                 }
                 if (valid) {
                     token = body_plain.substr(i, 64);
@@ -511,8 +201,14 @@ int main(int argc, char* argv[]) {
                 }
             }
 
-            if (token.empty()) { res.set_content("{\"ok\":false,\"error\":\"no_token\"}", "application/json"); return; }
-            if (!service.verifyBootstrapToken(token)) { res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json"); return; }
+            if (token.empty()) {
+                res.set_content("{\"ok\":false,\"error\":\"no_token\"}", "application/json");
+                return;
+            }
+            if (!service.verifyBootstrapToken(token)) {
+                res.set_content("{\"ok\":false,\"error\":\"invalid_token\"}", "application/json");
+                return;
+            }
 
             if (!cfg.admin_email.empty()) {
                 auto user = store->getUserByEmail(cfg.admin_email);
@@ -528,177 +224,31 @@ int main(int argc, char* argv[]) {
         std::cout << "[BASE] Boot: " << cfg.boot_path << std::endl;
     }
 
-    std::cout << "[BASE] JRPC: /jrpc" << std::endl;
-
-    // Binary push endpoint: POST /push?name=xxx&file=xxx with Authorization header
+    // REST endpoints
     svr.Post("/push", [&service](const httplib::Request& req, httplib::Response& res) {
-        res.set_header("Content-Type", "application/json");
-
-        // Get JWT from Authorization header
-        std::string auth = req.get_header_value("Authorization");
-        std::string jwt;
-        if (auth.substr(0, 7) == "Bearer ") {
-            jwt = auth.substr(7);
-        }
-        if (jwt.empty()) {
-            res.status = 401;
-            res.set_content("{\"ok\":false,\"error\":\"Missing authorization\"}", "application/json");
-            return;
-        }
-
-        // Get params from query string
-        std::string name = req.get_param_value("name");
-        std::string file = req.get_param_value("file");
-        if (name.empty() || file.empty()) {
-            res.status = 400;
-            res.set_content("{\"ok\":false,\"error\":\"Missing name or file param\"}", "application/json");
-            return;
-        }
-
-        // Binary body
-        if (req.body.empty()) {
-            res.status = 400;
-            res.set_content("{\"ok\":false,\"error\":\"Empty body\"}", "application/json");
-            return;
-        }
-
-        auto resp = service.handlePush({jwt, name, file, req.body});
-        if (!resp.ok) {
-            // Check if it's an auth error
-            if (resp.error == "Unauthorized" || resp.error.find("Invalid") != std::string::npos) {
-                res.status = 401;
-            } else {
-                res.status = 400;
-            }
-            res.set_content("{\"ok\":false,\"error\":\"" + resp.error + "\"}", "application/json");
-            return;
-        }
-        res.set_content("{\"ok\":true}", "application/json");
+        base::rest::handlePush(service, req, res);
     });
     std::cout << "[BASE] Push: /push" << std::endl;
 
-    // Binary pull endpoint: GET /pull?name=xxx&file=xxx with Authorization header
     svr.Get("/pull", [&service, &data_area](const httplib::Request& req, httplib::Response& res) {
-        // Get JWT from Authorization header
-        std::string auth = req.get_header_value("Authorization");
-        std::string jwt;
-        if (auth.substr(0, 7) == "Bearer ") {
-            jwt = auth.substr(7);
-        }
-        if (jwt.empty()) {
-            res.status = 401;
-            res.set_content("Unauthorized", "text/plain");
-            return;
-        }
-
-        // Get name and file from query params
-        std::string name = req.get_param_value("name");
-        std::string file = req.get_param_value("file");
-        if (name.empty() || file.empty()) {
-            res.status = 400;
-            res.set_content("Missing name or file param", "text/plain");
-            return;
-        }
-
-        // Verify JWT and get claims
-        auto claims = base::jwt::decode(jwt, service.getSigningPubkey());
-        if (!claims || claims->itag.empty()) {
-            res.status = 401;
-            res.set_content("Invalid JWT", "text/plain");
-            return;
-        }
-
-        // Validate name and file to prevent path traversal
-        auto validPath = [](const std::string& s) {
-            if (s.empty() || s.size() > 255) return false;
-            if (s.find("..") != std::string::npos) return false;
-            if (s.find('/') != std::string::npos) return false;
-            if (s.find('\\') != std::string::npos) return false;
-            return true;
-        };
-        if (!validPath(name) || !validPath(file)) {
-            res.status = 400;
-            res.set_content("Invalid name or file", "text/plain");
-            return;
-        }
-
-        // Build file path: var/LABS/<itag>/pipe/<name>/<file>
-        std::string file_path = data_area + "LABS/" + claims->itag + "/pipe/" + name + "/" + file;
-
-        // Read file
-        FILE* f = fopen(file_path.c_str(), "rb");
-        if (!f) {
-            res.status = 404;
-            res.set_content("File not found", "text/plain");
-            return;
-        }
-
-        fseek(f, 0, SEEK_END);
-        size_t size = ftell(f);
-        fseek(f, 0, SEEK_SET);
-
-        std::string content(size, '\0');
-        size_t read = fread(&content[0], 1, size, f);
-        fclose(f);
-
-        if (read != size) {
-            res.status = 500;
-            res.set_content("Read error", "text/plain");
-            return;
-        }
-
-        // Determine content type
-        std::string content_type = "application/octet-stream";
-        if (file.size() > 5 && file.substr(file.size() - 5) == ".json") {
-            content_type = "application/json";
-        }
-
-        res.set_content(content, content_type);
+        base::rest::handlePull(service, data_area, req, res);
     });
     std::cout << "[BASE] Pull: /pull" << std::endl;
 
-    // Redirect root to labs.html
+    svr.Delete("/drop", [&service, &data_area](const httplib::Request& req, httplib::Response& res) {
+        base::rest::handleDropPipe(service, data_area, req, res);
+    });
+    std::cout << "[BASE] Drop: /drop" << std::endl;
+
+    // Root redirect
     svr.Get("/", [](const httplib::Request&, httplib::Response& res) {
         res.set_redirect("/labs.html");
     });
 
-    // Static file serving with proper MIME types for WASM
-    if (!wasm_root.empty()) {
-        // Serve .wasm files with correct MIME type and caching
-        svr.Get("/.*\\.wasm", [&wasm_root](const httplib::Request& req, httplib::Response& res) {
-            std::string path = wasm_root + req.path;
-            std::ifstream file(path, std::ios::binary);
-            if (!file) {
-                res.status = 404;
-                return;
-            }
-            std::ostringstream ss;
-            ss << file.rdbuf();
-            res.set_content(ss.str(), "application/wasm");
-            res.set_header("Cache-Control", "public, max-age=31536000");  // Cache for 1 year
-        });
+    // Static WASM serving
+    base::wasm::setup(svr, wasm_root);
 
-        // Serve .js files with caching
-        svr.Get("/.*\\.js", [&wasm_root](const httplib::Request& req, httplib::Response& res) {
-            std::string path = wasm_root + req.path;
-            std::ifstream file(path);
-            if (!file) {
-                res.status = 404;
-                return;
-            }
-            std::ostringstream ss;
-            ss << file.rdbuf();
-            res.set_content(ss.str(), "application/javascript");
-            res.set_header("Cache-Control", "no-cache");  // Check for updates
-        });
-
-        if (svr.set_mount_point("/", wasm_root)) {
-            std::cout << "[BASE] WWW: " << wasm_root << std::endl;
-        } else {
-            std::cerr << "[BASE] Warning: Failed to mount www: " << wasm_root << std::endl;
-        }
-    }
-
+    // Start server
     std::cout << "[BASE] Listening on " << cfg.host << ":" << cfg.port << " (v2-debug)" << std::endl;
     if (!svr.listen(cfg.host, cfg.port)) {
         std::cerr << "[BASE] Failed to start server" << std::endl;

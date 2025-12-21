@@ -2,7 +2,7 @@
 //
 // Provides simple C++ wrappers around Dawn WebGPU.
 
-#include "dawn.hpp"
+#include <dawn/webgpu_cpp.h>
 #include <dawn/native/DawnNative.h>
 #include <dawn/dawn_proc.h>
 

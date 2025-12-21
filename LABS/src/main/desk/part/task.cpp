@@ -138,7 +138,7 @@ void runTuneStep() {
             raw_attr.onsuccess = [](emscripten_fetch_t* fetch) {
                 int step = static_cast<int>(reinterpret_cast<intptr_t>(fetch->userData));
 
-                pipe::Data result = gear::sony::decode(fetch->data, fetch->numBytes);
+                pipe::Flow result = gear::sony::decode(fetch->data, fetch->numBytes);
                 emscripten_fetch_close(fetch);
 
                 if (result.info.text("error")[0] != '\0') {
@@ -148,8 +148,8 @@ void runTuneStep() {
                     return;
                 }
 
-                if (result.page) {
-                    auto* buf = static_cast<gear::sony::BayerBuffer*>(result.page);
+                if (result.data) {
+                    auto* buf = static_cast<gear::sony::BayerBuffer*>(result.data);
 
                     // Extract preview before running HEAD
                     if (g_state.preview_data) free(g_state.preview_data);

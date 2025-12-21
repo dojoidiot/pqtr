@@ -385,7 +385,7 @@ static float srgb_to_linear(float v) {
     return std::pow((v + 0.055f) / 1.055f, 2.4f);
 }
 
-bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut) {
+bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut, bool direct) {
     if (!flat || !target || width <= 0 || height <= 0) {
         std::cerr << "[lute::tune] Error: Invalid input\n";
         return false;
@@ -400,13 +400,13 @@ bool tune(const float* flat, const uint8_t* target, int width, int height, Camer
     lut.snapshot();
 
     long pixels_added = 0;
-    float bin_size = 1.0f / GRID_SIZE;  // scene-linear [0,1] bins
+    float bin_size = 1.0f / GRID_SIZE;  // [0,1] bins
 
     for (int y = 0; y < height; y++) {
         for (int x = 0; x < width; x++) {
             size_t idx = (static_cast<size_t>(y) * width + x) * 3;
 
-            // Flat is scene-linear [0,1+] - clamp to [0,1]
+            // Input RGB [0,1+] - clamp to [0,1]
             float fr = std::max(0.0f, std::min(1.0f, flat[idx + 0]));
             float fg = std::max(0.0f, std::min(1.0f, flat[idx + 1]));
             float fb = std::max(0.0f, std::min(1.0f, flat[idx + 2]));
@@ -416,25 +416,31 @@ bool tune(const float* flat, const uint8_t* target, int width, int height, Camer
             float tg = srgb_to_linear(target[idx + 1] / 255.0f);
             float tb = srgb_to_linear(target[idx + 2] / 255.0f);
 
-            // === 1D Tone Curve ===
-            // Input luminance (scene-linear from HEAD)
-            float in_lum = 0.299f * fr + 0.587f * fg + 0.114f * fb;
-            // Output luminance (JPEG linearized to scene-linear)
-            float out_lum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
+            float cr, cg, cb;
 
-            // Bin by input luminance
-            int curve_bin = std::min(CURVE_SIZE - 1, static_cast<int>(in_lum * CURVE_SIZE));
-            lut.curve_sum[curve_bin] += out_lum;
-            lut.curve_count[curve_bin]++;
+            if (direct) {
+                // Direct mode: input already tone-mapped (ACES), bin directly
+                cr = fr;
+                cg = fg;
+                cb = fb;
+            } else {
+                // Scene-linear mode: apply ratio adjustment first
+                // === 1D Tone Curve ===
+                float in_lum = 0.299f * fr + 0.587f * fg + 0.114f * fb;
+                float out_lum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
 
-            // === 3D Color LUT ===
-            // First apply tone curve to input (so 3D LUT learns residual color correction)
-            float ratio = (in_lum > 0.001f) ? (out_lum / in_lum) : 1.0f;
-            float cr = std::max(0.0f, std::min(1.0f, fr * ratio));
-            float cg = std::max(0.0f, std::min(1.0f, fg * ratio));
-            float cb = std::max(0.0f, std::min(1.0f, fb * ratio));
+                int curve_bin = std::min(CURVE_SIZE - 1, static_cast<int>(in_lum * CURVE_SIZE));
+                lut.curve_sum[curve_bin] += out_lum;
+                lut.curve_count[curve_bin]++;
 
-            // Quantize curved input to grid cell
+                // Apply tone curve to input (so 3D LUT learns residual color)
+                float ratio = (in_lum > 0.001f) ? (out_lum / in_lum) : 1.0f;
+                cr = std::max(0.0f, std::min(1.0f, fr * ratio));
+                cg = std::max(0.0f, std::min(1.0f, fg * ratio));
+                cb = std::max(0.0f, std::min(1.0f, fb * ratio));
+            }
+
+            // Quantize to grid cell
             int ri = std::min(GRID_SIZE - 1, static_cast<int>(cr / bin_size));
             int gi = std::min(GRID_SIZE - 1, static_cast<int>(cg / bin_size));
             int bi = std::min(GRID_SIZE - 1, static_cast<int>(cb / bin_size));

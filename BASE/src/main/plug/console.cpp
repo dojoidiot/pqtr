@@ -1,7 +1,7 @@
 // console.cpp
 // Console mailer - prints OTP to stdout for local testing
 
-#include "mail.hpp"
+#include "base.hpp"
 #include <iostream>
 
 namespace base {

@@ -4,6 +4,7 @@
 
 #include "flow.hpp"
 #include "lute.hpp"
+#include "drum.hpp"
 #include <dawn/webgpu_cpp.h>
 #include <cstring>
 #include <vector>
@@ -108,9 +109,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
         else if (pos == 2u) { r = c; g = (n + s_val + e + ww) * 0.25; b = (ne + nw + se + sw) * 0.25; }
         else { r = (e + ww) * 0.5; g = c; b = (n + s_val) * 0.5; }
     }
-    let out_r = u.m00 * r + u.m01 * g + u.m02 * b;
-    let out_g = u.m10 * r + u.m11 * g + u.m12 * b;
-    let out_b = u.m20 * r + u.m21 * g + u.m22 * b;
+    let out_r = max(0.0, u.m00 * r + u.m01 * g + u.m02 * b);
+    let out_g = max(0.0, u.m10 * r + u.m11 * g + u.m12 * b);
+    let out_b = max(0.0, u.m20 * r + u.m21 * g + u.m22 * b);
     let out_idx = (u32(y) * u.width + u32(x)) * 3u;
     output[out_idx + 0u] = out_r;
     output[out_idx + 1u] = out_g;
@@ -251,6 +252,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         bool is_tune = false;
         std::vector<uint8_t> view_data;  // embedded JPEG
         std::string camera_key;           // profile key
+
+        // DRUM (local tone mapping)
+        std::string dro_setting;          // DRO level from EXIF
     };
 
     static TaskData *g_task = nullptr;
@@ -363,6 +367,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         const float *data = static_cast<const float *>(t.readback_buf.GetConstMappedRange());
         std::memcpy(out.rgb.data(), data, t.rgb_size);
         t.readback_buf.Unmap();
+
+        // DRUM is now applied separately in the pipeline
+        // (see flow test for staged application)
 
         // Tune mode: learn camera profile from flat + JPEG
         // (downsamples HEAD to JPEG size, learns resolution-independent LUT)
@@ -517,6 +524,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         wu.height = h;
         wu.knot_count = 0;
 
+        // DRO setting for local tone mapping (extracted here, applied after GPU)
+        std::string dro_setting;
+
         if (root.test("maker"))
         {
             Stem &maker = root.next("maker");
@@ -536,6 +546,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
                 if (pat >= 46 && pat <= 49)
                     hu.pattern = static_cast<uint32_t>(pat - 46);
             }
+
+            if (maker.test("dro"))
+                dro_setting = maker.leaf("dro").text();
 
             if (maker.test("color_matrix"))
             {
@@ -586,6 +599,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         g_task->w = w;
         g_task->h = h;
         g_task->has_warp = (wu.knot_count > 0);
+        g_task->dro_setting = dro_setting;
 
         // Create pipelines
         g_task->head_pipe = createPipeline(device, HEAD_WGSL);
@@ -727,3 +741,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
 } // namespace flow
+
+
+namespace flow
+{
+    // Stubs for forward-declared functions to resolve linker errors.
+    // These appear to be part of an alternative learning path in head.cpp.
+    void luteLearn(const Done &head, const uint8_t *jpeg, size_t jpegSize,
+                   const std::string &cameraKey)
+    {
+        // TODO: Implement LUTE learning from HEAD task
+    }
+
+    Done luteDiff(const Done &head, const uint8_t *jpeg, size_t jpegSize,
+                  const std::string &cameraKey)
+    {
+        // TODO: Implement LUTE diff from HEAD task
+        return head; // Just return the input for now
+    }
+}

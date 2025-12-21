@@ -1,7 +1,6 @@
 // mailgun.cpp - Mailgun implementation using httplib (no shell commands)
 
-#include "mail.hpp"
-#include "httplib.h"
+#include "base.hpp"
 #include <iostream>
 #include <sstream>
 

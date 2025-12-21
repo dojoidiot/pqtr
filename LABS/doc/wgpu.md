@@ -223,8 +223,9 @@ offset N+8:   IEND chunk (12 bytes)
 ## Direct API
 
 ```cpp
-#include <wgpu.hpp>
+#include <dawn/webgpu_cpp.h>
 
+// Helper functions in wgpu.cpp
 auto inst = dawn::instance();
 auto adapt = dawn::adapter(inst);
 auto dev = dawn::device(adapt);
@@ -235,7 +236,7 @@ auto pipe = dawn::pipeline(dev, wgslShaderCode);
 
 ```
 WGPU/
-├── inc/wgpu.hpp           # Public API
+├── src/main/wgpu/wgpu.cpp # Dawn helper functions
 ├── src/
 │   ├── main/
 │   │   └── link.cpp       # Pipe link implementations

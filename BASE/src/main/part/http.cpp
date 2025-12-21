@@ -4,7 +4,6 @@
 // in worker threads where cout/cerr buffer unpredictably.
 
 #include "base.hpp"
-#include "itag.hpp"
 #include <sodium.h>
 #include <ctime>
 #include <cstdio>
@@ -614,6 +613,58 @@ rpc::PushResponse Service::handlePush(const rpc::PushRequest& req) {
     }
     fwrite(req.data.data(), 1, req.data.size(), f);
     fclose(f);
+
+    resp.ok = true;
+    return resp;
+}
+
+rpc::DropPipeResponse Service::handleDropPipe(const rpc::DropPipeRequest& req) {
+    rpc::DropPipeResponse resp{};
+
+    // Verify JWT and extract itag
+    auto claims = jwt::decode(req.jwt, m_signing_pubkey);
+    if (!claims || !itag::valid(claims->itag)) {
+        resp.error = "Unauthorized";
+        return resp;
+    }
+
+    if (m_data_area.empty()) {
+        resp.error = "No data area";
+        return resp;
+    }
+
+    // Validate path component
+    if (!validPathComponent(req.name)) {
+        resp.error = "Invalid name";
+        return resp;
+    }
+
+    // Build pipe path
+    std::string pipe_path = m_data_area + "LABS/" + claims->itag + "/pipe/" + req.name;
+
+    // Check if exists
+    struct stat st;
+    if (stat(pipe_path.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) {
+        resp.error = "Not found";
+        return resp;
+    }
+
+    // Delete all files in directory then remove directory
+    DIR* dir = opendir(pipe_path.c_str());
+    if (dir) {
+        struct dirent* entry;
+        while ((entry = readdir(dir)) != nullptr) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+            std::string file_path = pipe_path + "/" + entry->d_name;
+            unlink(file_path.c_str());
+        }
+        closedir(dir);
+    }
+
+    if (rmdir(pipe_path.c_str()) != 0) {
+        resp.error = "Failed to remove directory";
+        return resp;
+    }
 
     resp.ok = true;
     return resp;

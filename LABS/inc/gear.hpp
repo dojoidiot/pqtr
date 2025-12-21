@@ -4,8 +4,8 @@
 //
 // API (pipe::Link):
 //   gear::read() - Link contributor for pipe
-//   Input:  Page = raw file buffer, Info = { "size": buffer_size }
-//   Output: Page = Bayer buffer, Info = camera metadata
+//   Input:  Data = raw file buffer, Info = { "size": buffer_size }
+//   Output: Data = Bayer buffer, Info = camera metadata
 //
 // GPU compute via WGPU (WebGPU)
 
@@ -24,7 +24,7 @@ namespace gear {
     // Read RAW file into pipeline
     pipe::Hold<pipe::Link> read();
 
-    // Sony decoder direct call (returns pipe::Data)
+    // Sony decoder direct call (returns pipe::Flow)
     namespace sony {
         // Bayer buffer - raw sensor data + embedded preview
         struct BayerBuffer {
@@ -41,8 +41,8 @@ namespace gear {
         };
 
         // Decode Sony ARW file
-        // Returns: Page = BayerBuffer*, Info = camera metadata
-        pipe::Data decode(const char* raw_data, size_t raw_size);
+        // Returns: Data = BayerBuffer*, Info = camera metadata
+        pipe::Flow decode(const char* raw_data, size_t raw_size);
     }
 
 } // namespace gear

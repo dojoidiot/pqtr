@@ -41,8 +41,9 @@ namespace lute {
     // tune() - Accumulate flat -> target mappings
     //   flat:   scene-linear RGB [0,1], w*h*3 floats
     //   target: camera JPEG RGB [0,255], w*h*3 uint8
+    //   direct: if true, skip ratio adjustment (use for ACES input)
     //   Returns true on success
-    bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut);
+    bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut, bool direct = false);
 
     // view() - Apply learned LUT with trilinear interpolation
     //   in:  scene-linear RGB [0,1], w*h*3 floats

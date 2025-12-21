@@ -22,6 +22,7 @@ namespace pipe
     // Type Aliases
     // ============================================================
 
+    using Size = size_t;      // flow sizes.
     using Name = std::string; // Identifier
 
     template <typename T>
@@ -33,7 +34,8 @@ namespace pipe
     template <typename K, typename V>
     using Dict = std::map<K, V>;
 
-    using Page = void*;       // GPU context (wgpu::Device* when using WebGPU)
+    using Data = void *;
+   
 
     // ============================================================
     // Node - Tree-structured metadata
@@ -43,7 +45,7 @@ namespace pipe
     {
     public:
         Node();
-        explicit Node(const Name &tag);
+        explicit Node(const Name &name);
         ~Node();
 
         Node(Node &&);
@@ -51,26 +53,27 @@ namespace pipe
         Node(const Node &) = delete;
         Node &operator=(const Node &) = delete;
 
-        Name tag() const;
+        Name name() const;
 
+        // Tree management
         List<Node *> list();
         List<const Node *> list() const;
         Node &make(const Name &tag);
         Node *find(const Name &tag);
         const Node *find(const Name &tag) const;
+        Size size(const Name &key) const;
+        bool test(const Name &key) const;
+        void tidy();
 
+        // Setters/Getters
         void dial(const Name &key, float value);
         float dial(const Name &key) const;
 
         void text(const Name &key, const Name &value);
         Name text(const Name &key) const;
 
-        void data(const Name &key, const float *values, size_t size);
+        void data(const Name &key, const float *values, Size size);
         const float *data(const Name &key) const;
-        size_t size(const Name &key) const;
-
-        bool test(const Name &key) const;
-        void tidy();
 
         // JSON persistence
         Name save() const;           // Serialize to JSON string
@@ -82,25 +85,25 @@ namespace pipe
     };
 
     // ============================================================
-    // Data - Image + Metadata + GPU context
+    // Flow - Image + Metadata + GPU context
     // ============================================================
 
     using Info = Node;
 
-    class Data
+    class Flow
     {
     public:
-        Page page;  // GPU context (optional)
-        Info info;  // Metadata
+        Data data; // GPU context (optional)
+        Info info; // Metadata
 
-        Data();
-        Data(Page p, Info i);
-        ~Data();
+        Flow();
+        Flow(Data data, Info info);
+        ~Flow();
 
-        Data(Data &&);
-        Data &operator=(Data &&);
-        Data(const Data &) = delete;
-        Data &operator=(const Data &) = delete;
+        Flow(Flow &&);
+        Flow &operator=(Flow &&);
+        Flow(const Flow &) = delete;
+        Flow &operator=(const Flow &) = delete;
     };
 
     // ============================================================
@@ -116,8 +119,8 @@ namespace pipe
         virtual ~Link() = default;
 
         virtual Name name() const = 0;
-        virtual Name type() const = 0;
-        virtual Data flow(Data in) = 0;
+
+        virtual Flow flow(Flow in) = 0;
     };
 
     // ============================================================
@@ -128,7 +131,7 @@ namespace pipe
     //   auto pipe = pipe::make();
     //   pipe->link(gear::read());
     //   pipe->link(vibe::link("style1"));
-    //   Data out = pipe->flow(in);
+    //   Flow out = pipe->flow(in);
 
     class Pipe
     {
@@ -136,13 +139,12 @@ namespace pipe
         virtual ~Pipe() = default;
 
         virtual Pipe &link(Hold<Link> link) = 0;
-        virtual Data flow(Data in) = 0;
 
-        virtual size_t size() const = 0;
-        virtual Link &link(size_t i) = 0;
+        virtual Flow flow(Flow in) = 0;
 
-        virtual Link *find(const Name &name) = 0;
-        virtual List<Link *> type(const Name &type) = 0;
+        virtual Size size() const = 0;
+
+        virtual Link &link(Size i) = 0;
     };
 
     Hold<Pipe> make();
@@ -151,11 +153,11 @@ namespace pipe
     // Core Pipeline Links (RAW processing)
     // ============================================================
 
-    Hold<Link> blc();       // Black level correction
-    Hold<Link> wb();        // White balance (Bayer domain)
-    Hold<Link> demosaic();  // Bayer → RGB
-    Hold<Link> cst();       // Color space transform (matrix)
-    Hold<Link> crop();      // Active area crop
+    Hold<Link> blc();      // Black level correction
+    Hold<Link> wb();       // White balance (Bayer domain)
+    Hold<Link> demosaic(); // Bayer → RGB
+    Hold<Link> cst();      // Color space transform (matrix)
+    Hold<Link> crop();     // Active area crop
 
     // ============================================================
     // View Link - PNG snapshot pushed to BASE
@@ -183,14 +185,19 @@ namespace pipe
     // Utility - Image encoding/decoding
     // ============================================================
 
-    std::vector<uint8_t> encodePng(const uint8_t* rgb, int width, int height);
+    std::vector<uint8_t> encodePng(const uint8_t *rgb, int width, int height);
+    std::vector<uint8_t> encodeJpeg(const uint8_t *rgb, int width, int height, int quality = 85);
 
-    struct JpegResult {
+    struct ImageResult
+    {
         int width;
         int height;
-        std::vector<uint8_t> rgb;  // RGB8, empty on failure
+        std::vector<uint8_t> rgb; // RGB8, empty on failure
     };
 
-    JpegResult decodeJpeg(const uint8_t* data, size_t size);
+    using JpegResult = ImageResult;
+
+    ImageResult decodeJpeg(const uint8_t *data, size_t size);
+    ImageResult decodePng(const uint8_t *data, size_t size);
 
 } // namespace pipe

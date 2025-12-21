@@ -1,7 +1,6 @@
 // crypto.cpp - Cryptographic operations (libsodium wrapper)
 
 #include "base.hpp"
-#include "itag.hpp"
 #include <sodium.h>
 #include <sstream>
 #include <iomanip>

@@ -1,8 +1,8 @@
 // link.cpp - GEAR Link implementation
 //
 // GearLink: First link in pipe
-//   Input:  Page = raw file buffer, Info.dial("size") = buffer size
-//   Output: Page = Bayer buffer, Info = camera metadata
+//   Input:  Data = raw file buffer, Info.dial("size") = buffer size
+//   Output: Data = Bayer buffer, Info = camera metadata
 //
 // Detects format from magic bytes, dispatches to manufacturer decoder.
 
@@ -52,9 +52,9 @@ static Format detectFormat(const char* data, size_t size) {
 // ============================================================
 
 // Sony decoder - implemented in sony.cpp
-// Returns: page = Bayer buffer (allocated), info = metadata
+// Returns: data = Bayer buffer (allocated), info = metadata
 namespace sony {
-    pipe::Data decode(const char* data, size_t size);
+    pipe::Flow decode(const char* data, size_t size);
 }
 
 // ============================================================
@@ -64,11 +64,10 @@ namespace sony {
 class GearLink : public pipe::Link {
 public:
     pipe::Name name() const override { return "gear"; }
-    pipe::Name type() const override { return "decode"; }
 
-    pipe::Data flow(pipe::Data in) override {
-        // Get input buffer from Page
-        const char* data = static_cast<const char*>(in.page);
+    pipe::Flow flow(pipe::Flow in) override {
+        // Get input buffer from Data
+        const char* data = static_cast<const char*>(in.data);
         size_t size = static_cast<size_t>(in.info.dial("size"));
 
         if (!data || size == 0) {

@@ -105,7 +105,12 @@ FLOW_SRCS = src/test/flow/flow.cpp \
             src/main/flow/part/sony.cpp \
             src/main/flow/part/warp.cpp \
             src/main/flow/part/head.cpp \
-            src/main/flow/part/lute.cpp \
+            src/main/flow/part/exposure.cpp \
+            src/main/flow/part/drum.cpp \
+            src/main/flow/part/tone.cpp \
+            src/main/flow/part/tune.cpp \
+            src/main/flow/part/tint.cpp \
+            src/main/flow/part/vibe.cpp \
             src/main/lute/lute.cpp \
             src/main/wgpu/wgpu.cpp \
             src/main/pipe/pipe.cpp \
@@ -119,9 +124,14 @@ $(TEST_FLOW): $(FLOW_SRCS) | $(DAWN_LIB)
 	@mkdir -p tmp/var/flow
 	$(CXX) $(CXXFLAGS) -Iinc $(DAWN_INC) $(DAWN_NATIVE_INC) $^ $(DAWN_NATIVE_LIBS) $(DAWN_LIB) -lpthread -ldl -o $@
 
+flow: $(TEST_FLOW)
+	@echo "=== FLOW 4-Layer Pipeline Test ==="
+	@cd $(shell pwd) && $(TEST_FLOW) || true
+
 # LUTE test (camera profile learning)
 LUTE_SRCS = src/test/lute/lute.cpp \
             src/main/lute/lute.cpp \
+            src/main/flow/part/drum.cpp \
             src/main/flow/flow.cpp \
             src/main/flow/part/tree.cpp \
             src/main/flow/part/load.cpp \

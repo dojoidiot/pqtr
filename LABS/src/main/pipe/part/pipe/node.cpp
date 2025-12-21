@@ -78,7 +78,7 @@ Node& Node::operator=(Node&&) = default;
 // Node - Identity
 // ============================================================
 
-Name Node::tag() const {
+Name Node::name() const {
     return m_impl->tag;
 }
 
@@ -192,18 +192,18 @@ void Node::tidy() {
 }
 
 // ============================================================
-// Data
+// Flow
 // ============================================================
 
-Data::Data() : page(nullptr) {}
+Flow::Flow() : data(nullptr) {}
 
-Data::Data(Page p, Info i) : page(p), info(std::move(i)) {}
+Flow::Flow(Data d, Info i) : data(d), info(std::move(i)) {}
 
-Data::~Data() = default;
+Flow::~Flow() = default;
 
-Data::Data(Data&&) = default;
+Flow::Flow(Flow&&) = default;
 
-Data& Data::operator=(Data&&) = default;
+Flow& Flow::operator=(Flow&&) = default;
 
 // ============================================================
 // Node - JSON persistence
