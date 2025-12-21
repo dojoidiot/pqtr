@@ -11,7 +11,7 @@
 #include "tone.hpp"
 #include "tune.hpp"
 #include "lute.hpp"
-#include "exposure.hpp"
+#include "loud.hpp"
 #include "drum.hpp"
 
 #include <dawn/webgpu_cpp.h>
@@ -343,9 +343,9 @@ int main(int argc, char **argv)
     std::vector<float> exposure_rgb = head_rgb; // Copy for in-place modification
     if (!ref.rgb.empty())
     {
-        exposure::Params exp_params = exposure::learn(exposure_rgb.data(), sw, sh, ref.rgb8.data(), ref.width, ref.height);
+        loud::Params exp_params = loud::learn(exposure_rgb.data(), sw, sh, ref.rgb8.data(), ref.width, ref.height);
         std::cout << "  Exposure correction factor: " << exp_params.correction << std::endl;
-        exposure::apply(exposure_rgb.data(), sw, sh, exp_params);
+        loud::apply(exposure_rgb.data(), sw, sh, exp_params);
     }
     save_png(prefix + ".2.exposure.png", exposure_rgb.data(), sw, sh);
     if (!ref.rgb.empty())

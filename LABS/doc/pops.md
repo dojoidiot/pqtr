@@ -8,7 +8,7 @@ The architecture is based on the modular design of professional photo editing so
 
 The pipeline consists of the following 5 stages, executed in order:
 
-**`RAWS -> EXPOSURE -> DRUM -> TONE -> TUNE`**
+**`RAWS -> LOUD -> DRUM -> TONE -> TUNE`**
 
 ---
 
@@ -19,10 +19,10 @@ The pipeline consists of the following 5 stages, executed in order:
 *   **Implementation:** The `head.cpp` module, which uses a GPU-accelerated pipeline.
 *   **Learning Strategy:** This stage is considered a "given." Its parameters (white balance, color matrix) are read directly from the RAW file's metadata and are not optimized in the pipeline.
 
-### 2. EXPOSURE (Global Brightness)
+### 2. LOUD (Global Loudness)
 
-*   **Purpose:** To apply a global brightness correction, anchoring the image's mid-tones to match the target reference.
-*   **Implementation:** `exposure.cpp`
+*   **Purpose:** To apply a global brightness correction, or "loudness," amplifying the signal to anchor the image's mid-tones to match the target reference.
+*   **Implementation:** `loud.cpp`
 *   **Learning Strategy:** A simple multiplicative correction factor is learned by comparing the average luminance of the input image to the average luminance of the reference JPEG.
 
 ### 3. DRUM (Local Tone Mapping)

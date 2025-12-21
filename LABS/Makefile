@@ -105,7 +105,7 @@ FLOW_SRCS = src/test/flow/flow.cpp \
             src/main/flow/part/sony.cpp \
             src/main/flow/part/warp.cpp \
             src/main/flow/part/head.cpp \
-            src/main/flow/part/exposure.cpp \
+            src/main/flow/part/loud.cpp \
             src/main/flow/part/drum.cpp \
             src/main/flow/part/tone.cpp \
             src/main/flow/part/tune.cpp \

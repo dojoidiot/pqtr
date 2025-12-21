@@ -2,7 +2,7 @@
 
 #include <cstdint>
 
-namespace exposure
+namespace loud
 {
     struct Params
     {

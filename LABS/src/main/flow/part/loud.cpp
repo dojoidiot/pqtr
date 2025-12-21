@@ -1,4 +1,4 @@
-#include "exposure.hpp"
+#include "loud.hpp"
 #include <cmath>
 #include <vector>
 #include <numeric>
@@ -60,7 +60,7 @@ namespace
 
 } // namespace
 
-exposure::Params exposure::learn(const float* in_rgb, int width, int height,
+loud::Params loud::learn(const float* in_rgb, int width, int height,
                                  const uint8_t* ref_rgb8, int ref_width, int ref_height)
 {
     Params params;
@@ -101,7 +101,7 @@ exposure::Params exposure::learn(const float* in_rgb, int width, int height,
     return params;
 }
 
-void exposure::apply(float* rgb, int width, int height, const Params& params)
+void loud::apply(float* rgb, int width, int height, const Params& params)
 {
     if (params.correction == 1.0f)
     {
