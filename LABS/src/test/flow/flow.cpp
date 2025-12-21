@@ -335,21 +335,21 @@ int main(int argc, char **argv)
         compute_diff(prefix + ".1.head.diff.png", head_rgb.data(), sw, sh, ref, "HEAD");
 
     // =========================================================================
-    // Stage 2: EXPOSURE (Global Brightness Correction)
+    // Stage 2: LOUD (Global Loudness Correction)
     // =========================================================================
-    std::cout << "\n=== Stage 2: EXPOSURE ===" << std::endl;
-    std::cout << "  Learning global exposure correction..." << std::endl;
+    std::cout << "\n=== Stage 2: LOUD ===" << std::endl;
+    std::cout << "  Learning global loudness correction..." << std::endl;
     
-    std::vector<float> exposure_rgb = head_rgb; // Copy for in-place modification
+    std::vector<float> loud_rgb = head_rgb; // Copy for in-place modification
     if (!ref.rgb.empty())
     {
-        loud::Params exp_params = loud::learn(exposure_rgb.data(), sw, sh, ref.rgb8.data(), ref.width, ref.height);
-        std::cout << "  Exposure correction factor: " << exp_params.correction << std::endl;
-        loud::apply(exposure_rgb.data(), sw, sh, exp_params);
+        loud::Params loud_params = loud::learn(loud_rgb.data(), sw, sh, ref.rgb8.data(), ref.width, ref.height);
+        std::cout << "  Loudness correction factor: " << loud_params.correction << std::endl;
+        loud::apply(loud_rgb.data(), sw, sh, loud_params);
     }
-    save_png(prefix + ".2.exposure.png", exposure_rgb.data(), sw, sh);
+    save_png(prefix + ".2.loud.png", loud_rgb.data(), sw, sh);
     if (!ref.rgb.empty())
-        compute_diff(prefix + ".2.exposure.diff.png", exposure_rgb.data(), sw, sh, ref, "EXPOSURE");
+        compute_diff(prefix + ".2.loud.diff.png", loud_rgb.data(), sw, sh, ref, "LOUD");
 
     // =========================================================================
     // Stage 3: DRUM (Local Tone Mapping)
@@ -357,7 +357,7 @@ int main(int argc, char **argv)
     std::cout << "\n=== Stage 3: DRUM ===" << std::endl;
     std::cout << "  Applying local tone mapping (CLAHE)..." << std::endl;
 
-    std::vector<float> drum_rgb = exposure_rgb; // Copy for in-place modification
+    std::vector<float> drum_rgb = loud_rgb; // Input from LOUD stage
     drum::Params drum_params;
     if (root.test("maker") && root.next("maker").test("d-range-optimizer")) {
         std::string dro_str = root.next("maker").leaf("d-range-optimizer").text();
@@ -378,10 +378,10 @@ int main(int argc, char **argv)
     std::cout << "\n=== Stage 4: TONE ===" << std::endl;
     std::cout << "  Learning global luminance curve..." << std::endl;
 
-    std::vector<float> tone_rgb = drum_rgb;  // Copy for in-place modification
+    std::vector<float> tone_rgb = drum_rgb;  // Input from DRUM stage
     if (!ref.rgb8.empty())
     {
-        auto drum_ds = downsample(drum_rgb.data(), sw, sh, ref.width, ref.height);
+        auto drum_ds = downsample(drum_rgb.data(), sw, sh, ref.width, ref.height); // Downsample DRUM output
         tone::learn(drum_ds.data(), ref.width, ref.height,
                     ref.rgb8.data(), ref.width, ref.height, profile);
         tone::apply(tone_rgb.data(), tone_rgb.data(), sw, sh, profile);
@@ -396,10 +396,10 @@ int main(int argc, char **argv)
     std::cout << "\n=== Stage 5: TUNE ===" << std::endl;
     std::cout << "  Learning 3D color lookup table..." << std::endl;
 
-    std::vector<float> tune_rgb = tone_rgb; // Use buffer from previous stage
+    std::vector<float> tune_rgb = tone_rgb; // Input from TONE stage
     if (!ref.rgb8.empty())
     {
-        auto tone_ds = downsample(tone_rgb.data(), sw, sh, ref.width, ref.height);
+        auto tone_ds = downsample(tone_rgb.data(), sw, sh, ref.width, ref.height); // Downsample TONE output
         tune::learn(tone_ds.data(), ref.width, ref.height,
                     ref.rgb8.data(), ref.width, ref.height, profile);
         tune::apply(tune_rgb.data(), tune_rgb.data(), sw, sh, profile);
@@ -414,7 +414,7 @@ int main(int argc, char **argv)
     std::cout << "\n=== Pipeline ===" << std::endl;
     std::cout << "  0.ref.jpg      - Camera JPEG (target)" << std::endl;
     std::cout << "  1.head.png     - scene-linear (GPU RAW decode)" << std::endl;
-    std::cout << "  2.exposure.png - global exposure matched" << std::endl;
+    std::cout << "  2.loud.png     - global loudness matched" << std::endl;
     std::cout << "  3.drum.png     - local tone mapped (CLAHE)" << std::endl;
     std::cout << "  4.tone.png     - global tone curve applied" << std::endl;
     std::cout << "  5.tune.png     - 3D color LUT applied (final)" << std::endl;

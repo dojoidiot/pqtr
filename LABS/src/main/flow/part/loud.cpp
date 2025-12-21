@@ -58,6 +58,13 @@ namespace
         return dst;
     }
 
+    float get_percentile(const std::vector<float>& sorted_lum, float percentile)
+    {
+        if (sorted_lum.empty()) return 0.0f;
+        size_t index = static_cast<size_t>((sorted_lum.size() - 1) * percentile);
+        return sorted_lum[index];
+    }
+
 } // namespace
 
 loud::Params loud::learn(const float* in_rgb, int width, int height,
@@ -73,29 +80,32 @@ loud::Params loud::learn(const float* in_rgb, int width, int height,
     std::vector<float> in_ds = downsample(in_rgb, width, height, ref_width, ref_height);
     
     const size_t num_pixels = static_cast<size_t>(ref_width) * ref_height;
-    double sum_in_lum = 0.0;
-    double sum_ref_lum = 0.0;
+    std::vector<float> in_lum_values(num_pixels);
+    std::vector<float> ref_lum_values(num_pixels);
 
     for (size_t i = 0; i < num_pixels; ++i)
     {
         const size_t idx = i * 3;
 
         // Input luminance
-        sum_in_lum += linear_rgb_to_luminance(in_ds[idx], in_ds[idx + 1], in_ds[idx + 2]);
+        in_lum_values[i] = linear_rgb_to_luminance(in_ds[idx], in_ds[idx + 1], in_ds[idx + 2]);
 
         // Reference luminance
         float ref_r = srgb_to_linear(ref_rgb8[idx]);
         float ref_g = srgb_to_linear(ref_rgb8[idx + 1]);
         float ref_b = srgb_to_linear(ref_rgb8[idx + 2]);
-        sum_ref_lum += linear_rgb_to_luminance(ref_r, ref_g, ref_b);
+        ref_lum_values[i] = linear_rgb_to_luminance(ref_r, ref_g, ref_b);
     }
 
-    double avg_in_lum = sum_in_lum / num_pixels;
-    double avg_ref_lum = sum_ref_lum / num_pixels;
+    std::sort(in_lum_values.begin(), in_lum_values.end());
+    std::sort(ref_lum_values.begin(), ref_lum_values.end());
 
-    if (avg_in_lum > 1e-6)
+    float in_90th = get_percentile(in_lum_values, 0.90f);
+    float ref_90th = get_percentile(ref_lum_values, 0.90f);
+
+    if (in_90th > 1e-6)
     {
-        params.correction = static_cast<float>(avg_ref_lum / avg_in_lum);
+        params.correction = ref_90th / in_90th;
     }
 
     return params;
