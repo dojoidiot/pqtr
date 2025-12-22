@@ -1,15 +1,8 @@
 // lute.cpp - Camera Profile Learning
 //
-// LUTE learns camera-specific color transforms from RAW + embedded JPEG pairs.
-// Each shot improves the LUT for that camera's style.
-//
-// Model:
-//   1. flow::Flow provides flat (scene-linear RGB after HEAD pipeline)
-//   2. flow::Flow provides target (embedded JPEG from camera)
-//   3. tune() accumulates flat->target mappings into 17^3 LUT
-//   4. view() applies learned LUT to produce camera-style output
-//
-// Profile key: Camera_Model_Style (e.g., "Sony_ILCE-7M4_Standard")
+// LUTE is a container for learned color and tone transforms.
+// The actual learning logic is now implemented in the respective
+// pipeline plugins (TONE, TUNE).
 
 #include "lute.hpp"
 
@@ -21,6 +14,44 @@
 
 namespace lute {
 
+// Helper to fill empty bins in a curve by linear interpolation
+static void fill_empty_bins(float* curve, const std::vector<int>& counts, int size)
+{
+    for (int i = 0; i < size; ++i) {
+        if (counts[i] == 0) {
+            curve[i] = -1.0f; // Mark as empty
+        }
+    }
+
+    for (int i = 0; i < size; ++i) {
+        if (curve[i] < 0) {
+            int prev = i - 1;
+            while (prev >= 0 && curve[prev] < 0) {
+                prev--;
+            }
+
+            int next = i + 1;
+            while (next < size && curve[next] < 0) {
+                next++;
+            }
+
+            float default_val = static_cast<float>(i) / (size - 1);
+            
+            if (prev < 0 && next >= size) {
+                curve[i] = default_val;
+            } else if (prev < 0) {
+                curve[i] = curve[next];
+            } else if (next >= size) {
+                curve[i] = curve[prev];
+            } else {
+                float t = static_cast<float>(i - prev) / (next - prev);
+                curve[i] = curve[prev] * (1.0f - t) + curve[next] * t;
+            }
+        }
+    }
+}
+
+
 // ============================================================================
 // CameraLut implementation
 // ============================================================================
@@ -30,17 +61,16 @@ CameraLut::CameraLut() {
 }
 
 void CameraLut::reset() {
-    // 3D LUT
-    sum.assign(LUT_SIZE, 0.0);
-    prev_avg.assign(LUT_SIZE, 0.0);
-    count.assign(CELLS, 0);
-
-    // 1D tone curve
-    curve_sum.assign(CURVE_SIZE, 0.0);
-    curve_count.assign(CURVE_SIZE, 0);
+    tone_sum.assign(TONE_CURVE_SIZE, 0.0);
+    tone_count.assign(TONE_CURVE_SIZE, 0);
+    hue_sum.assign(HUE_CURVE_SIZE, 0.0);
+    hue_count.assign(HUE_CURVE_SIZE, 0);
+    sat_sum.assign(SAT_CURVE_SIZE, 0.0);
+    sat_count.assign(SAT_CURVE_SIZE, 0);
+    val_sum.assign(VAL_CURVE_SIZE, 0.0);
+    val_count.assign(VAL_CURVE_SIZE, 0);
 
     sample_count = 0;
-    last_delta = 1.0f;
     frozen = false;
     estimated = false;
     camera_make.clear();
@@ -55,481 +85,80 @@ std::string CameraLut::key() const {
     return k;
 }
 
-void CameraLut::lut(float* out) const {
-    for (int ri = 0; ri < GRID_SIZE; ri++) {
-        for (int gi = 0; gi < GRID_SIZE; gi++) {
-            for (int bi = 0; bi < GRID_SIZE; bi++) {
-                int cell_idx = (ri * GRID_SIZE + gi) * GRID_SIZE + bi;
-                int lut_base = cell_idx * 3;
-
-                if (count[cell_idx] > 0) {
-                    out[lut_base + 0] = static_cast<float>(sum[lut_base + 0] / count[cell_idx]);
-                    out[lut_base + 1] = static_cast<float>(sum[lut_base + 1] / count[cell_idx]);
-                    out[lut_base + 2] = static_cast<float>(sum[lut_base + 2] / count[cell_idx]);
-                } else {
-                    // Identity for empty cells
-                    out[lut_base + 0] = static_cast<float>(ri) / (GRID_SIZE - 1);
-                    out[lut_base + 1] = static_cast<float>(gi) / (GRID_SIZE - 1);
-                    out[lut_base + 2] = static_cast<float>(bi) / (GRID_SIZE - 1);
-                }
-            }
-        }
-    }
-}
-
-void CameraLut::curve(float* out) const {
-    for (int i = 0; i < CURVE_SIZE; i++) {
-        if (curve_count[i] > 0) {
-            out[i] = static_cast<float>(curve_sum[i] / curve_count[i]);
+void CameraLut::tone_curve(float* out) const {
+    for (int i = 0; i < TONE_CURVE_SIZE; i++) {
+        if (tone_count[i] > 0) {
+            out[i] = static_cast<float>(tone_sum[i] / tone_count[i]);
         } else {
-            // Identity for empty bins: input = output
-            out[i] = static_cast<float>(i) / (CURVE_SIZE - 1);
+            out[i] = static_cast<float>(i) / (TONE_CURVE_SIZE - 1);
         }
     }
+    fill_empty_bins(out, tone_count, TONE_CURVE_SIZE);
 }
 
-float CameraLut::coverage() const {
-    int filled = 0;
-    for (int i = 0; i < CELLS; i++)
-        if (count[i] > 0) filled++;
-    return static_cast<float>(filled) / CELLS;
-}
-
-int CameraLut::emptyCells() const {
-    int empty = 0;
-    for (int i = 0; i < CELLS; i++)
-        if (count[i] == 0) empty++;
-    return empty;
-}
-
-void CameraLut::snapshot() {
-    for (int i = 0; i < CELLS; i++) {
-        int base = i * 3;
-        if (count[i] > 0) {
-            prev_avg[base + 0] = sum[base + 0] / count[i];
-            prev_avg[base + 1] = sum[base + 1] / count[i];
-            prev_avg[base + 2] = sum[base + 2] / count[i];
+void CameraLut::hue_curve(float* out) const {
+    for (int i = 0; i < HUE_CURVE_SIZE; i++) {
+        if (hue_count[i] > 0) {
+            out[i] = static_cast<float>(hue_sum[i] / hue_count[i]);
         } else {
-            // Identity for empty cells
-            int ri = i / (GRID_SIZE * GRID_SIZE);
-            int gi = (i / GRID_SIZE) % GRID_SIZE;
-            int bi = i % GRID_SIZE;
-            prev_avg[base + 0] = static_cast<double>(ri) / (GRID_SIZE - 1);
-            prev_avg[base + 1] = static_cast<double>(gi) / (GRID_SIZE - 1);
-            prev_avg[base + 2] = static_cast<double>(bi) / (GRID_SIZE - 1);
+            out[i] = static_cast<float>(i) / (HUE_CURVE_SIZE - 1);
         }
     }
+    // Note: Hue is circular, so interpolation needs to handle wrap-around.
+    // Simple linear fill for now.
+    fill_empty_bins(out, hue_count, HUE_CURVE_SIZE);
 }
 
-float CameraLut::computeDelta() const {
-    double total_delta = 0.0;
-    int cells_with_data = 0;
-
-    for (int i = 0; i < CELLS; i++) {
-        if (count[i] > 0) {
-            int base = i * 3;
-            double curr_r = sum[base + 0] / count[i];
-            double curr_g = sum[base + 1] / count[i];
-            double curr_b = sum[base + 2] / count[i];
-
-            double dr = std::abs(curr_r - prev_avg[base + 0]);
-            double dg = std::abs(curr_g - prev_avg[base + 1]);
-            double db = std::abs(curr_b - prev_avg[base + 2]);
-
-            total_delta += (dr + dg + db) / 3.0;
-            cells_with_data++;
+void CameraLut::sat_curve(float* out) const {
+    for (int i = 0; i < SAT_CURVE_SIZE; i++) {
+        if (sat_count[i] > 0) {
+            out[i] = static_cast<float>(sat_sum[i] / sat_count[i]);
+        } else {
+            out[i] = static_cast<float>(i) / (SAT_CURVE_SIZE - 1);
         }
     }
-
-    if (cells_with_data == 0)
-        return 1.0f;
-
-    return static_cast<float>(total_delta / cells_with_data);
+    fill_empty_bins(out, sat_count, SAT_CURVE_SIZE);
 }
 
-bool CameraLut::converged(float threshold) const {
-    return frozen || (sample_count >= 5 && last_delta < threshold);
-}
-
-std::vector<std::string> CameraLut::missing() const {
-    std::vector<std::string> suggestions;
-
-    // Count empty cells by region
-    int dark_empty = 0, mid_empty = 0, bright_empty = 0;
-    int red_empty = 0, green_empty = 0, blue_empty = 0;
-    int neutral_empty = 0;
-
-    for (int ri = 0; ri < GRID_SIZE; ri++) {
-        for (int gi = 0; gi < GRID_SIZE; gi++) {
-            for (int bi = 0; bi < GRID_SIZE; bi++) {
-                int cell_idx = (ri * GRID_SIZE + gi) * GRID_SIZE + bi;
-                if (count[cell_idx] > 0) continue;
-
-                // Luminance
-                int lum = ri + gi + bi;
-                if (lum < 15) dark_empty++;
-                else if (lum < 33) mid_empty++;
-                else bright_empty++;
-
-                // Hue
-                int max_ch = std::max({ri, gi, bi});
-                int min_ch = std::min({ri, gi, bi});
-                int chroma = max_ch - min_ch;
-
-                if (chroma < 3) {
-                    neutral_empty++;
-                } else if (ri == max_ch) {
-                    red_empty++;
-                } else if (gi == max_ch) {
-                    green_empty++;
-                } else {
-                    blue_empty++;
-                }
-            }
+void CameraLut::val_curve(float* out) const {
+    for (int i = 0; i < VAL_CURVE_SIZE; i++) {
+        if (val_count[i] > 0) {
+            out[i] = static_cast<float>(val_sum[i] / val_count[i]);
+        } else {
+            out[i] = static_cast<float>(i) / (VAL_CURVE_SIZE - 1);
         }
     }
+    fill_empty_bins(out, val_count, VAL_CURVE_SIZE);
+}
 
-    const int threshold = 50;
 
-    if (dark_empty > threshold)
-        suggestions.push_back("dark scenes (night, shadows)");
-    if (bright_empty > threshold)
-        suggestions.push_back("bright scenes (snow, clouds)");
-    if (red_empty > threshold)
-        suggestions.push_back("reds (flowers, autumn leaves)");
-    if (green_empty > threshold)
-        suggestions.push_back("greens (foliage, grass)");
-    if (blue_empty > threshold)
-        suggestions.push_back("blues (sky, water)");
-    if (neutral_empty > threshold)
-        suggestions.push_back("neutrals (gray cards, concrete)");
+// ============================================================================
+// Stubs for global functions (logic moved to plugins)
+// ============================================================================
 
-    if (suggestions.empty())
-        suggestions.push_back("good coverage - no major gaps");
+bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut, bool direct) {
+    // This logic is now handled by the TONE and TUNE plugins directly.
+    return true;
+}
 
-    return suggestions;
+void view(const float* in, float* out, int width, int height, const CameraLut& lut) {
+    // This logic is now handled by the TONE and TUNE plugins directly.
+    // For simplicity, just copy input to output.
+    std::copy(in, in + (size_t)width * height * 3, out);
 }
 
 // ============================================================================
-// JSON Persistence
+// Stubs for persistence (TODO: Re-implement for HSV model)
 // ============================================================================
 
 bool save(const CameraLut& lut, const std::string& path) {
-    std::ofstream file(path);
-    if (!file.is_open()) {
-        std::cerr << "[lute::save] Failed to open: " << path << "\n";
-        return false;
-    }
-
-    file << "{\n";
-    file << "  \"version\": 1,\n";
-    file << "  \"camera_make\": \"" << lut.camera_make << "\",\n";
-    file << "  \"camera_model\": \"" << lut.camera_model << "\",\n";
-    file << "  \"creative_style\": \"" << lut.creative_style << "\",\n";
-    file << "  \"sample_count\": " << lut.sample_count << ",\n";
-    file << "  \"coverage\": " << lut.coverage() << ",\n";
-    file << "  \"last_delta\": " << lut.last_delta << ",\n";
-    file << "  \"frozen\": " << (lut.frozen ? "true" : "false") << ",\n";
-    file << "  \"grid_size\": " << GRID_SIZE << ",\n";
-
-    // Save sum array
-    file << "  \"sum\": [";
-    for (int i = 0; i < LUT_SIZE; i++) {
-        if (i > 0) file << ",";
-        if (i % 12 == 0) file << "\n    ";
-        file << lut.sum[i];
-    }
-    file << "\n  ],\n";
-
-    // Save count array
-    file << "  \"count\": [";
-    for (int i = 0; i < CELLS; i++) {
-        if (i > 0) file << ",";
-        if (i % 20 == 0) file << "\n    ";
-        file << lut.count[i];
-    }
-    file << "\n  ]\n";
-
-    file << "}\n";
-
-    std::cerr << "[lute::save] " << lut.key() << " (" << lut.sample_count << " samples, "
-              << (lut.coverage() * 100.0f) << "% coverage) -> " << path << "\n";
-    return true;
+    std::cerr << "[lute::save] STUB: Persistence for new HSV model is not implemented.\n";
+    return false;
 }
 
 bool load(CameraLut& lut, const std::string& path) {
-    std::ifstream file(path);
-    if (!file.is_open())
-        return false;
-
-    std::string content((std::istreambuf_iterator<char>(file)),
-                        std::istreambuf_iterator<char>());
-
-    // Simple JSON parsing
-    auto extractString = [&](const std::string& key) -> std::string {
-        std::string search = "\"" + key + "\": \"";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return "";
-        pos += search.length();
-        size_t end = content.find("\"", pos);
-        if (end == std::string::npos) return "";
-        return content.substr(pos, end - pos);
-    };
-
-    auto extractInt = [&](const std::string& key) -> int {
-        std::string search = "\"" + key + "\": ";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return 0;
-        pos += search.length();
-        return std::stoi(content.substr(pos));
-    };
-
-    auto extractFloat = [&](const std::string& key) -> float {
-        std::string search = "\"" + key + "\": ";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return 0.0f;
-        pos += search.length();
-        return std::stof(content.substr(pos));
-    };
-
-    auto extractBool = [&](const std::string& key) -> bool {
-        std::string search = "\"" + key + "\": ";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return false;
-        pos += search.length();
-        return content.substr(pos, 4) == "true";
-    };
-
-    auto extractDoubleArray = [&](const std::string& key, std::vector<double>& out) {
-        std::string search = "\"" + key + "\": [";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return;
-        pos += search.length();
-
-        size_t end = content.find("]", pos);
-        if (end == std::string::npos) return;
-
-        std::string arr = content.substr(pos, end - pos);
-        std::istringstream iss(arr);
-        std::string token;
-
-        out.clear();
-        while (std::getline(iss, token, ',')) {
-            size_t start = token.find_first_not_of(" \t\n");
-            size_t stop = token.find_last_not_of(" \t\n");
-            if (start != std::string::npos && stop != std::string::npos) {
-                token = token.substr(start, stop - start + 1);
-                out.push_back(std::stod(token));
-            }
-        }
-    };
-
-    auto extractIntArray = [&](const std::string& key, std::vector<int>& out) {
-        std::string search = "\"" + key + "\": [";
-        size_t pos = content.find(search);
-        if (pos == std::string::npos) return;
-        pos += search.length();
-
-        size_t end = content.find("]", pos);
-        if (end == std::string::npos) return;
-
-        std::string arr = content.substr(pos, end - pos);
-        std::istringstream iss(arr);
-        std::string token;
-
-        out.clear();
-        while (std::getline(iss, token, ',')) {
-            size_t start = token.find_first_not_of(" \t\n");
-            size_t stop = token.find_last_not_of(" \t\n");
-            if (start != std::string::npos && stop != std::string::npos) {
-                token = token.substr(start, stop - start + 1);
-                out.push_back(std::stoi(token));
-            }
-        }
-    };
-
-    lut.reset();
-    lut.camera_make = extractString("camera_make");
-    lut.camera_model = extractString("camera_model");
-    lut.creative_style = extractString("creative_style");
-    lut.sample_count = extractInt("sample_count");
-    lut.last_delta = extractFloat("last_delta");
-    lut.frozen = extractBool("frozen");
-    lut.estimated = lut.sample_count > 0;
-
-    extractDoubleArray("sum", lut.sum);
-    extractIntArray("count", lut.count);
-
-    // Ensure vectors are correct size
-    if (lut.sum.size() != LUT_SIZE) lut.sum.resize(LUT_SIZE, 0.0);
-    if (lut.count.size() != CELLS) lut.count.resize(CELLS, 0);
-    if (lut.prev_avg.size() != LUT_SIZE) lut.prev_avg.resize(LUT_SIZE, 0.0);
-
-    std::cerr << "[lute::load] " << lut.key() << " (" << lut.sample_count << " samples, "
-              << (lut.coverage() * 100.0f) << "% coverage) <- " << path << "\n";
-    return true;
-}
-
-// ============================================================================
-// tune() - Accumulate flat -> target mappings
-// ============================================================================
-//
-// flat: scene-linear RGB from HEAD pipeline (float [0,1])
-// target: camera JPEG RGB (uint8 [0,255])
-// Both at same resolution.
-
-// sRGB to linear conversion
-static float srgb_to_linear(float v) {
-    if (v <= 0.04045f)
-        return v / 12.92f;
-    return std::pow((v + 0.055f) / 1.055f, 2.4f);
-}
-
-bool tune(const float* flat, const uint8_t* target, int width, int height, CameraLut& lut, bool direct) {
-    if (!flat || !target || width <= 0 || height <= 0) {
-        std::cerr << "[lute::tune] Error: Invalid input\n";
-        return false;
-    }
-
-    if (lut.frozen) {
-        std::cerr << "[lute::tune] Profile frozen, skipping\n";
-        return true;
-    }
-
-    // Snapshot for delta tracking
-    lut.snapshot();
-
-    long pixels_added = 0;
-    float bin_size = 1.0f / GRID_SIZE;  // [0,1] bins
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-
-            // Input RGB [0,1+] - clamp to [0,1]
-            float fr = std::max(0.0f, std::min(1.0f, flat[idx + 0]));
-            float fg = std::max(0.0f, std::min(1.0f, flat[idx + 1]));
-            float fb = std::max(0.0f, std::min(1.0f, flat[idx + 2]));
-
-            // Target is sRGB uint8 - convert to linear [0,1]
-            float tr = srgb_to_linear(target[idx + 0] / 255.0f);
-            float tg = srgb_to_linear(target[idx + 1] / 255.0f);
-            float tb = srgb_to_linear(target[idx + 2] / 255.0f);
-
-            float cr, cg, cb;
-
-            if (direct) {
-                // Direct mode: input already tone-mapped (ACES), bin directly
-                cr = fr;
-                cg = fg;
-                cb = fb;
-            } else {
-                // Scene-linear mode: apply ratio adjustment first
-                // === 1D Tone Curve ===
-                float in_lum = 0.299f * fr + 0.587f * fg + 0.114f * fb;
-                float out_lum = 0.299f * tr + 0.587f * tg + 0.114f * tb;
-
-                int curve_bin = std::min(CURVE_SIZE - 1, static_cast<int>(in_lum * CURVE_SIZE));
-                lut.curve_sum[curve_bin] += out_lum;
-                lut.curve_count[curve_bin]++;
-
-                // Apply tone curve to input (so 3D LUT learns residual color)
-                float ratio = (in_lum > 0.001f) ? (out_lum / in_lum) : 1.0f;
-                cr = std::max(0.0f, std::min(1.0f, fr * ratio));
-                cg = std::max(0.0f, std::min(1.0f, fg * ratio));
-                cb = std::max(0.0f, std::min(1.0f, fb * ratio));
-            }
-
-            // Quantize to grid cell
-            int ri = std::min(GRID_SIZE - 1, static_cast<int>(cr / bin_size));
-            int gi = std::min(GRID_SIZE - 1, static_cast<int>(cg / bin_size));
-            int bi = std::min(GRID_SIZE - 1, static_cast<int>(cb / bin_size));
-
-            int cell_idx = (ri * GRID_SIZE + gi) * GRID_SIZE + bi;
-
-            // Accumulate target RGB
-            lut.sum[cell_idx * 3 + 0] += tr;
-            lut.sum[cell_idx * 3 + 1] += tg;
-            lut.sum[cell_idx * 3 + 2] += tb;
-            lut.count[cell_idx]++;
-            pixels_added++;
-        }
-    }
-
-    lut.estimated = true;
-    lut.sample_count++;
-    lut.last_delta = lut.computeDelta();
-
-    // Auto-freeze on convergence
-    bool just_converged = false;
-    if (lut.sample_count >= 10 && lut.last_delta < 0.001f && lut.coverage() > 0.7f) {
-        lut.frozen = true;
-        just_converged = true;
-    }
-
-    std::cerr << "[lute::tune] " << (pixels_added / 1000) << "k pixels"
-              << ", coverage " << (lut.coverage() * 100.0f) << "%"
-              << ", delta " << (lut.last_delta * 100.0f) << "%"
-              << ", sample #" << lut.sample_count
-              << (just_converged ? " -> CONVERGED" : "")
-              << "\n";
-
-    return true;
-}
-
-// ============================================================================
-// view() - Apply learned LUT to scene-linear RGB
-// ============================================================================
-//
-// Trilinear interpolation in 17^3 grid.
-// Input: scene-linear RGB [0,1]
-// Output: camera-style RGB [0,1]
-
-void view(const float* in, float* out, int width, int height, const CameraLut& lut) {
-    // Extract tone curve (3D LUT disabled until coverage > 70%)
-    std::vector<float> tone(CURVE_SIZE);
-    lut.curve(tone.data());
-
-    float curve_scale = static_cast<float>(CURVE_SIZE - 1);
-
-    // Helper: interpolate tone curve
-    auto applyCurve = [&](float lum) -> float {
-        float idx = lum * curve_scale;
-        int i0 = static_cast<int>(idx);
-        int i1 = std::min(i0 + 1, CURVE_SIZE - 1);
-        i0 = std::min(i0, CURVE_SIZE - 1);
-        float t = idx - i0;
-        return tone[i0] * (1 - t) + tone[i1] * t;
-    };
-
-    for (int y = 0; y < height; y++) {
-        for (int x = 0; x < width; x++) {
-            size_t idx = (static_cast<size_t>(y) * width + x) * 3;
-
-            // Clamp input to [0,1]
-            float r = std::max(0.0f, std::min(1.0f, in[idx + 0]));
-            float g = std::max(0.0f, std::min(1.0f, in[idx + 1]));
-            float b = std::max(0.0f, std::min(1.0f, in[idx + 2]));
-
-            // === Step 1: Apply tone curve ===
-            // Compute input luminance
-            float in_lum = 0.299f * r + 0.587f * g + 0.114f * b;
-            float out_lum = applyCurve(in_lum);
-
-            // Scale RGB by luminance ratio (preserves color, changes brightness)
-            float ratio = (in_lum > 0.001f) ? (out_lum / in_lum) : 1.0f;
-            r = std::max(0.0f, std::min(1.0f, r * ratio));
-            g = std::max(0.0f, std::min(1.0f, g * ratio));
-            b = std::max(0.0f, std::min(1.0f, b * ratio));
-
-            // === Step 2: Apply 3D LUT (disabled until coverage > 70%) ===
-            // With low coverage, the LUT creates discontinuities.
-            // The tone curve alone works better for now.
-            out[idx + 0] = r;
-            out[idx + 1] = g;
-            out[idx + 2] = b;
-        }
-    }
+    std::cerr << "[lute::load] STUB: Persistence for new HSV model is not implemented.\n";
+    return false;
 }
 
 } // namespace lute

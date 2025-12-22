@@ -59,7 +59,7 @@ namespace flow
     // Factory
     // -------------------------------------------------------------------------
 
-    std::unique_ptr<Flow> make(std::string name, uint16_t *bits, size_t size)
+    std::unique_ptr<Flow> make(std::string name, uint8_t *bits, size_t size)  downscaled  bits
     {
         return std::make_unique<FlowImpl>(name, bits, size);
     }

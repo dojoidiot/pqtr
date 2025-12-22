@@ -22,6 +22,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include <vector>
 
 // Dawn helper functions (defined in wgpu.cpp)
 namespace dawn
@@ -30,6 +31,8 @@ namespace dawn
     wgpu::Adapter adapter(wgpu::Instance instance);
     wgpu::Device device(wgpu::Adapter adapter);
 }
+
+namespace {
 
 static std::vector<uint8_t> read_file(const char *path)
 {
@@ -63,6 +66,13 @@ static float srgb_to_linear(uint8_t v)
         return f / 12.92f;
     return std::pow((f + 0.055f) / 1.055f, 2.4f);
 }
+
+// Helper to calculate luminance from linear RGB
+static float linear_rgb_to_luminance(float r, float g, float b)
+{
+    return 0.2126f * r + 0.7152f * g + 0.0722f * b;
+}
+
 
 // Linear to sRGB gamma
 static uint8_t linear_to_srgb(float v)
@@ -192,6 +202,114 @@ static std::vector<float> downsample(const float *src, int src_w, int src_h, int
     return dst;
 }
 
+
+// Histogram and CDF helpers for tone matching
+static std::vector<int> get_luminance_histogram(const std::vector<float>& lum_values, int bins)
+{
+    std::vector<int> histogram(bins, 0);
+    for (float lum : lum_values)
+    {
+        int bin = std::min(bins - 1, std::max(0, static_cast<int>(lum * (bins - 1) + 0.5f)));
+        histogram[bin]++;
+    }
+    return histogram;
+}
+
+static std::vector<float> get_cdf(const std::vector<int>& histogram, size_t num_pixels)
+{
+    std::vector<float> cdf(histogram.size());
+    long cumulative_sum = 0;
+    for (size_t i = 0; i < histogram.size(); ++i)
+    {
+        cumulative_sum += histogram[i];
+        cdf[i] = static_cast<float>(cumulative_sum) / num_pixels;
+    }
+    return cdf;
+}
+
+// Maps a luminance value from a source CDF to a target CDF (histogram matching)
+static float map_luminance_to_target_cdf(float lum_val, int bins, const std::vector<float>& source_cdf, const std::vector<float>& target_cdf)
+{
+    int bin = std::min(bins - 1, std::max(0, static_cast<int>(lum_val * (bins - 1) + 0.5f)));
+    float src_cdf_val = source_cdf[bin];
+
+    // Find the corresponding luminance value in the target CDF
+    // This is effectively target_cdf_inverse(src_cdf_val)
+    for (int i = 0; i < bins; ++i)
+    {
+        if (target_cdf[i] >= src_cdf_val)
+        {
+            // Simple linear interpolation between bins to get a smoother map
+            if (i == 0) return 0.0f;
+            float prev_cdf = target_cdf[i-1];
+            float current_cdf = target_cdf[i];
+            float t = (src_cdf_val - prev_cdf) / (current_cdf - prev_cdf);
+            return ((float)(i-1) + t) / (bins - 1);
+        }
+    }
+    return 1.0f; // Should not happen for well-formed CDFs, but for safety.
+}
+
+// Helper to create a tone-matched reference RGB buffer
+// This function assumes original_ref_rgb8_data is a uint8 sRGB image.
+// It will generate a float RGB buffer where the luminance histogram matches that of pipeline_tone_rgb.
+static std::vector<float> create_tone_matched_reference(
+    const float* pipeline_tone_rgb, int pipeline_w, int pipeline_h, // Output of TONE stage
+    const uint8_t* original_ref_rgb8_data, int ref_w, int ref_h)      // Original reference JPEG (uint8 sRGB)
+{
+    // 0. Ensure original_ref_rgb8_data is converted to linear float first
+    std::vector<float> original_ref_rgb_linear(ref_w * ref_h * 3);
+    for (size_t i = 0; i < (size_t)ref_w * ref_h; ++i) {
+        original_ref_rgb_linear[i*3+0] = srgb_to_linear(original_ref_rgb8_data[i*3+0]);
+        original_ref_rgb_linear[i*3+1] = srgb_to_linear(original_ref_rgb8_data[i*3+1]);
+        original_ref_rgb_linear[i*3+2] = srgb_to_linear(original_ref_rgb8_data[i*3+2]);
+    }
+
+    // 1. Extract luminance values for pipeline_tone_rgb (downsampled to ref_w, ref_h)
+    // The input pipeline_tone_rgb is already downsampled if it's from `tone_ds`
+    std::vector<float> tone_lum_values(ref_w * ref_h);
+    const float* current_tone_rgb_ds = downsample(pipeline_tone_rgb, pipeline_w, pipeline_h, ref_w, ref_h).data();
+    for (size_t i = 0; i < (size_t)ref_w * ref_h; ++i) {
+        tone_lum_values[i] = linear_rgb_to_luminance(
+            current_tone_rgb_ds[i*3+0], current_tone_rgb_ds[i*3+1], current_tone_rgb_ds[i*3+2]);
+    }
+
+    // 2. Extract luminance values for original_ref_rgb_linear
+    std::vector<float> ref_lum_values(ref_w * ref_h);
+    for (size_t i = 0; i < (size_t)ref_w * ref_h; ++i) {
+        ref_lum_values[i] = linear_rgb_to_luminance(
+            original_ref_rgb_linear[i*3+0], original_ref_rgb_linear[i*3+1], original_ref_rgb_linear[i*3+2]);
+    }
+
+    // 3. Compute CDF for tone_lum_values (target CDF)
+    int bins = 256; // Use 256 bins for luminance histograms
+    std::vector<int> tone_hist = get_luminance_histogram(tone_lum_values, bins);
+    std::vector<float> tone_cdf = get_cdf(tone_hist, tone_lum_values.size());
+
+    // 4. Compute CDF for ref_lum_values (source CDF)
+    std::vector<int> ref_hist = get_luminance_histogram(ref_lum_values, bins);
+    std::vector<float> ref_cdf = get_cdf(ref_hist, ref_lum_values.size());
+    
+    // 5. Create the tone-matched reference RGB buffer
+    std::vector<float> tone_matched_ref_rgb(ref_w * ref_h * 3);
+    for (size_t i = 0; i < (size_t)ref_w * ref_h; ++i) {
+        float original_ref_lum = ref_lum_values[i];
+        
+        // Map original_ref_lum to new luminance using histogram matching
+        float new_ref_lum = map_luminance_to_target_cdf(original_ref_lum, bins, ref_cdf, tone_cdf);
+
+        // Calculate ratio to preserve color
+        float ratio = (original_ref_lum > 1e-6f) ? (new_ref_lum / original_ref_lum) : 1.0f;
+
+        // Apply ratio to original color channels
+        tone_matched_ref_rgb[i*3+0] = original_ref_rgb_linear[i*3+0] * ratio;
+        tone_matched_ref_rgb[i*3+1] = original_ref_rgb_linear[i*3+1] * ratio;
+        tone_matched_ref_rgb[i*3+2] = original_ref_rgb_linear[i*3+2] * ratio;
+    }
+
+    return tone_matched_ref_rgb;
+}
+
 // Compute diff against reference and save visualization
 static float compute_diff(const std::string &path, const float *stage, int sw, int sh,
                           const Reference &ref, const std::string &stage_name)
@@ -240,6 +358,9 @@ static float compute_diff(const std::string &path, const float *stage, int sw, i
 
     return pct_brighter;
 }
+
+} // namespace
+
 
 int main(int argc, char **argv)
 {
@@ -399,9 +520,15 @@ int main(int argc, char **argv)
     std::vector<float> tune_rgb = tone_rgb; // Input from TONE stage
     if (!ref.rgb8.empty())
     {
-        auto tone_ds = downsample(tone_rgb.data(), sw, sh, ref.width, ref.height); // Downsample TONE output
+        // Our pipeline's tone-corrected output (downsampled for learning)
+        auto tone_ds = downsample(tone_rgb.data(), sw, sh, ref.width, ref.height);
+        
+        // Create a tone-matched reference from the original JPEG for orthogonal color learning
+        std::vector<float> tone_matched_ref_ds = create_tone_matched_reference(
+            tone_rgb.data(), sw, sh, ref.rgb8.data(), ref.width, ref.height);
+
         tune::learn(tone_ds.data(), ref.width, ref.height,
-                    ref.rgb8.data(), ref.width, ref.height, profile);
+                    tone_matched_ref_ds.data(), ref.width, ref.height, profile); // Use tone_matched_ref_ds as target
         tune::apply(tune_rgb.data(), tune_rgb.data(), sw, sh, profile);
     }
     save_png(prefix + ".5.tune.png", tune_rgb.data(), sw, sh);

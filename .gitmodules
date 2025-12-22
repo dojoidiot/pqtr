@@ -16,3 +16,6 @@
 [submodule "LABS/lib/dawn"]
 	path = LABS/lib/dawn
 	url = https://dawn.googlesource.com/dawn
+[submodule "VIBE/lib/dawn"]
+	path = VIBE/lib/dawn
+	url = https://dawn.googlesource.com/dawn

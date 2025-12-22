@@ -109,9 +109,6 @@ namespace flow
         virtual uint8_t *view() = 0;   // preview RGB (from embedded JPEG)
         virtual size_t viewSize() = 0; // size of view buffer in bytes
 
-        // GPU processing
-        virtual Task head(void *device) = 0;  // RAW → scene-linear RGB
-        virtual Task tune(void *device) = 0;  // head + learn camera profile
     };
 
     // ============================================================================
@@ -133,5 +130,8 @@ namespace flow
     //   BIN->PNG/JPG: data is w*h*3 RGB, size ignored
     //   PNG/JPG->BIN: data is compressed, size is data length, w/h extracted from image
     std::vector<uint8_t> swap(uint8_t *data, size_t size, int w, int h, Swap into);
+
+implement this
+   std::vector<uint8_t> swap(uint16_t *data, size_t size, int w, int h, Swap into);
 
 }

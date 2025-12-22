@@ -7,7 +7,7 @@ namespace tune
     // Learn the 3D color LUT from a TONE-corrected output and a reference JPEG.
     // This function will populate the LUT-related parts of the CameraLut struct.
     void learn(const float* tone_rgb, int width, int height,
-               const uint8_t* ref_rgb8, int ref_width, int ref_height,
+               const float* ref_rgb, int ref_width, int ref_height,
                lute::CameraLut& profile);
 
     // Apply the learned 3D color LUT to the full-resolution image.

@@ -33,8 +33,8 @@ void tone::learn(const float* head_rgb, int width, int height,
         return;
     }
 
-    profile.curve_sum.resize(lute::CURVE_SIZE, 0.0);
-    profile.curve_count.resize(lute::CURVE_SIZE, 0);
+    profile.tone_sum.assign(lute::TONE_CURVE_SIZE, 0.0);
+    profile.tone_count.assign(lute::TONE_CURVE_SIZE, 0);
 
     const size_t num_pixels = static_cast<size_t>(width) * height;
 
@@ -56,12 +56,12 @@ void tone::learn(const float* head_rgb, int width, int height,
         float ref_lum = linear_rgb_to_luminance(ref_r, ref_g, ref_b);
 
         // Find the appropriate bin for this input luminance
-        int bin = static_cast<int>(in_lum * (lute::CURVE_SIZE - 1) + 0.5f);
-        bin = std::max(0, std::min(lute::CURVE_SIZE - 1, bin));
+        int bin = static_cast<int>(in_lum * (lute::TONE_CURVE_SIZE - 1) + 0.5f);
+        bin = std::max(0, std::min(lute::TONE_CURVE_SIZE - 1, bin));
 
         // Accumulate data for this bin
-        profile.curve_sum[bin] += ref_lum;
-        profile.curve_count[bin]++;
+        profile.tone_sum[bin] += ref_lum;
+        profile.tone_count[bin]++;
     }
 
     profile.sample_count += static_cast<int>(num_pixels);
@@ -71,8 +71,8 @@ void tone::learn(const float* head_rgb, int width, int height,
 void tone::apply(const float* in_rgb, float* out_rgb, int width, int height,
                    const lute::CameraLut& profile)
 {
-    float curve[lute::CURVE_SIZE];
-    profile.curve(curve); // Get the finalized tone curve
+    float curve[lute::TONE_CURVE_SIZE];
+    profile.tone_curve(curve); // Get the finalized tone curve
 
     const size_t num_pixels = static_cast<size_t>(width) * height;
 
@@ -87,9 +87,9 @@ void tone::apply(const float* in_rgb, float* out_rgb, int width, int height,
         in_lum = std::max(0.0f, std::min(1.0f, in_lum));
 
         // Find the position in the curve array
-        float curve_pos = in_lum * (lute::CURVE_SIZE - 1);
+        float curve_pos = in_lum * (lute::TONE_CURVE_SIZE - 1);
         int bin0 = static_cast<int>(curve_pos);
-        int bin1 = std::min(lute::CURVE_SIZE - 1, bin0 + 1);
+        int bin1 = std::min(lute::TONE_CURVE_SIZE - 1, bin0 + 1);
         float t = curve_pos - bin0;
 
         // Trilinearly interpolate the target luminance from the curve

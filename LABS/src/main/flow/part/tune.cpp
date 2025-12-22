@@ -6,123 +6,142 @@
 
 namespace
 {
-    // Helper to convert sRGB [0, 255] to linear [0, 1]
-    static float srgb_to_linear(uint8_t v)
-    {
-        float f = v / 255.0f;
-        if (f <= 0.04045f)
-            return f / 12.92f;
-        return std::pow((f + 0.055f) / 1.055f, 2.4f);
+    struct HSV { float h, s, v; };
+
+    // r,g,b inputs are [0,1]
+    // h is [0,360], s is [0,1], v is [0,1]
+    static HSV rgb_to_hsv(float r, float g, float b) {
+        float max_val = std::max(r, std::max(g, b));
+        float min_val = std::min(r, std::min(g, b));
+        float delta = max_val - min_val;
+
+        HSV hsv;
+        hsv.v = max_val;
+
+        if (delta < 1e-6f) {
+            hsv.h = 0.0f;
+            hsv.s = 0.0f;
+        } else {
+            hsv.s = delta / max_val;
+            if (r >= max_val) {
+                hsv.h = 60.0f * fmod(((g - b) / delta), 6.0f);
+            } else if (g >= max_val) {
+                hsv.h = 60.0f * (((b - r) / delta) + 2.0f);
+            } else {
+                hsv.h = 60.0f * (((r - g) / delta) + 4.0f);
+            }
+            if (hsv.h < 0.0f) {
+                hsv.h += 360.0f;
+            }
+        }
+        return hsv;
     }
-}
+
+    static void hsv_to_rgb(float h, float s, float v, float& r, float& g, float& b) {
+        if (s < 1e-6f) {
+            r = g = b = v;
+            return;
+        }
+
+        float c = v * s;
+        float x = c * (1.0f - std::abs(fmod(h / 60.0f, 2.0f) - 1.0f));
+        float m = v - c;
+
+        if (h >= 0 && h < 60) {
+            r = c; g = x; b = 0;
+        } else if (h >= 60 && h < 120) {
+            r = x; g = c; b = 0;
+        } else if (h >= 120 && h < 180) {
+            r = 0; g = c; b = x;
+        } else if (h >= 180 && h < 240) {
+            r = 0; g = x; b = c;
+        } else if (h >= 240 && h < 300) {
+            r = x; g = 0; b = c;
+        } else {
+            r = c; g = 0; b = x;
+        }
+
+        r += m; g += m; b += m;
+    }
+
+    // Helper to apply a 1D LUT with interpolation
+    static float apply_curve(float val, const float* curve, int size)
+    {
+        float curve_pos = val * (size - 1);
+        int bin0 = std::max(0, std::min(size - 1, static_cast<int>(curve_pos)));
+        int bin1 = std::max(0, std::min(size - 1, bin0 + 1));
+        float t = curve_pos - bin0;
+        return curve[bin0] * (1.0f - t) + curve[bin1] * t;
+    }
+
+} // namespace
 
 void tune::learn(const float* tone_rgb, int width, int height,
-                   const uint8_t* ref_rgb8, int ref_width, int ref_height,
+                   const float* ref_rgb, int ref_width, int ref_height,
                    lute::CameraLut& profile)
 {
-    if (width != ref_width || height != ref_height)
-    {
-        return; // Caller is responsible for downsampling
-    }
+    if (width != ref_width || height != ref_height) return;
 
-    profile.sum.resize(lute::CELLS * 3, 0.0);
-    profile.count.resize(lute::CELLS, 0);
+    profile.hue_sum.assign(lute::HUE_CURVE_SIZE, 0.0);
+    profile.hue_count.assign(lute::HUE_CURVE_SIZE, 0);
+    profile.sat_sum.assign(lute::SAT_CURVE_SIZE, 0.0);
+    profile.sat_count.assign(lute::SAT_CURVE_SIZE, 0);
+    profile.val_sum.assign(lute::VAL_CURVE_SIZE, 0.0);
+    profile.val_count.assign(lute::VAL_CURVE_SIZE, 0);
 
     const size_t num_pixels = static_cast<size_t>(width) * height;
-    const float grid_scale = lute::GRID_SIZE - 1;
 
     for (size_t i = 0; i < num_pixels; ++i)
     {
         const size_t idx = i * 3;
 
-        // Input coordinates from tone-corrected rgb
-        float in_r = std::max(0.0f, std::min(1.0f, tone_rgb[idx]));
-        float in_g = std::max(0.0f, std::min(1.0f, tone_rgb[idx + 1]));
-        float in_b = std::max(0.0f, std::min(1.0f, tone_rgb[idx + 2]));
+        // Convert input and reference to HSV
+        HSV in_hsv = rgb_to_hsv(tone_rgb[idx], tone_rgb[idx+1], tone_rgb[idx+2]);
+        HSV ref_hsv = rgb_to_hsv(ref_rgb[idx], ref_rgb[idx+1], ref_rgb[idx+2]);
 
-        // Target color from reference jpeg
-        float ref_r = srgb_to_linear(ref_rgb8[idx]);
-        float ref_g = srgb_to_linear(ref_rgb8[idx + 1]);
-        float ref_b = srgb_to_linear(ref_rgb8[idx + 2]);
+        // Accumulate for Hue curve
+        int hue_bin = std::min(lute::HUE_CURVE_SIZE - 1, static_cast<int>(in_hsv.h));
+        profile.hue_sum[hue_bin] += ref_hsv.h;
+        profile.hue_count[hue_bin]++;
 
-        // Find cell index in 3D LUT
-        int r_idx = static_cast<int>(in_r * grid_scale + 0.5f);
-        int g_idx = static_cast<int>(in_g * grid_scale + 0.5f);
-        int b_idx = static_cast<int>(in_b * grid_scale + 0.5f);
-        int cell_idx = r_idx + g_idx * lute::GRID_SIZE + b_idx * lute::GRID_SIZE * lute::GRID_SIZE;
-        cell_idx = std::max(0, std::min(lute::CELLS - 1, cell_idx));
-
-        // Accumulate target color
-        const size_t lut_idx = cell_idx * 3;
-        profile.sum[lut_idx + 0] += ref_r;
-        profile.sum[lut_idx + 1] += ref_g;
-        profile.sum[lut_idx + 2] += ref_b;
-        profile.count[cell_idx]++;
+        // Accumulate for Saturation curve
+        int sat_bin = std::min(lute::SAT_CURVE_SIZE - 1, static_cast<int>(in_hsv.s * (lute::SAT_CURVE_SIZE - 1)));
+        profile.sat_sum[sat_bin] += ref_hsv.s;
+        profile.sat_count[sat_bin]++;
+        
+        // Accumulate for Value curve
+        int val_bin = std::min(lute::VAL_CURVE_SIZE - 1, static_cast<int>(in_hsv.v * (lute::VAL_CURVE_SIZE - 1)));
+        profile.val_sum[val_bin] += ref_hsv.v;
+        profile.val_count[val_bin]++;
     }
 }
 
 void tune::apply(const float* in_rgb, float* out_rgb, int width, int height,
                    const lute::CameraLut& profile)
 {
-    std::vector<float> lut(lute::LUT_SIZE);
-    profile.lut(lut.data());
+    // Extract learned curves
+    float h_curve[lute::HUE_CURVE_SIZE];
+    float s_curve[lute::SAT_CURVE_SIZE];
+    float v_curve[lute::VAL_CURVE_SIZE];
+    profile.hue_curve(h_curve);
+    profile.sat_curve(s_curve);
+    profile.val_curve(v_curve);
 
     const size_t num_pixels = static_cast<size_t>(width) * height;
-    const float grid_scale = lute::GRID_SIZE - 1;
 
     for (size_t i = 0; i < num_pixels; ++i)
     {
-        const size_t p_idx = i * 3;
-        float r = std::max(0.0f, std::min(1.0f, in_rgb[p_idx]));
-        float g = std::max(0.0f, std::min(1.0f, in_rgb[p_idx + 1]));
-        float b = std::max(0.0f, std::min(1.0f, in_rgb[p_idx + 2]));
-
-        // Get grid coordinates and interpolation factors
-        float r_pos = r * grid_scale;
-        float g_pos = g * grid_scale;
-        float b_pos = b * grid_scale;
-
-        int r0 = static_cast<int>(r_pos);
-        int g0 = static_cast<int>(g_pos);
-        int b0 = static_cast<int>(b_pos);
-
-        float fr = r_pos - r0;
-        float fg = g_pos - g0;
-        float fb = b_pos - b0;
-
-        int r1 = std::min(lute::GRID_SIZE - 1, r0 + 1);
-        int g1 = std::min(lute::GRID_SIZE - 1, g0 + 1);
-        int b1 = std::min(lute::GRID_SIZE - 1, b0 + 1);
+        const size_t idx = i * 3;
         
-        r0 = std::max(0, std::min(lute::GRID_SIZE - 1, r0));
-        g0 = std::max(0, std::min(lute::GRID_SIZE - 1, g0));
-        b0 = std::max(0, std::min(lute::GRID_SIZE - 1, b0));
+        // 1. Convert to HSV
+        HSV hsv = rgb_to_hsv(in_rgb[idx], in_rgb[idx+1], in_rgb[idx+2]);
+        
+        // 2. Apply learned curves
+        hsv.h = apply_curve(hsv.h / 360.0f, h_curve, lute::HUE_CURVE_SIZE) * 360.0f;
+        hsv.s = apply_curve(hsv.s, s_curve, lute::SAT_CURVE_SIZE);
+        hsv.v = apply_curve(hsv.v, v_curve, lute::VAL_CURVE_SIZE);
 
-        // Trilinear interpolation
-        for (int c = 0; c < 3; ++c)
-        {
-            // Get values of the 8 corners of the cube in the LUT
-            float v000 = lut[(r0 + g0 * lute::GRID_SIZE + b0 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v100 = lut[(r1 + g0 * lute::GRID_SIZE + b0 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v010 = lut[(r0 + g1 * lute::GRID_SIZE + b0 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v110 = lut[(r1 + g1 * lute::GRID_SIZE + b0 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v001 = lut[(r0 + g0 * lute::GRID_SIZE + b1 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v101 = lut[(r1 + g0 * lute::GRID_SIZE + b1 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v011 = lut[(r0 + g1 * lute::GRID_SIZE + b1 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-            float v111 = lut[(r1 + g1 * lute::GRID_SIZE + b1 * lute::GRID_SIZE * lute::GRID_SIZE) * 3 + c];
-
-            // Interpolate along r-axis
-            float v00 = v000 * (1 - fr) + v100 * fr;
-            float v01 = v001 * (1 - fr) + v101 * fr;
-            float v10 = v010 * (1 - fr) + v110 * fr;
-            float v11 = v011 * (1 - fr) + v111 * fr;
-
-            // Interpolate along g-axis
-            float v0 = v00 * (1 - fg) + v10 * fg;
-            float v1 = v01 * (1 - fg) + v11 * fg;
-
-            // Interpolate along b-axis
-            out_rgb[p_idx + c] = v0 * (1 - fb) + v1 * fb;
-        }
+        // 3. Convert back to RGB
+        hsv_to_rgb(hsv.h, hsv.s, hsv.v, out_rgb[idx], out_rgb[idx+1], out_rgb[idx+2]);
     }
 }

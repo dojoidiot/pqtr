@@ -80,9 +80,11 @@ $(OBJ_DIR)/lib/%.o: lib/%.cpp
 	$(EMXX) $(EMFLAGS) $(INC) -c $< -o $@
 
 # === Tests (native) ===
-test: $(TEST_FLOW)
+test: $(TEST_FLOW) $(TEST_TUNE)
 	@echo "=== FLOW Test ==="
 	@cd $(shell pwd) && $(TEST_FLOW) || true
+	@echo "\n=== TUNE Unit Tests ==="
+	@cd $(shell pwd) && $(TEST_TUNE) || true
 
 # GEAR test
 $(TEST_GEAR): src/test/gear/test_dawn.cpp src/test/gear/pipe.cpp src/main/wgpu/wgpu.cpp | $(DAWN_LIB)
@@ -155,6 +157,20 @@ $(TEST_LUTE): $(LUTE_SRCS) | $(DAWN_LIB)
 lute: $(TEST_LUTE)
 	@echo "=== LUTE Test ==="
 	@cd $(shell pwd) && $(TEST_LUTE) || true
+
+# TUNE test
+TEST_TUNE = $(TEST_DIR)/test_tune
+TUNE_SRCS = src/test/flow/test_tune.cpp \
+            src/main/flow/part/tune.cpp \
+            src/main/lute/lute.cpp
+
+$(TEST_TUNE): $(TUNE_SRCS)
+	@mkdir -p $(TEST_DIR)
+	$(CXX) $(CXXFLAGS) -Iinc $^ -o $@
+
+test_tune: $(TEST_TUNE)
+	@echo "=== TUNE Test ==="
+	@cd $(shell pwd) && $(TEST_TUNE) || true
 
 tidy:
 	rm -rf tmp
