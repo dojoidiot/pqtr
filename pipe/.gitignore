@@ -1,0 +1,10 @@
+# Build output
+tmp/
+
+# External dependencies (git repos)
+LibRaw/
+dark/
+
+# Large test files
+src/test/*.ARW
+src/test/*.JPG
