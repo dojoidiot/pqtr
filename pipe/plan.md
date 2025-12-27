@@ -498,7 +498,55 @@ After copying algorithms from a reference implementation (darktable), a cleanup 
 
 ---
 
+## Step 10: Sony Expert Baseline ✓ SIGNED OFF
+
+### Goal
+Capture darktable's expert system output for Sony ILCE-7M3 as hard baseline.
+
+### Method
+1. Ran darktable GUI on `DSC00144.ARW` with `auto_presets_applied=1`
+2. Darktable applied scene-referred workflow based on camera metadata
+3. Exported XMP as `sony.xmp`
+
+### Darktable Expert System Applied (11 modules)
+
+| # | Module | Purpose | In Our Pipeline? |
+|---|--------|---------|------------------|
+| 0 | rawprepare | BLC + crop | ✓ |
+| 1 | demosaic | Bayer → RGB | ✓ |
+| 2 | colorin | cam → Lab | ✓ |
+| 3 | colorout | Lab → sRGB | ✓ |
+| 4 | gamma | sRGB transfer | ✓ |
+| 5 | temperature | White balance | ✓ |
+| 6 | highlights | Highlight recovery | ✗ NEW |
+| 7 | channelmixerrgb | Chromatic adaptation | ✗ NEW |
+| 8 | exposure | Scene-referred brightness | ✗ NEW |
+| 9 | flip | EXIF orientation | ✗ NEW |
+| 10 | sigmoid | Scene-referred tonemapping | ✗ NEW |
+
+### Gap Analysis
+
+**Visual differences (our pipeline vs sony.xmp):**
+- Our output: Cool bluish-gray tones, magenta cast, darker
+- Sony baseline: Warm natural brown, neutral color, better shadows
+
+**Modules needed to close gap:**
+1. `highlights` - Recover clipped highlights
+2. `channelmixerrgb` - CAT chromatic adaptation
+3. `exposure` - Scene brightness adjustment
+4. `sigmoid` - Modern tone mapping (replaces basic gamma)
+
+### Files
+- `src/test/sony.xmp` - DT expert system baseline (11 modules)
+- `src/test/default.xmp` - Our minimal pipeline (6 modules)
+- `tmp/var/pipe/sony-ref.png` - Reference output to match
+
+**SIGNED OFF** (baseline captured)
+
+---
+
 ## Next Steps
 
-1. **XMP Parser (Copy step)**: Parse XMP to auto-configure pipeline
-2. **Additional cameras**: Extract matrices for other camera models
+1. **Implement gap modules**: highlights, channelmixerrgb, exposure, sigmoid
+2. **XMP Parser**: Parse sony.xmp to auto-configure pipeline
+3. **Additional cameras**: Extract matrices for other camera models
