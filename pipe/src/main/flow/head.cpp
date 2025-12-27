@@ -20,6 +20,8 @@ class FlowImpl : public Flow
 {
     sony::BayerU16 bayer_;
     std::unique_ptr<Tree> info_;
+    std::vector<float> fbayer_;  // normalized float bayer (filled by rawprepare)
+    std::vector<float> rgb_;     // RGB float data (filled by demosaic)
 
 public:
     FlowImpl(sony::BayerU16&& bayer, std::unique_ptr<Tree> info)
@@ -29,6 +31,28 @@ public:
 
     Tree& info() override { return *info_; }
     uint16_t* data() override { return bayer_.ptr(); }
+
+    float* fdata() override {
+        // Allocate on first access if needed
+        if (fbayer_.empty()) {
+            auto& root = info_->root();
+            int width = static_cast<int>(root.leaf(WIDTH).dial());
+            int height = static_cast<int>(root.leaf(HEIGHT).dial());
+            fbayer_.resize(static_cast<size_t>(width) * height);
+        }
+        return fbayer_.data();
+    }
+
+    float* rgb() override {
+        // Allocate on first access (4 floats per pixel for RGBX)
+        if (rgb_.empty()) {
+            auto& root = info_->root();
+            int width = static_cast<int>(root.leaf(WIDTH).dial());
+            int height = static_cast<int>(root.leaf(HEIGHT).dial());
+            rgb_.resize(static_cast<size_t>(width) * height * 4);
+        }
+        return rgb_.data();
+    }
 };
 
 // -------------------------------------------------------------------------
@@ -40,7 +64,7 @@ class HeadImpl : public Head
 public:
     std::string name() const override { return "head"; }
     std::string save() override { return "{}"; }
-    void load(std::string) override {}
+    void load(const std::string&) override {}
 
     std::unique_ptr<Flow> decode(const uint8_t* bytes, size_t size) override
     {
@@ -90,10 +114,34 @@ public:
         std::string pattern = patterns[meta.bayer_pattern & 3];
         root.leaf("bayer").text(pattern);
 
-        // Color matrix (3x3)
+        // Color matrix (3x3) - Sony 0x7800 (camera->sRGB)
         auto& matrix = root.next("color_matrix");
         for (int i = 0; i < 9; i++) {
             matrix.leaf(std::to_string(i)).dial(meta.color_matrix[i]);
+        }
+
+        // Camera-to-XYZ matrix - from LibRaw/dcraw database
+        // This converts camera RGB to XYZ
+        // Used by colorin to go camera RGB → XYZ → Lab (D50)
+        // TODO: Build camera database instead of hardcoding
+        auto& cam_xyz = root.next("cam_xyz");
+        if (make == "SONY" && model == "ILCE-7M3") {
+            // Sony A7III - from LibRaw cam_xyz
+            float m[9] = {
+                 0.7374f, -0.2389f, -0.0551f,
+                -0.5435f,  1.3162f,  0.2519f,
+                -0.1006f,  0.1795f,  0.6552f
+            };
+            for (int i = 0; i < 9; i++) {
+                cam_xyz.leaf(std::to_string(i)).dial(m[i]);
+            }
+        } else {
+            // Fallback: use metadata if available, else identity
+            for (int i = 0; i < 9; i++) {
+                float val = meta.cam_xyz[i];
+                if (val == 0.0f && (i == 0 || i == 4 || i == 8)) val = 1.0f;
+                cam_xyz.leaf(std::to_string(i)).dial(val);
+            }
         }
 
         // Crop info

@@ -37,13 +37,8 @@
 #include <vector>
 #include <cstring>
 
-// stb_image for JPEG preview decoding
-#define STB_IMAGE_IMPLEMENTATION
-#define STBI_ONLY_JPEG
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wunused-parameter"
+// stb_image for JPEG preview decoding (implementation in stb_impl.cpp)
 #include "stb_image.h"
-#pragma GCC diagnostic pop
 
 namespace sony
 {
@@ -93,7 +88,10 @@ namespace sony
             // SR2SubIFD tags (encrypted)
             SONY_TAG_SR2_OFFSET = 0x7200,
             SONY_TAG_SR2_LENGTH = 0x7201,
-            SONY_TAG_SR2_KEY = 0x7221
+            SONY_TAG_SR2_KEY = 0x7221,
+            // SR2SubIFD data tags
+            SONY_TAG_BLACK_LEVEL = 0x7310,  // Per-channel black levels (RGGB order)
+            SONY_TAG_LINEAR_MAX = 0x787f    // Highlight linearity limit
         };
 
         // Sony SR2SubIFD decryption (Dave Coffin's algorithm from dcraw)
@@ -524,12 +522,16 @@ namespace sony
             metadata.crop_height = metadata.height;
         }
 
-        // Decrypt and parse SR2SubIFD for color matrix
+        // Decrypt and parse SR2SubIFD for color matrix and linear_max
         if (sr2_offset > 0 && sr2_length > 0 && sr2_key != 0 && sr2_offset + sr2_length <= size)
         {
             std::vector<uint8_t> sr2(sr2_length);
             std::memcpy(sr2.data(), &file_data[sr2_offset], sr2_length);
             decrypt_sr2(sr2.data(), sr2_length, sr2_key);
+
+            bool found_matrix = false;
+            bool found_linear_max = false;
+            bool found_black = false;
 
             if (sr2_length >= 2)
             {
@@ -540,9 +542,9 @@ namespace sony
                     if (entry_off + 12 > sr2_length) break;
                     IFDEntry entry = parse_ifd_entry(&sr2[entry_off]);
 
-                    if (entry.tag == SONY_TAG_COLOR_MATRIX && entry.count == 9)
+                    // Color matrix (0x7800)
+                    if (!found_matrix && entry.tag == SONY_TAG_COLOR_MATRIX && entry.count == 9)
                     {
-                        // Offset is relative to file start, convert to SR2 buffer offset
                         uint32_t rel_offset = entry.value_offset - sr2_offset;
                         if (rel_offset + 18 <= sr2_length)
                         {
@@ -551,11 +553,73 @@ namespace sony
                                 int16_t val = static_cast<int16_t>(read_u16(&sr2[rel_offset + j * 2]));
                                 metadata.color_matrix[j] = val / 1024.0f;
                             }
+                            found_matrix = true;
                         }
-                        break;
                     }
+
+                    // Black level per channel (0x7310) - RGGB order
+                    if (!found_black && entry.tag == SONY_TAG_BLACK_LEVEL && entry.count == 4)
+                    {
+                        uint32_t rel_offset = entry.value_offset - sr2_offset;
+                        if (rel_offset + 8 <= sr2_length)
+                        {
+                            // Read 4 per-channel values, find minimum as base black
+                            uint16_t cblack[4];
+                            for (int j = 0; j < 4; j++)
+                            {
+                                cblack[j] = read_u16(&sr2[rel_offset + j * 2]);
+                            }
+                            // Use minimum of all channels (LibRaw algorithm)
+                            uint16_t min_black = cblack[0];
+                            for (int j = 1; j < 4; j++)
+                            {
+                                if (cblack[j] < min_black) min_black = cblack[j];
+                            }
+                            metadata.black_level = min_black;
+                            found_black = true;
+                        }
+                    }
+
+                    // Linear max / highlight linearity limit (0x787f)
+                    if (!found_linear_max && entry.tag == SONY_TAG_LINEAR_MAX)
+                    {
+                        if (entry.count == 3)
+                        {
+                            // 3 values: R, G, B (use first/max)
+                            uint32_t rel_offset = entry.value_offset - sr2_offset;
+                            if (rel_offset + 6 <= sr2_length)
+                            {
+                                // Note: We read linear_max but use 16383 (14-bit max) for normalization
+                                // to match LibRaw/DT behavior. The camera's linear_max (e.g., 15360)
+                                // is the sensor saturation point, but normalization uses full 14-bit range.
+                                (void)read_u16(&sr2[rel_offset]); // linear_max_r - not used
+                                metadata.white_level = 16383;
+                                found_linear_max = true;
+                            }
+                        }
+                        else if (entry.count == 1)
+                        {
+                            // Single value - use 16383 for normalization (matching LibRaw/DT)
+                            metadata.white_level = 16383;
+                            found_linear_max = true;
+                        }
+                    }
+
+                    if (found_matrix && found_linear_max && found_black) break;
                 }
             }
+
+            // Fallback for black_level if not found
+            if (!found_black)
+            {
+                metadata.black_level = 512;  // Default for Sony sensors
+            }
+        }
+        else
+        {
+            // No SR2SubIFD available - use fallback defaults
+            metadata.black_level = 512;
+            metadata.white_level = 16383;
         }
 
         if (strip_offset == 0 || strip_offset + strip_byte_count > size)
@@ -605,8 +669,12 @@ namespace sony
                     if (curve_index < 16384)
                         bayer.data[i] = linearization_curve[curve_index];
                 }
-                // Update white level to match curve-expanded range (14-bit)
-                metadata.white_level = 16383;  // LibRaw uses 16383 (0x3fff)
+                // Note: white_level should come from linear_max (0x787f) in SR2SubIFD,
+                // which we parsed above. Only use fallback if not found.
+                if (metadata.white_level == 0 || metadata.white_level > 16383)
+                {
+                    metadata.white_level = 16383;  // Fallback to 14-bit max
+                }
             }
         }
         else if (compression == 1)

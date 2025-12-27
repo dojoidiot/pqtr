@@ -17,8 +17,15 @@ SRCS := \
 	src/main/flow/png.cpp \
 	src/main/flow/jpg.cpp \
 	src/main/flow/head.cpp \
+	src/main/flow/rawprepare.cpp \
+	src/main/flow/demosaic.cpp \
+	src/main/flow/temperature.cpp \
+	src/main/flow/colorin.cpp \
+	src/main/flow/colorout.cpp \
+	src/main/flow/gamma.cpp \
 	src/main/flow/sony/sony.cpp \
-	src/main/flow/sony/prepare.cpp
+	src/main/flow/sony/prepare.cpp \
+	src/main/flow/sony/stb_impl.cpp
 
 # Build directory
 BUILD := tmp/build
@@ -30,12 +37,45 @@ OBJS := $(SRCS:%.cpp=$(BUILD)/%.o)
 INCLUDES := -I inc -I src/main/flow
 
 # Targets
-.PHONY: all test dark clean tidy
+.PHONY: all test dark clean tidy test-rawprepare test-temperature test-demosaic test-colorin ref
 
-all: $(BUILD)/pipe_test $(BUILD)/dark
+all: $(BUILD)/default $(BUILD)/dark
 
-# Step 0 test
-$(BUILD)/pipe_test: $(OBJS) $(BUILD)/src/test/pipe.o
+# Module tests
+$(BUILD)/rawprepare: $(OBJS) $(BUILD)/src/test/rawprepare.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(BUILD)/temperature: $(OBJS) $(BUILD)/src/test/temperature.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(BUILD)/demosaic: $(OBJS) $(BUILD)/src/test/demosaic.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+$(BUILD)/colorin: $(OBJS) $(BUILD)/src/test/colorin.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-rawprepare: $(BUILD)/rawprepare
+	@./$(BUILD)/rawprepare
+
+test-temperature: $(BUILD)/temperature
+	@./$(BUILD)/temperature
+
+test-demosaic: $(BUILD)/demosaic
+	@./$(BUILD)/demosaic
+
+test-colorin: $(BUILD)/colorin
+	@./$(BUILD)/colorin
+
+# Generate reference files
+ref:
+	python3 scripts/gen_ref.py all
+
+# Default pipeline test
+$(BUILD)/default: $(OBJS) $(BUILD)/src/test/default.o
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
@@ -48,9 +88,9 @@ $(BUILD)/%.o: %.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) $(INCLUDES) -c -o $@ $<
 
-test: $(BUILD)/pipe_test
-	@echo "=== Running Step 0 Test ==="
-	@cd /home/z/base/code/pqtr/pipe && ./tmp/build/pipe_test
+test: $(BUILD)/default
+	@echo "=== Running Default Pipeline Test ==="
+	@cd /home/z/base/code/pqtr/pipe && ./tmp/build/default
 
 dark: $(BUILD)/dark
 	@echo "Built: tmp/build/dark"

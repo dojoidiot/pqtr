@@ -86,6 +86,8 @@ namespace flow
         virtual ~Flow() = default;
         virtual Tree &info() = 0;      // metadata tree
         virtual uint16_t *data() = 0;  // raw bayer data (width * height)
+        virtual float *fdata() = 0;    // normalized float bayer (null until rawprepare)
+        virtual float *rgb() = 0;      // RGB float data (width * height * 4, RGBX)
     };
     // ============================================================
     // Link - Processing unit
@@ -103,7 +105,7 @@ namespace flow
         // Save link as Json.  If link has links - like the pipe does - then recurse.
         virtual std::string save() = 0;
         // Load link from Json.  If link has links - like the pipe does - then recurse.
-        virtual void load(std::string json) = 0;
+        virtual void load(const std::string& json) = 0;
     };
 
     // The head link; takes the raw arw file bytes, and makes the flow object for the pipe.
@@ -111,6 +113,55 @@ namespace flow
     {
     public:
         virtual std::unique_ptr<Flow> decode(const uint8_t *bytes, size_t size) = 0;
+    };
+
+    // Rawprepare link; black level subtraction and normalization.
+    // Input: uint16 bayer in data(), Output: float bayer in fdata()
+    class Rawprepare : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+    };
+
+    // Demosaic link; bayer interpolation to RGB.
+    // Input: float bayer in fdata(), Output: float RGB in rgb()
+    class Demosaic : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+    };
+
+    // Temperature link; white balance correction.
+    // Input/Output: float RGB in rgb() (in-place)
+    class Temperature : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setCoeffs(float r, float g, float b) = 0;
+    };
+
+    // Colorin link; camera RGB → XYZ → Lab (D50).
+    // Input/Output: float RGB in rgb() (in-place, becomes Lab)
+    class Colorin : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+    };
+
+    // Colorout link; Lab → XYZ → linear sRGB (D50 adapted).
+    // Input/Output: float data in rgb() (Lab in, linear sRGB out)
+    class Colorout : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+    };
+
+    // Gamma link; sRGB transfer function only.
+    // Input: linear sRGB in rgb(), Output: display sRGB
+    class Gamma : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
     };
 
     // ============================================================================
@@ -122,6 +173,24 @@ namespace flow
 
     // Create a Head (Sony ARW decoder)
     std::unique_ptr<Head> makeHead();
+
+    // Create a Rawprepare (black level subtraction)
+    std::unique_ptr<Rawprepare> makeRawprepare();
+
+    // Create a Demosaic (bayer to RGB)
+    std::unique_ptr<Demosaic> makeDemosaic();
+
+    // Create a Temperature (white balance)
+    std::unique_ptr<Temperature> makeTemperature();
+
+    // Create a Colorin (camera RGB → Lab)
+    std::unique_ptr<Colorin> makeColorin();
+
+    // Create a Colorout (Lab → linear sRGB)
+    std::unique_ptr<Colorout> makeColorout();
+
+    // Create a Gamma (sRGB transfer function)
+    std::unique_ptr<Gamma> makeGamma();
 
     // Format types
     enum Swap

@@ -443,6 +443,61 @@ Side-by-side comparison of pipeline output vs DT reference.
 
 ---
 
+## Step 9: Post-Copy Refactor ✓ SIGNED OFF
+
+### Goal
+Clean up codebase after DT algorithm copy phase. No regressions, task-focused, canonical C++.
+
+### Principle
+After copying algorithms from a reference implementation (darktable), a cleanup pass removes:
+- Dead code that was copied but not used
+- Stale comments that no longer apply
+- Build inefficiencies
+
+### Changes Made
+
+**1. Removed dead code in `colorin.cpp`:**
+- Deleted unused `mat3_invert()` function
+- Deleted unused `BRADFORD_D65_TO_D50[9]` matrix
+- These were copied from DT but not needed (we use pre-computed matrix)
+
+**2. Fixed stale comment in `colorin.cpp`:**
+- Old: "Applies Bradford chromatic adaptation from D65 to D50"
+- New: "Uses pre-computed cam→XYZ(D50) matrix (Bradford D65→D50 already applied)"
+
+**3. Separated STB_IMAGE compilation:**
+- Created `src/main/flow/sony/stb_impl.cpp` - single compilation unit
+- Moved `#define STB_IMAGE_IMPLEMENTATION` out of `prepare.cpp`
+- **Benefit:** Faster incremental builds (large header compiled once)
+
+**4. Fixed const correctness in Link interface:**
+- Changed `void load(std::string json)` → `void load(const std::string& json)`
+- Updated all 7 module implementations to match
+
+### What Was NOT Changed
+- **Algorithms** - All DT clean copies preserved exactly
+- **APIs** - All interfaces unchanged
+- **File structure** - No unnecessary reorganization
+- **Naming** - Already consistent
+
+### Lessons for Future Copy Phases
+
+1. **Copy first, clean later** - Get the algorithm working, then remove unused parts
+2. **Track what you copy** - Comments like "CLEAN COPY from DT" help identify copied code
+3. **STB-style headers** - Always put `*_IMPLEMENTATION` in dedicated .cpp file
+4. **Const correctness** - Fix interface signatures early, before implementations multiply
+5. **Dead code** - If you copy a helper function but don't call it, delete it
+6. **Comments** - Update comments when implementation differs from what was copied
+
+### Verification
+- Build: ✓ Clean (no warnings)
+- Tests: ✓ All pipeline steps pass
+- Output: ✓ Identical results (31526913 byte PNG)
+
+**SIGNED OFF** (refactor complete, no regressions)
+
+---
+
 ## Next Steps
 
 1. **XMP Parser (Copy step)**: Parse XMP to auto-configure pipeline
