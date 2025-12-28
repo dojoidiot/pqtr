@@ -69,30 +69,50 @@ module.process(flow, params)  # Pure processing (no tree access)
 
 ## Testing Strategy
 
-### Principle: No test code in our repo
+### Principle: DT is the oracle
 
-We use DT's test harness directly. Our code is validated by passing their tests.
-
-### Two-tier testing
-
-| Level | Test Source | Images | Purpose |
-|-------|-------------|--------|---------|
-| **Unit** | DT test harness | DT images (CR2, ARW, RAF) | Module correctness |
-| **Acceptance** | Our harness | Our images (Sony A7III) | End-to-end validation |
+We don't write test code. We compare our output directly against darktable's output.
+Same input (RAW + XMP) → same output = we match DT.
 
 ### How it works
 
-1. Build `pipe-cli` matching darktable-cli interface:
+```
+                    ┌─────────────┐
+   test.xmp ───────►│  pipe-cli   │───► our.png ──┐
+                    └─────────────┘               │
+                                                  ▼
+   input.raw ──────────────────────────────► diff_test ──► delta-E
+                                                  ▲
+                    ┌─────────────┐               │
+   test.xmp ───────►│darktable-cli│───► dt.png ──┘
+                    └─────────────┘
+```
+
+1. Run both CLIs with same XMP:
    ```bash
-   pipe-cli [options] <input.raw> <settings.xmp> <output.png>
+   pipe-cli input.raw test.xmp our.png
+   darktable-cli input.raw test.xmp dt.png
    ```
 
-2. Run DT's test harness with our CLI:
+2. Compare outputs:
    ```bash
-   DARKTABLE_CLI=./pipe-cli ./run.sh
+   diff_test our.png dt.png
    ```
 
-3. Pass = delta-E ≈ 0 vs DT's expected.png
+3. Delta-E = signal for what to fix
+
+### Test coverage
+
+DT integration tests: 176 XMPs in `dark/lib/desk/src/tests/integration/`
+
+| Image | Tests | Status |
+|-------|-------|--------|
+| mire1.cr2 (Canon) | 162 | ✓ have decoder |
+| hlrecovery.arw (Sony) | 4 | ✓ have decoder |
+| mire1-xtrans.raf (Fuji) | 8 | need X-Trans |
+| xtransIV.raf (Fuji) | 2 | need X-Trans |
+
+**166 tests runnable now** with Canon + Sony decoders.
 
 ### Tolerance
 
