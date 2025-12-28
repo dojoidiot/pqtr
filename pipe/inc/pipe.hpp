@@ -27,6 +27,28 @@ namespace flow
     constexpr const char *WHITE = "white";
 
     // ============================================================================
+    // Colorspace tracking (Rule 7: assert before each module test)
+    // ============================================================================
+
+    enum Colorspace {
+        BAYER,          // Bayer mosaic (float32, before demosaic)
+        LINEAR_RGB,     // Scene-referred linear RGB (float32)
+        LAB,            // CIE Lab D50 (float32)
+        DISPLAY_SRGB    // Display-referred sRGB (uint8 after gamma)
+    };
+
+    // Returns colorspace name for logging
+    inline const char* colorspace_name(Colorspace cs) {
+        switch (cs) {
+            case BAYER: return "BAYER";
+            case LINEAR_RGB: return "LINEAR_RGB";
+            case LAB: return "LAB";
+            case DISPLAY_SRGB: return "DISPLAY_SRGB";
+        }
+        return "UNKNOWN";
+    }
+
+    // ============================================================================
     // Tree - hierarchical metadata (PIMPL)
     // ============================================================================
 
@@ -256,6 +278,24 @@ namespace flow
         virtual void setOrientation(int orientation) = 0;
     };
 
+    // Colorequal link; per-hue color adjustments.
+    // Input/Output: float RGB in rgb() (in-place)
+    // Works in dt UCS 22 colorspace for perceptual uniformity.
+    // 8 hue nodes: red, orange, yellow, green, cyan, blue, lavender, magenta
+    class Colorequal : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        // Set hue shift for each of 8 hues (degrees, -180 to +180)
+        virtual void setHue(const float hue[8]) = 0;
+        // Set saturation multiplier for each of 8 hues (0 to 2, 1=unchanged)
+        virtual void setSaturation(const float sat[8]) = 0;
+        // Set brightness multiplier for each of 8 hues (0 to 2, 1=unchanged)
+        virtual void setBrightness(const float bright[8]) = 0;
+        // Set all 24 parameters at once (for optimizer)
+        virtual void setParams(const float hue[8], const float sat[8], const float bright[8]) = 0;
+    };
+
     // ============================================================================
     // Factory & Utilities
     // ============================================================================
@@ -311,6 +351,9 @@ namespace flow
     // Create a Flip (orientation)
     std::unique_ptr<Flip> makeFlip();
 
+    // Create a Colorequal (per-hue color adjustments)
+    std::unique_ptr<Colorequal> makeColorequal();
+
     // Colorspace swaps (in-place on rgb() buffer)
     // CLEAN COPY from DT common/colorspaces_inline_conversions.h
     void swapLabToRGB(Flow& flow);  // Lab → XYZ → linear sRGB (D50)
@@ -329,6 +372,49 @@ namespace flow
     //   from BIN/LIN: w=width, h=height
     //   from PNG/JPG: w=byte_size, h=ignored
     std::vector<uint8_t> swap(const void *data, int w, int h, Swap from, Swap into);
-    // Swap tree into json
+
+    // ============================================================================
+    // Diff - Delta-E image comparison (like ImageMagick compare)
+    // ============================================================================
+
+    // Delta-E statistics from image comparison
+    struct DiffResult
+    {
+        int width;
+        int height;
+        double mean_de;     // Mean delta-E across all pixels
+        double max_de;      // Maximum delta-E
+        double pct_above_1; // % of pixels with delta-E > 1 (just noticeable)
+        double pct_above_2; // % of pixels with delta-E > 2 (noticeable at a glance)
+        double correlation; // Pearson correlation
+        std::vector<float> diff_map; // Per-pixel delta-E values (optional)
+    };
+
+    // Compare two sRGB images and compute delta-E metrics
+    // img1, img2: RGB uint8 data (w*h*3 bytes each)
+    // compute_map: if true, populate diff_map with per-pixel delta-E
+    DiffResult diff(const uint8_t* img1, const uint8_t* img2, int width, int height, bool compute_map = false);
+
+    // Mode for diff visualization
+    enum class DiffMode
+    {
+        GRAYSCALE,  // Delta-E as grayscale (0=black, scale=white)
+        HEATMAP,    // Delta-E as heat map (blue→green→yellow→red)
+        HIGHLIGHT   // Gray base + red highlights for differences
+    };
+
+    // Generate visual diff image (RGB uint8, w*h*3 bytes)
+    // scale: delta-E value that maps to max intensity (default 10)
+    std::vector<uint8_t> diff_image(const uint8_t* img1, const uint8_t* img2,
+                                     int width, int height, DiffMode mode = DiffMode::HIGHLIGHT, float scale = 10.0f);
+
+    // Print diff statistics to stdout
+    void print_diff_stats(const DiffResult& result);
+
+    // Compare float32 buffers (for non-visual intermediate steps)
+    // Works on RGBX (4 floats per pixel) or LabX format
+    // Returns delta-E for Lab, or RMSE for RGB
+    DiffResult diff_float(const float* buf1, const float* buf2, int width, int height,
+                          Colorspace cs, bool compute_map = false);
 
 }

@@ -33,9 +33,12 @@ SRCS := \
 	src/main/flow/bilat.cpp \
 	src/main/flow/colorbalancergb.cpp \
 	src/main/flow/flip.cpp \
+	src/main/flow/colorequal.cpp \
+	src/main/flow/diff.cpp \
 	src/main/flow/sony/sony.cpp \
 	src/main/flow/sony/prepare.cpp \
-	src/main/flow/sony/stb_impl.cpp
+	src/main/flow/sony/stb_impl.cpp \
+	src/main/flow/canon/canon.cpp
 
 # Build directory
 BUILD := tmp/build
@@ -87,12 +90,40 @@ $(BUILD)/bilat_test: $(OBJS) $(BUILD)/src/test/bilat_test.o
 test-bilat: $(BUILD)/bilat_test
 	@./$(BUILD)/bilat_test
 
+$(BUILD)/colorequal_test: $(OBJS) $(BUILD)/src/test/colorequal_test.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-colorequal: $(BUILD)/colorequal_test
+	@./$(BUILD)/colorequal_test
+
+$(BUILD)/diff_test: $(OBJS) $(BUILD)/src/test/diff_test.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-diff: $(BUILD)/diff_test
+	@./$(BUILD)/diff_test
+
 $(BUILD)/phase4: $(OBJS) $(BUILD)/src/test/phase4.o
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 
 test-phase4: $(BUILD)/phase4
 	@./$(BUILD)/phase4
+
+$(BUILD)/cr2_test: $(OBJS) $(BUILD)/src/test/cr2_test.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-cr2: $(BUILD)/cr2_test
+	@./$(BUILD)/cr2_test
+
+$(BUILD)/cr2_pipeline: $(OBJS) $(BUILD)/src/test/cr2_pipeline.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-cr2-pipeline: $(BUILD)/cr2_pipeline
+	@./$(BUILD)/cr2_pipeline
 
 # Generate reference files
 ref:

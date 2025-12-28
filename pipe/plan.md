@@ -2,8 +2,9 @@
 
 ## Objective
 
-Clean-room stepwise recreation of darktable processing using pipe.hpp.
-Each Link = one darktable module, matched 1:1.
+Clean-room recreation of darktable processing. Each Link = one DT module, matched 1:1.
+
+---
 
 ## Golden Rules
 
@@ -26,19 +27,15 @@ We are always wrong until we match DT exactly. No exceptions.
 
 ### Rule 3: Stop on failure
 Each step must pass before moving to the next.
-- **Test FAILS?** STOP. Apply Rule 6 to find the bug.
+- **Test FAILS?** STOP. Fix before continuing.
 - Ask user if stuck after one iteration.
 
-### Rule 4: C++ tests verify each module
-- One test file per module: `src/test/<module>.cpp`
-- Test must PASS before SIGNED OFF
-
-### Rule 5: Use dark tool to decode XMP params
+### Rule 4: Use dark tool to decode XMP params
 **ALWAYS** use `./tmp/build/dark <file.xmp> --dump` to decode module parameters.
 Don't decode hex/base64 manually.
 
-### Rule 6: Step-wise verification loop
-**When a test fails, go back to Step 1.**
+### Rule 5: Step-wise verification
+When a test fails, fix the earliest failing module first.
 
 ```
 for module in pipeline_order:
@@ -47,20 +44,89 @@ for module in pipeline_order:
         break
 ```
 
+### Rule 6: Neutral Pipeline
+**Camera-agnostic testing.** Neutral = camera data normalized + DT module defaults.
+
+- **Head normalizes** camera-specific data to standard tree schema
+- **Modules read** from standard tree paths (never camera-specific)
+- **Module params** use DT defaults when XMP not provided
+- **Tests work unchanged** for any camera after head
+
+### Rule 7: Separation of Concerns
+**Extract → Params → Process.** Modules are pure computation.
+
+```
+params = extract(tree)     # Tree read (knows schema)
+assertColorspace(expected) # Colorspace gate
+module.process(flow, params)  # Pure processing (no tree access)
+```
+
+- **Extract**: Centralized tree→params conversion
+- **Params**: Typed structs per module
+- **Process**: Pure computation, no tree coupling
+
+---
+
+## Testing Strategy
+
+### Principle: No test code in our repo
+
+We use DT's test harness directly. Our code is validated by passing their tests.
+
+### Two-tier testing
+
+| Level | Test Source | Images | Purpose |
+|-------|-------------|--------|---------|
+| **Unit** | DT test harness | DT images (CR2, ARW, RAF) | Module correctness |
+| **Acceptance** | Our harness | Our images (Sony A7III) | End-to-end validation |
+
+### How it works
+
+1. Build `pipe-cli` matching darktable-cli interface:
+   ```bash
+   pipe-cli [options] <input.raw> <settings.xmp> <output.png>
+   ```
+
+2. Run DT's test harness with our CLI:
+   ```bash
+   DARKTABLE_CLI=./pipe-cli ./run.sh
+   ```
+
+3. Pass = delta-E ≈ 0 vs DT's expected.png
+
+### Tolerance
+
+```
+delta-E < 1:   PASS (imperceptible)
+delta-E 1-2:   WARN (investigate)
+delta-E > 2:   FAIL
+```
+
+### Head requirement
+
+Before running DT unit tests, head must decode all 3 formats identically to LibRaw:
+
+| Format | Camera | Status | Notes |
+|--------|--------|--------|-------|
+| Sony ARW | A7III, RX100M3 | ✓ DONE | Bayer + info tree verified |
+| Canon CR2 | EOS 40D | ✓ DONE | LJpeg decode matches LibRaw exactly |
+| Fuji RAF | X-Trans | TODO | Different CFA pattern |
+
+Once head matches LibRaw for all formats → safe to run DT unit tests.
+Any delta-E difference is then purely in our modules, not input.
+
 ---
 
 ## Pipeline Architecture
 
 **Two-stage pipeline:**
-1. **Image Processing** - IOP order with colorspace swaps (gets color/tone correct)
-2. **Geometric** - runs LAST on correct image data (moves correct pixels)
+1. **Image Processing** - IOP order with colorspace swaps
+2. **Geometric** - runs LAST (moves correct pixels)
 
-### Image Processing Pipeline
-
-IOP order, woven by working space swaps. Each module runs in its correct colorspace.
+### Processing Order
 
 ```
-SENSOR SPACE (Bayer float):
+SENSOR (Bayer float):
   rawprepare → temperature → highlights → demosaic
 
 LINEAR RGB:
@@ -69,7 +135,7 @@ LINEAR RGB:
 RGB WORKING SPACE:
   channelmixer → sigmoid → [swap RGB→Lab]
 
-LAB SPACE:
+LAB:
   bilat → [swap Lab→RGB]
 
 RGB WORKING SPACE:
@@ -79,14 +145,13 @@ DISPLAY:
   colorout → gamma
 ```
 
-### Geometric Pipeline (runs LAST)
+### Geometric (runs LAST)
 
-After image processing is correct, geometric transforms move pixels:
 ```
-  flip → lens
+flip → lens
 ```
 
-### Swap Functions
+### Colorspace Swaps
 
 Clean copy from `common/colorspaces_inline_conversions.h`:
 - `swapLabToRGB()` - Lab → XYZ → linear sRGB (D50)
@@ -94,129 +159,159 @@ Clean copy from `common/colorspaces_inline_conversions.h`:
 
 ---
 
-## Reference
+## Info Tree Schema
 
-- **darktable**: v5.3.0 (in `dark/`)
-- **LibRaw**: (in `LibRaw/`)
-- **Test file**: `src/test/DSC00144.ARW` (Sony A7III, 3968x2648)
-- **XMP files**: `default.xmp` (6 modules), `sony.xmp` (11 modules)
+Standard tree paths populated by head. Modules read these, never camera-specific data.
+
+### Image Data
+| Path | Type | Unit | Description |
+|------|------|------|-------------|
+| `width` | float | pixels | RAW width |
+| `height` | float | pixels | RAW height |
+| `black` | float | 0-65535 | Black level (averaged if per-channel) |
+| `white` | float | 0-65535 | White/saturation level |
+| `bayer` | string | "RGGB" | CFA pattern |
+
+### White Balance
+| Path | Type | Unit | Description |
+|------|------|------|-------------|
+| `wb/r` | float | multiplier | Red multiplier (normalized: g1=1.0) |
+| `wb/g1` | float | multiplier | Green1 multiplier (always 1.0) |
+| `wb/b` | float | multiplier | Blue multiplier |
+| `wb/g2` | float | multiplier | Green2 multiplier |
+
+### Color
+| Path | Type | Unit | Description |
+|------|------|------|-------------|
+| `cam_xyz/0-8` | float | matrix | Camera RGB → XYZ D50 (row-major 3×3) |
+
+### Camera
+| Path | Type | Description |
+|------|------|-------------|
+| `camera/make` | string | Manufacturer |
+| `camera/model` | string | Model name |
+
+### EXIF
+| Path | Type | Description |
+|------|------|-------------|
+| `exif/iso` | float | ISO speed |
+| `exif/shutter` | float | Shutter speed (seconds) |
+| `exif/aperture` | float | F-number |
+| `exif/focal_length` | float | Focal length (mm) |
+| `exif/lens` | string | Lens model |
+| `exif/orientation` | float | EXIF orientation (1-8) |
+
+### Crop
+| Path | Type | Description |
+|------|------|-------------|
+| `crop/left` | float | Active area left offset |
+| `crop/top` | float | Active area top offset |
+| `crop/width` | float | Active area width |
+| `crop/height` | float | Active area height |
+
+---
+
+## Tools
+
+### diff_test - Delta-E Comparison
+
+```bash
+./tmp/build/diff_test <img1.png> <img2.png> [diff_output.png]
+```
+
+**Output:**
+```
+Delta-E Statistics:
+  Mean:          4.980
+  Max:           65.880
+  >1 (JND):      75.05%
+  >2 (visible):  59.03%
+  Correlation:   0.9948
+```
+
+**API (pipe.hpp):**
+```cpp
+flow::diff(img1, img2, w, h, compute_map);
+flow::diff_float(buf1, buf2, w, h, colorspace);  // For intermediate stages
+flow::diff_image(img1, img2, w, h, mode, scale);
+flow::print_diff_stats(result);
+```
 
 ---
 
 ## Status
 
-### Phase 1: Default Pipeline (default.xmp)
+### Head (RAW Decoder)
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| rawprepare | ✓ DONE | exact match |
-| temperature | ✓ DONE | exact match |
-| demosaic | ✓ DONE | 0.984 correlation |
-| colorin | ✓ DONE | LCMS matrix |
-| colorout | ✓ DONE | Lab→sRGB |
-| gamma | ✓ DONE | sRGB transfer |
-| **TOTAL** | **0.98 correlation** | Phase 1 verified |
+| Format | Status | Test |
+|--------|--------|------|
+| Sony ARW | ✓ | Bayer matches LibRaw, info tree complete |
+| Canon CR2 | ✓ | LJpeg decode matches LibRaw (mire1.cr2) |
+| Fuji RAF | - | X-Trans CFA |
 
-### Phase 2: Sony Pipeline (sony.xmp)
+### Modules
 
-| Module | Status | Notes |
-|--------|--------|-------|
-| swap Lab↔RGB | ✓ DONE | clean copy from DT |
-| sigmoid | ✓ DONE | 0.98 correlation with swaps |
-| exposure | ✓ DONE | fixed formula |
-| channelmixerrgb | ✓ DONE | identity in XMP (no-op) |
-| highlights | ✓ DONE | opposed inpaint (0.994 corr) |
-| **TOTAL** | **0.994 correlation** | Phase 2 complete |
+| Module | Status | Correlation | Notes |
+|--------|--------|-------------|-------|
+| rawprepare | ✓ | exact | BLC + normalize |
+| temperature | ✓ | exact | WB on mosaic |
+| highlights | ✓ | 0.994 | Opposed inpaint |
+| demosaic | ✓ | 0.984 | Bilinear |
+| exposure | ✓ | exact | EV multiply |
+| colorin | ✓ | exact | Camera→XYZ→Lab |
+| channelmixerrgb | ✓ | exact | 3×3 matrix |
+| sigmoid | ✓ | 0.98 | Tone map |
+| bilat | ✓ | 0.997 | Local Laplacian |
+| filmicrgb | ✓ | 0.986 | Filmic tone |
+| colorbalancergb | ✓ | exact | Identity (defaults) |
+| colorout | ✓ | exact | Lab→sRGB |
+| gamma | ✓ | exact | sRGB transfer |
+| flip | ✓ | - | Orientation |
+| lens | - | - | Geometric warp |
 
----
-
-### Phase 3: Canon Pipeline (canon.xmp)
-
-Canon EOS 5D Mark III style applied on top of sony.xmp.
-Adds filmicrgb, colorbalancergb, bilat for "Canon color science" look.
-**sigmoid disabled, filmicrgb enabled** for Canon tone mapping.
-
-**Processing order (IOP order v3.0):**
-
-| IOP | Module | Colorspace | Status | Notes |
-|-----|--------|------------|--------|-------|
-| 1.0 | rawprepare | SENSOR | ✓ | Phase 1 |
-| 3.0 | temperature | SENSOR | ✓ | Phase 1 |
-| 5.0 | highlights | SENSOR | ✓ | Phase 2 |
-| 9.0 | demosaic | SENSOR→RGB | ✓ | Phase 1 |
-| 21.0 | exposure (0.7 EV) | RGB | ✓ | sony.xmp default |
-| 28.0 | colorin | RGB→Lab | ✓ | Phase 1 |
-| 30.5 | channelmixerrgb | RGB (swap) | ✓ | Phase 2 (no-op) |
-| 41.5 | colorbalancergb | RGB (Jzazbz) | - | saturation+0.2, vibrance+0.2 |
-| 46.0 | filmicrgb | RGB | ✓ | **CLEAN COPY** grey=18.45, black=-5, white=4 |
-| 46.0+ | exposure (1.2 EV) | RGB | ✓ | Canon style, runs AFTER filmicrgb |
-| 54.0 | bilat | Lab (auto-swap) | - | local Laplacian, complex |
-| 70.0 | colorout | Lab→RGB | ✓ | Phase 1 |
-| 78.0 | gamma | RGB | ✓ | Phase 1 |
-
-Note: sigmoid is DISABLED in canon.xmp. filmicrgb handles tone mapping.
-Canon style adds second exposure (+1.2 EV) that runs after filmicrgb.
-
-**filmicrgb implementation:**
-- Clean copy from `dark/lib/desk/src/iop/filmicrgb.c`
-- Key functions: `log_tonemapping_v2_1ch()` (line 907), `filmic_spline()` (line 947)
-- Gaussian elimination for 4th order polynomial spline coefficients
-- Power norm for ratio-preserving per-pixel processing
-
-| **TOTAL** | **0.986 correlation** | filmicrgb working |
-
-**Remaining for 0.99+:**
-- colorbalancergb: mild saturation boost (0.2), low impact expected
-- bilat: local Laplacian (~500 lines), complex multi-scale filter
+**Overall: 0.997 correlation** (processing complete, geometric pending)
 
 ---
 
-### Phase 4: Final Pipeline (final.xmp)
+## Reference
 
-Complete pipeline with all modules. Uses **both sigmoid AND filmicrgb**.
-Adds lens correction, local contrast, and color grading.
-
-**Enabled modules (history order):**
-
-| # | Module | Status | Notes |
-|---|--------|--------|-------|
-| 0 | rawprepare | ✓ | Phase 1 |
-| 1 | demosaic | ✓ | Phase 1 |
-| 2 | colorin | ✓ | Phase 1 |
-| 3 | colorout | ✓ | Phase 1 |
-| 4 | gamma | ✓ | Phase 1 |
-| 5 | temperature | ✓ | Phase 1 |
-| 6 | highlights | ✓ | Phase 2 |
-| 7 | channelmixerrgb | ✓ | Phase 2 |
-| 8 | exposure (0.7 EV) | ✓ | Phase 2 |
-| 9 | flip | - | orientation, no-op for this image |
-| 10 | sigmoid | ✓ | Phase 2 (ENABLED, runs before filmicrgb) |
-| 11 | lens | ✓ | warp.cpp (lensfun) |
-| 13 | bilat | ✓ | local Laplacian (99.9% pixels modified) |
-| 14 | colorbalancergb | ✓ | identity (all params default) |
-| 15 | exposure (1.1 EV) | ✓ | second instance |
-| 16 | filmicrgb | ✓ | Phase 3 (runs AFTER sigmoid) |
-
-Note: basecurve (12) and second sigmoid (17) are DISABLED.
-
-**Status: PROCESSING COMPLETE** (0.9968 correlation)
-- All processing modules verified
-- Geometric (lens, flip) deferred - doesn't affect color/tone accuracy
-
-**Verified modules:**
-- bilat: local Laplacian (0.9968 corr with sigmoid+bilat+filmicrgb)
-- colorbalancergb: identity (all params at defaults)
-- flip: implemented, no-op for this image
+- **darktable**: v5.3.0 (in `dark/`)
+- **DT tests**: `dark/lib/desk/src/tests/integration/`
+- **Test images**: `dark/lib/desk/src/tests/integration/images/`
+  - `mire1.cr2` - Canon EOS 40D (primary)
+  - `hlrecovery.arw` - Sony RX100M3
+  - `mire1-xtrans.raf` - Fuji X-Trans
 
 ---
 
 ## Next Steps
 
-1. ✓ Highlights implemented using "inpaint opposed" algorithm
-2. ✓ Phase 2 (sony.xmp) complete at 0.994 correlation
-3. ✓ Phase 3 (canon.xmp) filmicrgb at 0.986 correlation
-4. ✓ Phase 4: bilat (local Laplacian contrast)
-5. ✓ Phase 4: colorbalancergb (identity, all params default)
-6. ✓ Phase 4: flip (orientation, implemented)
-7. ✓ Phase 4 PROCESSING COMPLETE: 0.9968 correlation
-8. TODO: lens geometric correction (separate from processing pipeline)
+1. ~~**Canon CR2 head**~~ ✓ Done - LJpeg decode matches LibRaw
+2. **Canon MakerNotes** - Extract WB, black level to complete tree schema
+3. **Refactor modules** - Implement Rule 7 (Extract → Params → Process)
+4. **pipe-cli** - Match darktable-cli interface
+5. **Run DT tests** - `DARKTABLE_CLI=./pipe-cli ./run.sh`
+6. **Pass delta-E < 1** on all 176+ tests
+
+---
+
+## TODO: User Sliders (pqtr.md)
+
+Modules needed to support final app sliders:
+
+| Slider | DT Module | Status | Notes |
+|--------|-----------|--------|-------|
+| Brightness | exposure | ✓ | EV multiply |
+| Contrast | filmicrgb | ✓ | contrast param |
+| Highlights | shadhi | TODO | Bilateral shadows/highlights |
+| Shadows | shadhi | TODO | Bilateral shadows/highlights |
+| Saturation | colorbalancergb | ✓ | saturation_global param |
+| Temperature | temperature | ✓ | Needs slider→coeffs mapping |
+| Tint | channelmixerrgb | ⚠️ | Green-magenta axis, verify |
+| Sharpness | sharpen | TODO | Unsharp mask |
+| Vignette | vignetting | TODO | Radial falloff |
+
+**Priority:**
+1. shadhi - common user adjustment
+2. sharpen - essential for output
+3. vignetting - creative effect
