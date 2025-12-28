@@ -151,7 +151,7 @@
      <rdf:li
       darktable:num="11"
       darktable:operation="lens"
-      darktable:enabled="0"
+      darktable:enabled="1"
       darktable:modversion="10"
       darktable:params="gz05eJxjYGBgYGeAgQZ7CD7haGy82eHpxggHRqCop4+zq665rzHDAAFXhYAoBUMLXUMD09xcBTcTBXcF/+BgersCFjaYmBEuDwf2UAwGACf7E9o="
       darktable:multi_name=""

@@ -90,16 +90,17 @@ namespace sony
         int crop_width = 0;
         int crop_height = 0;
 
-        // RAW processing metadata
-        int black_level = 512;
-        int white_level = 16383;
+        // RAW processing metadata (0 = not parsed, use fallback)
+        int black_level = 0;
+        int white_level = 0;
         uint16_t wb_rggb[4] = {2176, 1024, 1551, 1024};
         int bayer_pattern = 0;        // 0=RGGB, 1=GRBG, 2=BGGR, 3=GBRG
-        float color_matrix[9] = {     // Camera RGB -> sRGB (row-major 3x3)
+        float color_matrix[9] = {     // Camera RGB -> sRGB (Sony 0x7800, row-major 3x3)
             1.3125f, -0.2061f, -0.0742f,
            -0.0088f,  1.1953f, -0.1553f,
             0.0068f, -0.0400f,  1.0645f
         };
+        float cam_xyz[9] = {0};       // Camera RGB -> XYZ (from LibRaw/dcraw database)
         int orientation = 1;          // EXIF orientation (1-8)
 
         // Camera identification

@@ -11,17 +11,17 @@
    exif:DateTimeOriginal="2024:10:06 13:19:28.000"
    xmpMM:DerivedFrom="DSC00144.ARW"
    xmp:Rating="0"
-   darktable:import_timestamp="63902493916926069"
-   darktable:change_timestamp="63902493956507456"
+   darktable:import_timestamp="63902431281445655"
+   darktable:change_timestamp="-1"
    darktable:export_timestamp="-1"
    darktable:print_timestamp="-1"
    darktable:xmp_version="5"
    darktable:raw_params="0"
    darktable:auto_presets_applied="1"
-   darktable:history_end="18"
+   darktable:history_end="15"
    darktable:iop_order_version="4"
    darktable:history_auto_hash="4218150440c45d7564d76fa3249cf4ae"
-   darktable:history_current_hash="5661498c3f6594752c43f82f9e96fbe0">
+   darktable:history_current_hash="4218150440c45d7564d76fa3249cf4ae">
    <darktable:masks_history>
     <rdf:Seq/>
    </darktable:masks_history>
@@ -140,7 +140,7 @@
      <rdf:li
       darktable:num="10"
       darktable:operation="sigmoid"
-      darktable:enabled="1"
+      darktable:enabled="0"
       darktable:modversion="3"
       darktable:params="0000c03f000000000000c8426c09793c000000000000c8420000000000000000000000000000000000000000000000000000000000000000"
       darktable:multi_name="_builtin_scene-referred default"
@@ -150,39 +150,6 @@
       darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
      <rdf:li
       darktable:num="11"
-      darktable:operation="lens"
-      darktable:enabled="0"
-      darktable:modversion="10"
-      darktable:params="gz05eJxjYGBgYGeAgQZ7CD7haGy82eHpxggHRqCop4+zq665rzHDAAFXhYAoBUMLXUMD09xcBTcTBXcF/+BgersCFjaYmBEuDwf2UAwGACf7E9o="
-      darktable:multi_name=""
-      darktable:multi_name_hand_edited="0"
-      darktable:multi_priority="0"
-      darktable:blendop_version="14"
-      darktable:blendop_params="gz11eJxjYIAACQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dcF/IADRAGpyHQU="/>
-     <rdf:li
-      darktable:num="12"
-      darktable:operation="basecurve"
-      darktable:enabled="0"
-      darktable:modversion="6"
-      darktable:params="gz09eJxjYICAL3eYbKcsErU1fXPdVmRLpl1B+T07pyon+6WC0fb9R6rtGRgaoHgUDCXAhsRmwpCFxCkjkAUAufkQ3g=="
-      darktable:multi_name=""
-      darktable:multi_name_hand_edited="0"
-      darktable:multi_priority="0"
-      darktable:blendop_version="14"
-      darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
-     <rdf:li
-      darktable:num="13"
-      darktable:operation="bilat"
-      darktable:enabled="1"
-      darktable:modversion="3"
-      darktable:params="010000000000003f0000003fcccccc3d0000003f"
-      darktable:multi_name=""
-      darktable:multi_name_hand_edited="0"
-      darktable:multi_priority="0"
-      darktable:blendop_version="14"
-      darktable:blendop_params="gz10eJxjYGBgYAJiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dcF/IADRAG2yHQc="/>
-     <rdf:li
-      darktable:num="14"
       darktable:operation="colorbalancergb"
       darktable:enabled="1"
       darktable:modversion="5"
@@ -190,61 +157,53 @@
       darktable:multi_name=""
       darktable:multi_name_hand_edited="0"
       darktable:multi_priority="0"
-      darktable:blendop_version="14"
+      darktable:blendop_version="13"
       darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
      <rdf:li
-      darktable:num="15"
-      darktable:operation="exposure"
-      darktable:enabled="1"
-      darktable:modversion="7"
-      darktable:params="00000000000080b9cccc8c3f00004842000080c00000000000000000"
-      darktable:multi_name=""
-      darktable:multi_name_hand_edited="0"
-      darktable:multi_priority="0"
-      darktable:blendop_version="14"
-      darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
-     <rdf:li
-      darktable:num="16"
+      darktable:num="12"
       darktable:operation="filmicrgb"
       darktable:enabled="1"
       darktable:modversion="6"
-      darktable:params="gz02eJybNXOyIwPDggP//9c7MICBA5A+4QTBEDALqEZ/WYUNSEyWzcKB67qyTWraMvv//90PgeTPnvGxYwbSLEDMCNXDiMSGASYoDQDTlhYU"
+      darktable:params="gz02eJybNXOyIwPDggP//9c7MICBA5A+4QTBEDALqEZ/WYUNSEyWzcKB67qyTWraMnuY/NkzPnbMQJoFiBmhYoxIbBhggtIALeETDQ=="
       darktable:multi_name=""
       darktable:multi_name_hand_edited="0"
       darktable:multi_priority="0"
-      darktable:blendop_version="14"
+      darktable:blendop_version="13"
       darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
      <rdf:li
-      darktable:num="17"
-      darktable:operation="sigmoid"
-      darktable:enabled="0"
-      darktable:modversion="3"
-      darktable:params="0000c03f000000000000c8426c09793c000000000000c8420000000000000000000000000000000000000000000000000000000000000000"
-      darktable:multi_name="_builtin_scene-referred default"
+      darktable:num="13"
+      darktable:operation="exposure"
+      darktable:enabled="1"
+      darktable:modversion="6"
+      darktable:params="00000000000080b99899993f00004842000080c001000000"
+      darktable:multi_name=""
       darktable:multi_name_hand_edited="0"
       darktable:multi_priority="0"
-      darktable:blendop_version="14"
+      darktable:blendop_version="13"
       darktable:blendop_params="gz08eJxjYGBgYAFiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dlAx68oBEMbFxwX+AwGIBgCbGCeh"/>
+     <rdf:li
+      darktable:num="14"
+      darktable:operation="bilat"
+      darktable:enabled="1"
+      darktable:modversion="3"
+      darktable:params="010000000000003f0000003f0000803e0000003f"
+      darktable:multi_name=""
+      darktable:multi_name_hand_edited="0"
+      darktable:multi_priority="0"
+      darktable:blendop_version="13"
+      darktable:blendop_params="gz10eJxjYGBgYAJiCQYYOOHEgAZY0QWAgBGLGANDgz0Ej1Q+dcF/IADRAG2yHQc="/>
     </rdf:Seq>
    </darktable:history>
    <dc:subject>
     <rdf:Bag>
-     <rdf:li>ILCE-7M3</rdf:li>
-     <rdf:li>ILCE...</rdf:li>
-     <rdf:li>Sony</rdf:li>
      <rdf:li>arw</rdf:li>
-     <rdf:li>camera styles</rdf:li>
-     <rdf:li>changed</rdf:li>
      <rdf:li>darktable</rdf:li>
      <rdf:li>format</rdf:li>
-     <rdf:li>style</rdf:li>
     </rdf:Bag>
    </dc:subject>
    <lr:hierarchicalSubject>
     <rdf:Bag>
-     <rdf:li>darktable|changed</rdf:li>
      <rdf:li>darktable|format|arw</rdf:li>
-     <rdf:li>darktable|style|darktable|camera styles|Sony|ILCE...|ILCE-7M3</rdf:li>
     </rdf:Bag>
    </lr:hierarchicalSubject>
   </rdf:Description>

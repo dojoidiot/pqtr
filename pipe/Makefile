@@ -14,15 +14,24 @@ LDFLAGS := -lz
 SRCS := \
 	src/main/flow/tree.cpp \
 	src/main/flow/swap.cpp \
+	src/main/flow/colorspace.cpp \
 	src/main/flow/png.cpp \
 	src/main/flow/jpg.cpp \
 	src/main/flow/head.cpp \
 	src/main/flow/rawprepare.cpp \
+	src/main/flow/highlights.cpp \
 	src/main/flow/demosaic.cpp \
 	src/main/flow/temperature.cpp \
+	src/main/flow/exposure.cpp \
+	src/main/flow/channelmixer.cpp \
 	src/main/flow/colorin.cpp \
 	src/main/flow/colorout.cpp \
 	src/main/flow/gamma.cpp \
+	src/main/flow/sigmoid.cpp \
+	src/main/flow/filmicrgb.cpp \
+	src/main/flow/bilat.cpp \
+	src/main/flow/colorbalancergb.cpp \
+	src/main/flow/flip.cpp \
 	src/main/flow/sony/sony.cpp \
 	src/main/flow/sony/prepare.cpp \
 	src/main/flow/sony/stb_impl.cpp
@@ -37,7 +46,7 @@ OBJS := $(SRCS:%.cpp=$(BUILD)/%.o)
 INCLUDES := -I inc -I src/main/flow
 
 # Targets
-.PHONY: all test dark clean tidy test-rawprepare test-temperature test-demosaic test-colorin ref
+.PHONY: all test dark clean tidy test-rawprepare test-temperature test-demosaic test-colorin test-bilat ref
 
 all: $(BUILD)/default $(BUILD)/dark
 
@@ -69,6 +78,20 @@ test-demosaic: $(BUILD)/demosaic
 
 test-colorin: $(BUILD)/colorin
 	@./$(BUILD)/colorin
+
+$(BUILD)/bilat_test: $(OBJS) $(BUILD)/src/test/bilat_test.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-bilat: $(BUILD)/bilat_test
+	@./$(BUILD)/bilat_test
+
+$(BUILD)/phase4: $(OBJS) $(BUILD)/src/test/phase4.o
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+test-phase4: $(BUILD)/phase4
+	@./$(BUILD)/phase4
 
 # Generate reference files
 ref:

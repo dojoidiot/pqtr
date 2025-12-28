@@ -131,6 +131,15 @@ namespace flow
         virtual void process(Flow &flow) = 0;
     };
 
+    // Highlights link; highlight reconstruction on Bayer mosaic.
+    // Input/Output: float bayer in fdata() (in-place, before demosaic)
+    class Highlights : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setClip(float clip) = 0;
+    };
+
     // Temperature link; white balance correction.
     // Input/Output: float RGB in rgb() (in-place)
     class Temperature : public Link
@@ -138,6 +147,24 @@ namespace flow
     public:
         virtual void process(Flow &flow) = 0;
         virtual void setCoeffs(float r, float g, float b) = 0;
+    };
+
+    // Exposure link; scene-referred brightness adjustment.
+    // Input/Output: float RGB in rgb() (in-place)
+    class Exposure : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setParams(float ev, float black) = 0;
+    };
+
+    // Channelmixer link; chromatic adaptation (CAT16).
+    // Input/Output: float RGB in rgb() (in-place)
+    class Channelmixer : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setParams(float x, float y, float temp) = 0;
     };
 
     // Colorin link; camera RGB → XYZ → Lab (D50).
@@ -164,6 +191,56 @@ namespace flow
         virtual void process(Flow &flow) = 0;
     };
 
+    // Sigmoid link; scene-referred tone mapping.
+    // Input: linear sRGB in rgb(), Output: display sRGB (replaces gamma)
+    class Sigmoid : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setParams(float contrast, float white_target, float black_target, float hue_preservation = 100.0f) = 0;
+    };
+
+    // Filmicrgb link; scene-referred filmic tone mapping.
+    // Input: linear sRGB in rgb(), Output: display sRGB
+    class Filmicrgb : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        virtual void setParams(float grey, float black_ev, float white_ev,
+                               float contrast, float latitude, float hardness) = 0;
+    };
+
+    // Bilat link; local contrast (local Laplacian filter).
+    // Input/Output: float Lab in rgb() (in-place, modifies L channel only)
+    class Bilat : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        // sigma=midtone point, shadows=shadow contrast, highlights=highlight contrast, clarity=detail
+        virtual void setParams(float sigma, float shadows, float highlights, float clarity) = 0;
+    };
+
+    // Colorbalancergb link; color grading in Jzazbz/Yrg.
+    // Input/Output: float RGB in rgb() (in-place)
+    class Colorbalancergb : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        // Most params - for now just support chroma/saturation/vibrance
+        virtual void setParams(float chroma_global, float saturation_global, float vibrance,
+                               float contrast, float grey_fulcrum) = 0;
+    };
+
+    // Flip link; image orientation (rotation/mirror).
+    // Input/Output: float RGB in rgb() (in-place, may change dimensions)
+    class Flip : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        // orientation: -1=auto (EXIF), 0=none, 1=flip_y, 2=flip_x, 3=180°, 5=cw90°, 6=ccw90°
+        virtual void setOrientation(int orientation) = 0;
+    };
+
     // ============================================================================
     // Factory & Utilities
     // ============================================================================
@@ -180,8 +257,17 @@ namespace flow
     // Create a Demosaic (bayer to RGB)
     std::unique_ptr<Demosaic> makeDemosaic();
 
+    // Create a Highlights (highlight reconstruction)
+    std::unique_ptr<Highlights> makeHighlights();
+
     // Create a Temperature (white balance)
     std::unique_ptr<Temperature> makeTemperature();
+
+    // Create an Exposure (scene-referred brightness)
+    std::unique_ptr<Exposure> makeExposure();
+
+    // Create a Channelmixer (CAT16 chromatic adaptation)
+    std::unique_ptr<Channelmixer> makeChannelmixer();
 
     // Create a Colorin (camera RGB → Lab)
     std::unique_ptr<Colorin> makeColorin();
@@ -191,6 +277,26 @@ namespace flow
 
     // Create a Gamma (sRGB transfer function)
     std::unique_ptr<Gamma> makeGamma();
+
+    // Create a Sigmoid (scene-referred tone mapping)
+    std::unique_ptr<Sigmoid> makeSigmoid();
+
+    // Create a Filmicrgb (filmic tone mapping)
+    std::unique_ptr<Filmicrgb> makeFilmicrgb();
+
+    // Create a Bilat (local Laplacian contrast)
+    std::unique_ptr<Bilat> makeBilat();
+
+    // Create a Colorbalancergb (color grading)
+    std::unique_ptr<Colorbalancergb> makeColorbalancergb();
+
+    // Create a Flip (orientation)
+    std::unique_ptr<Flip> makeFlip();
+
+    // Colorspace swaps (in-place on rgb() buffer)
+    // CLEAN COPY from DT common/colorspaces_inline_conversions.h
+    void swapLabToRGB(Flow& flow);  // Lab → XYZ → linear sRGB (D50)
+    void swapRGBToLab(Flow& flow);  // linear sRGB → XYZ → Lab (D50)
 
     // Format types
     enum Swap

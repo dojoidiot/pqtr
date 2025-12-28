@@ -364,8 +364,69 @@ int main() {
     std::cout << "\n=== Step 3 Complete ===\n";
 
     // =========================================================================
+    // Step 3.5: highlights - Highlight reconstruction on Bayer mosaic
+    // IOP Stage: Sensor (after temperature, before demosaic)
+    // =========================================================================
+
+    std::cout << "\n=== Step 3.5: highlights Verification ===\n\n";
+
+    // Count clipped pixels BEFORE highlights per channel
+    // After WB with coeffs [2.38, 1.0, 1.57], clip thresholds are:
+    //   Red: 1.0 * 2.38 = 2.38
+    //   Green: 1.0
+    //   Blue: 1.0 * 1.57 = 1.57
+    float wb_r_test = 2.37891f, wb_b_test = 1.56641f;
+    int clipped_r = 0, clipped_g = 0, clipped_b = 0;
+    for (int y = 0; y < height; y++) {
+        for (int x = 0; x < width; x++) {
+            size_t idx = y * width + x;
+            int px = x & 1, py = y & 1;
+            float v = fdata[idx];
+            if (py == 0 && px == 0) { // R
+                if (v >= wb_r_test * 0.95f) clipped_r++;
+            } else if (py == 1 && px == 1) { // B
+                if (v >= wb_b_test * 0.95f) clipped_b++;
+            } else { // G
+                if (v >= 0.95f) clipped_g++;
+            }
+        }
+    }
+    std::cout << "Clipped pixels by channel:\n";
+    std::cout << "  Red (>=" << wb_r_test * 0.95f << "): " << clipped_r << "\n";
+    std::cout << "  Green (>=0.95): " << clipped_g << "\n";
+    std::cout << "  Blue (>=" << wb_b_test * 0.95f << "): " << clipped_b << "\n";
+
+    // Save a copy to compare
+    std::vector<float> fdata_before(fdata, fdata + npixels);
+
+    // Highlights with opposed algorithm (matches DT "inpaint opposed")
+    std::cout << "Running highlights (opposed algorithm)...\n";
+    auto highlights = flow::makeHighlights();
+    highlights->setClip(1.0f);
+    highlights->process(*flow);
+
+    // Count how many pixels changed
+    int changed = 0;
+    for (size_t i = 0; i < npixels; i++) {
+        if (fdata[i] != fdata_before[i]) changed++;
+    }
+    std::cout << "Pixels modified by highlights: " << changed << "\n";
+
+    // Verify fdata range after highlights
+    std::cout << "\nVerifying fdata range after highlights...\n";
+    float hl_min = 1e10f, hl_max = 0.0f;
+    for (size_t i = 0; i < npixels; i++) {
+        float v = fdata[i];
+        if (v < hl_min) hl_min = v;
+        if (v > hl_max) hl_max = v;
+    }
+    std::cout << "  Range: [" << hl_min << ", " << hl_max << "]\n";
+
+    std::cout << "\n=== Step 3.5 Complete ===\n";
+
+    // =========================================================================
     // Step 4: demosaic - Bayer to RGB
-    // IOP Stage: Sensor (after temperature)
+    // IOP Stage: Sensor (after highlights)
     // =========================================================================
 
     std::cout << "\n=== Step 4: demosaic Verification ===\n\n";
@@ -430,8 +491,39 @@ int main() {
     std::cout << "\n=== Step 4 Complete ===\n";
 
     // =========================================================================
+    // Step 4.5: exposure - Scene-referred brightness adjustment
+    // From sony.xmp: mode=MANUAL, black≈0.0, exposure=+0.7 EV
+    // =========================================================================
+
+    std::cout << "\n=== Step 4.5: exposure Verification ===\n\n";
+
+    // sony.xmp exposure: +0.7 EV (IOP 14.0, before colorin)
+    // Canon style exposure runs AFTER filmicrgb per IOP order
+    std::cout << "Running exposure (ev=0.7, black=0)...\n";
+    auto exposure = flow::makeExposure();
+    exposure->setParams(0.7f, 0.0f);
+    exposure->process(*flow);
+
+    // Verify exposure-adjusted RGB range
+    std::cout << "\nVerifying exposure-adjusted RGB range...\n";
+    float exp_min[3] = {1e10f, 1e10f, 1e10f};
+    float exp_max[3] = {-1e10f, -1e10f, -1e10f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < exp_min[c]) exp_min[c] = v;
+            if (v > exp_max[c]) exp_max[c] = v;
+        }
+    }
+    std::cout << "  R: [" << exp_min[0] << ", " << exp_max[0] << "]\n";
+    std::cout << "  G: [" << exp_min[1] << ", " << exp_max[1] << "]\n";
+    std::cout << "  B: [" << exp_min[2] << ", " << exp_max[2] << "]\n";
+
+    std::cout << "\n=== Step 4.5 Complete ===\n";
+
+    // =========================================================================
     // Step 5: colorin - Camera RGB → XYZ → Lab (D50)
-    // IOP Stage: Color
+    // IOP Stage: Color (iop_order 28.0)
     // =========================================================================
 
     std::cout << "\n=== Step 5: colorin Verification ===\n\n";
@@ -458,18 +550,47 @@ int main() {
     std::cout << "\n=== Step 5 Complete ===\n";
 
     // =========================================================================
-    // Step 6: colorout - Lab → XYZ → linear sRGB (D50 adapted)
-    // IOP Stage: Color
+    // Step 5.5: channelmixer - CAT16 chromatic adaptation
+    // From sony.xmp: x=0.3755433, y=0.3808119, temp=4161.98K
     // =========================================================================
 
-    std::cout << "\n=== Step 6: colorout Verification ===\n\n";
+    std::cout << "\n=== Step 5.5: channelmixer Verification ===\n\n";
 
-    std::cout << "Running colorout (Lab → linear sRGB)...\n";
-    auto colorout = flow::makeColorout();
-    colorout->process(*flow);
+    // SKIPPED: Testing sigmoid isolation
+    std::cout << "Skipping channelmixer (testing sigmoid isolation)...\n";
+    // auto channelmixer = flow::makeChannelmixer();
+    // channelmixer->setParams(0.3755433f, 0.3808119f, 4161.98f);
+    // channelmixer->process(*flow);
+
+    // Verify Lab ranges after adaptation
+    std::cout << "\nVerifying Lab ranges after CAT16 adaptation...\n";
+    float cat_min[3] = {1e10f, 1e10f, 1e10f};
+    float cat_max[3] = {-1e10f, -1e10f, -1e10f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < cat_min[c]) cat_min[c] = v;
+            if (v > cat_max[c]) cat_max[c] = v;
+        }
+    }
+    std::cout << "  L: [" << cat_min[0] << ", " << cat_max[0] << "]\n";
+    std::cout << "  a: [" << cat_min[1] << ", " << cat_max[1] << "]\n";
+    std::cout << "  b: [" << cat_min[2] << ", " << cat_max[2] << "]\n";
+
+    std::cout << "\n=== Step 5.5 Complete ===\n";
+
+    // =========================================================================
+    // Step 6: swap Lab → RGB (for sigmoid)
+    // DT auto-converts Lab→RGB before sigmoid, RGB→Lab after
+    // =========================================================================
+
+    std::cout << "\n=== Step 6: swap Lab → RGB ===\n\n";
+
+    std::cout << "Running swapLabToRGB (Lab → linear sRGB)...\n";
+    flow::swapLabToRGB(*flow);
 
     // Verify linear sRGB ranges
-    std::cout << "\nVerifying linear sRGB ranges...\n";
+    std::cout << "\nVerifying linear sRGB ranges (after swap)...\n";
     float lrgb_min[3] = {1e10f, 1e10f, 1e10f};
     float lrgb_max[3] = {-1e10f, -1e10f, -1e10f};
     for (size_t i = 0; i < npixels; i++) {
@@ -486,17 +607,132 @@ int main() {
     std::cout << "\n=== Step 6 Complete ===\n";
 
     // =========================================================================
-    // Step 7: gamma - sRGB transfer function
-    // IOP Stage: Tone
+    // Step 7: sigmoid - Scene-referred tone mapping
+    // From sony.xmp: contrast=1.5, white=100%, black=1.52%
+    // Now running on RGB (after Lab→RGB swap)
     // =========================================================================
 
-    std::cout << "\n=== Step 7: gamma Verification ===\n\n";
+    // =========================================================================
+    // Step 7: Tone mapping - filmicrgb (Canon) or sigmoid (Sony)
+    // canon.xmp: filmicrgb ON, sigmoid OFF
+    // sony.xmp: sigmoid ON, filmicrgb OFF
+    // =========================================================================
 
+    std::cout << "\n=== Step 7: filmicrgb (Canon style) ===\n\n";
+
+    // From canon.xmp filmicrgb v6:
+    // grey=18.45, black=-5 EV, white=4 EV, contrast=1.3, latitude=0.01, hardness=2.875
+    std::cout << "Running filmicrgb (grey=18.45, black=-5, white=4, contrast=1.3)...\n";
+    auto filmicrgb = flow::makeFilmicrgb();
+    filmicrgb->setParams(18.45f, -5.0f, 4.0f, 1.3f, 0.01f, 2.87537f);
+    filmicrgb->process(*flow);
+
+    // Verify output range
+    std::cout << "\nVerifying filmicrgb output range...\n";
+    rgb_data = flow->rgb();
+    float film_min[3] = {1e10f, 1e10f, 1e10f};
+    float film_max[3] = {0.0f, 0.0f, 0.0f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < film_min[c]) film_min[c] = v;
+            if (v > film_max[c]) film_max[c] = v;
+        }
+    }
+    std::cout << "  R: [" << film_min[0] << ", " << film_max[0] << "]\n";
+    std::cout << "  G: [" << film_min[1] << ", " << film_max[1] << "]\n";
+    std::cout << "  B: [" << film_min[2] << ", " << film_max[2] << "]\n";
+
+    // =========================================================================
+    // Step 7.1: Canon style exposure (+1.2 EV) - runs AFTER filmicrgb
+    // From canon.xmp history num=13: exposure +1.2 EV
+    // IOP order: filmicrgb(38.0) → exposure(14.0) [instance 2]
+    // =========================================================================
+
+    std::cout << "\n=== Step 7.1: Canon exposure (+1.2 EV) ===\n\n";
+    std::cout << "Running Canon exposure (ev=1.2, after filmicrgb)...\n";
+    auto canon_exposure = flow::makeExposure();
+    canon_exposure->setParams(1.2f, 0.0f);
+    canon_exposure->process(*flow);
+
+    // Verify exposure-adjusted range
+    std::cout << "\nVerifying Canon exposure output range...\n";
+    float ce_min[3] = {1e10f, 1e10f, 1e10f};
+    float ce_max[3] = {0.0f, 0.0f, 0.0f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < ce_min[c]) ce_min[c] = v;
+            if (v > ce_max[c]) ce_max[c] = v;
+        }
+    }
+    std::cout << "  R: [" << ce_min[0] << ", " << ce_max[0] << "]\n";
+    std::cout << "  G: [" << ce_min[1] << ", " << ce_max[1] << "]\n";
+    std::cout << "  B: [" << ce_min[2] << ", " << ce_max[2] << "]\n";
+
+    std::cout << "\n=== Step 7.1 Complete ===\n";
+
+    // =========================================================================
+    // Step 7.5: swap RGB → Lab (for colorout)
+    // =========================================================================
+
+    std::cout << "\n=== Step 7.5: swap RGB → Lab ===\n\n";
+    std::cout << "Running swapRGBToLab (linear sRGB → Lab)...\n";
+    flow::swapRGBToLab(*flow);
+
+    // Verify Lab ranges
+    std::cout << "\nVerifying Lab ranges (after swap back)...\n";
+    float lab2_min[3] = {1e10f, 1e10f, 1e10f};
+    float lab2_max[3] = {-1e10f, -1e10f, -1e10f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < lab2_min[c]) lab2_min[c] = v;
+            if (v > lab2_max[c]) lab2_max[c] = v;
+        }
+    }
+    std::cout << "  L: [" << lab2_min[0] << ", " << lab2_max[0] << "]\n";
+    std::cout << "  a: [" << lab2_min[1] << ", " << lab2_max[1] << "]\n";
+    std::cout << "  b: [" << lab2_min[2] << ", " << lab2_max[2] << "]\n";
+
+    std::cout << "\n=== Step 7.5 Complete ===\n";
+
+    // =========================================================================
+    // Step 8: colorout - Lab → XYZ → linear sRGB (D50 adapted)
+    // =========================================================================
+
+    std::cout << "\n=== Step 8: colorout ===\n\n";
+    std::cout << "Running colorout (Lab → linear sRGB)...\n";
+    auto colorout = flow::makeColorout();
+    colorout->process(*flow);
+
+    // Verify linear sRGB ranges
+    std::cout << "\nVerifying linear sRGB ranges (after colorout)...\n";
+    float out_min[3] = {1e10f, 1e10f, 1e10f};
+    float out_max[3] = {-1e10f, -1e10f, -1e10f};
+    for (size_t i = 0; i < npixels; i++) {
+        for (int c = 0; c < 3; c++) {
+            float v = rgb_data[i * 4 + c];
+            if (v < out_min[c]) out_min[c] = v;
+            if (v > out_max[c]) out_max[c] = v;
+        }
+    }
+    std::cout << "  R: [" << out_min[0] << ", " << out_max[0] << "]\n";
+    std::cout << "  G: [" << out_min[1] << ", " << out_max[1] << "]\n";
+    std::cout << "  B: [" << out_min[2] << ", " << out_max[2] << "]\n";
+
+    std::cout << "\n=== Step 8 Complete ===\n";
+
+    // =========================================================================
+    // Step 9: gamma - sRGB transfer function
+    // =========================================================================
+
+    std::cout << "\n=== Step 9: gamma ===\n\n";
     std::cout << "Running gamma (sRGB transfer)...\n";
     auto gamma = flow::makeGamma();
     gamma->process(*flow);
 
-    // Verify output range
+    // Verify final sRGB range
     std::cout << "\nVerifying final sRGB range...\n";
     rgb_data = flow->rgb();
     float final_min[3] = {1e10f, 1e10f, 1e10f};
@@ -512,7 +748,7 @@ int main() {
     std::cout << "  G: [" << final_min[1] << ", " << final_max[1] << "]\n";
     std::cout << "  B: [" << final_min[2] << ", " << final_max[2] << "]\n";
 
-    // Save final output as PNG (already in sRGB, no extra gamma needed)
+    // Save final output as PNG
     std::cout << "\nSaving final output...\n";
     for (size_t i = 0; i < npixels; i++) {
         for (int c = 0; c < 3; c++) {
