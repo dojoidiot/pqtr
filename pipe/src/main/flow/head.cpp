@@ -239,12 +239,12 @@ private:
         exif.leaf("lens").text(lens);
         exif.leaf("orientation").dial(static_cast<float>(meta.orientation));
 
-        // White balance (Canon uses RGGB order)
+        // White balance (Canon ColorData stores RGGB = [R, G1, G2, B])
         auto& wb = root.next("wb");
         wb.leaf("r").dial(static_cast<float>(meta.wb_rggb[0]));
         wb.leaf("g1").dial(static_cast<float>(meta.wb_rggb[1]));
-        wb.leaf("b").dial(static_cast<float>(meta.wb_rggb[2]));
-        wb.leaf("g2").dial(static_cast<float>(meta.wb_rggb[3]));
+        wb.leaf("g2").dial(static_cast<float>(meta.wb_rggb[2]));
+        wb.leaf("b").dial(static_cast<float>(meta.wb_rggb[3]));
 
         // Bayer pattern (Canon is typically RGGB)
         const char* patterns[] = {"RGGB", "GRBG", "BGGR", "GBRG"};

@@ -383,6 +383,77 @@ static uint16_t* ljpeg_row(int jrow, JHead& jh, BitReader& br) {
 }
 
 // ============================================================================
+// Canon MakerNotes parsing
+// ============================================================================
+
+// Parse Canon MakerNotes IFD to find ColorData (0x4001)
+// Returns offset to ColorData or 0 if not found
+static bool parse_makernotes(const uint8_t* data, size_t size,
+                              uint32_t mn_offset, uint32_t /* mn_size */,
+                              RawMetadata& meta)
+{
+    // Canon MakerNotes are in IFD format, starting at mn_offset
+    if (mn_offset + 2 > size) return false;
+
+    uint16_t num_entries = read_u16(data + mn_offset);
+    if (mn_offset + 2 + num_entries * 12 > size) return false;
+
+    for (int i = 0; i < num_entries; i++) {
+        IFDEntry e = parse_ifd_entry(data + mn_offset + 2 + i * 12);
+
+        if (e.tag == TAG_CANON_COLOR_DATA && e.type == 3) {  // SHORT array
+            // ColorData found - e.count is number of shorts
+            uint32_t cd_offset = e.value_offset;
+            if (cd_offset + e.count * 2 > size) continue;
+
+            const uint16_t* cd = reinterpret_cast<const uint16_t*>(data + cd_offset);
+
+            // EOS 40D: len=692, ColorDataSubVer at [0]=3
+            // WB at [63..66], black levels at [231..234]
+            if (e.count >= 692) {
+                // WB RGGB at offsets 63-66
+                meta.wb_rggb[0] = cd[63];  // R
+                meta.wb_rggb[1] = cd[64];  // G1
+                meta.wb_rggb[2] = cd[65];  // G2
+                meta.wb_rggb[3] = cd[66];  // B
+
+                // Per-channel black levels at 231-234
+                // For EOS 40D these are: BlackRed, BlackGreen1, BlackGreen2, BlackBlue
+                uint16_t blk[4] = {cd[231], cd[232], cd[233], cd[234]};
+                meta.black_level = (blk[0] + blk[1] + blk[2] + blk[3]) / 4;
+
+                std::cout << "Canon ColorData: WB=[" << meta.wb_rggb[0] << ","
+                          << meta.wb_rggb[1] << "," << meta.wb_rggb[2] << ","
+                          << meta.wb_rggb[3] << "] black=" << meta.black_level << std::endl;
+                return true;
+            }
+            // TODO: Handle other camera models with different ColorData layouts
+        }
+    }
+    return false;
+}
+
+// Parse EXIF IFD to find MakerNote
+static bool parse_exif_ifd(const uint8_t* data, size_t size,
+                           uint32_t exif_offset, RawMetadata& meta)
+{
+    if (exif_offset + 2 > size) return false;
+
+    uint16_t num_entries = read_u16(data + exif_offset);
+    if (exif_offset + 2 + num_entries * 12 > size) return false;
+
+    for (int i = 0; i < num_entries; i++) {
+        IFDEntry e = parse_ifd_entry(data + exif_offset + 2 + i * 12);
+
+        if (e.tag == TAG_MAKER_NOTE && e.type == 7) {  // UNDEFINED
+            // MakerNote found
+            return parse_makernotes(data, size, e.value_offset, e.count, meta);
+        }
+    }
+    return false;
+}
+
+// ============================================================================
 // CR2 Decoder::prepare
 // ============================================================================
 
@@ -428,6 +499,10 @@ bool Decoder::prepare(const uint8_t* data, size_t size,
                 break;
             case TAG_ORIENTATION:
                 metadata.orientation = get_entry_value(e, data, size);
+                break;
+            case TAG_EXIF_IFD:
+                // Parse EXIF IFD to get MakerNotes
+                parse_exif_ifd(data, size, get_entry_value(e, data, size), metadata);
                 break;
             }
         }

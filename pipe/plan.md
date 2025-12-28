@@ -246,7 +246,7 @@ flow::print_diff_stats(result);
 | Format | Status | Test |
 |--------|--------|------|
 | Sony ARW | ✓ | Bayer matches LibRaw, info tree complete |
-| Canon CR2 | ✓ | LJpeg decode matches LibRaw (mire1.cr2) |
+| Canon CR2 | ✓ | LJpeg + MakerNotes (WB, black) complete |
 | Fuji RAF | - | X-Trans CFA |
 
 ### Modules
@@ -287,7 +287,7 @@ flow::print_diff_stats(result);
 ## Next Steps
 
 1. ~~**Canon CR2 head**~~ ✓ Done - LJpeg decode matches LibRaw
-2. **Canon MakerNotes** - Extract WB, black level to complete tree schema
+2. ~~**Canon MakerNotes**~~ ✓ Done - WB and black level from ColorData (0x4001)
 3. **Refactor modules** - Implement Rule 7 (Extract → Params → Process)
 4. **pipe-cli** - Match darktable-cli interface
 5. **Run DT tests** - `DARKTABLE_CLI=./pipe-cli ./run.sh`
