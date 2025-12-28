@@ -167,6 +167,21 @@ namespace flow
         virtual void setParams(float x, float y, float temp) = 0;
     };
 
+    // Channelmixerrgb link; RGB channel mixing with 3x3 matrix.
+    // Input/Output: float RGB in rgb() (in-place)
+    // IOP order: 28.5 (after exposure, before colorbalancergb)
+    class Channelmixerrgb : public Link
+    {
+    public:
+        virtual void process(Flow &flow) = 0;
+        // Set 3x3 mixing matrix (each row is [R,G,B,unused])
+        virtual void setMatrix(const float red[4], const float green[4], const float blue[4]) = 0;
+        // Optional adjustments
+        virtual void setSaturation(const float sat[4]) = 0;
+        virtual void setLightness(const float light[4]) = 0;
+        virtual void setGrey(const float grey[4]) = 0;
+    };
+
     // Colorin link; camera RGB → XYZ → Lab (D50).
     // Input/Output: float RGB in rgb() (in-place, becomes Lab)
     class Colorin : public Link
@@ -268,6 +283,9 @@ namespace flow
 
     // Create a Channelmixer (CAT16 chromatic adaptation)
     std::unique_ptr<Channelmixer> makeChannelmixer();
+
+    // Create a Channelmixerrgb (RGB channel mixing)
+    std::unique_ptr<Channelmixerrgb> makeChannelmixerrgb();
 
     // Create a Colorin (camera RGB → Lab)
     std::unique_ptr<Colorin> makeColorin();

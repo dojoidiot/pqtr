@@ -59,6 +59,8 @@ int main(int argc, char** argv) {
     std::string xmp = "final";  // default
     for (int i = 1; i < argc; i++) {
         if (std::string(argv[i]) == "--canon") xmp = "canon";
+        if (std::string(argv[i]) == "--sony") xmp = "sony";
+        if (std::string(argv[i]) == "--arw" && i + 1 < argc) arw_path = argv[++i];
     }
 
     if (xmp == "canon") {
@@ -127,6 +129,25 @@ int main(int argc, char** argv) {
     std::cout << "  swap Lab→RGB...\n";
     flow::swapLabToRGB(*flow);
 
+    // IOP 28.5: channelmixerrgb (identity matrix for these XMPs, but ready for optimization)
+    std::cout << "  channelmixerrgb (identity)...\n";
+    auto channelmixerrgb = flow::makeChannelmixerrgb();
+    // Identity matrix - passthrough
+    float red[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+    float green[4] = {0.0f, 1.0f, 0.0f, 0.0f};
+    float blue[4] = {0.0f, 0.0f, 1.0f, 0.0f};
+    channelmixerrgb->setMatrix(red, green, blue);
+    channelmixerrgb->process(*flow);
+
+    // IOP 41.5: colorbalancergb (saturation=0.2, vibrance=0.2 for non-sony XMPs)
+    if (xmp != "sony") {
+        std::cout << "  colorbalancergb (sat=0.2, vib=0.2)...\n";
+        auto colorbalancergb = flow::makeColorbalancergb();
+        // From XMP: saturation_global=0.2, vibrance=0.2
+        colorbalancergb->setParams(0.0f, 0.2f, 0.2f, 0.0f, 0.1845f);
+        colorbalancergb->process(*flow);
+    }
+
     if (xmp == "final") {
         // IOP order: sigmoid (45.3) → exposure2 → filmicrgb (46.0) → bilat (54.0)
         std::cout << "  sigmoid (contrast=1.5)...\n";
@@ -154,6 +175,13 @@ int main(int argc, char** argv) {
         bilat->process(*flow);
         std::cout << "  swap Lab→RGB...\n";
         flow::swapLabToRGB(*flow);
+
+    } else if (xmp == "sony") {
+        // sony.xmp: just sigmoid (no filmicrgb, no bilat)
+        std::cout << "  sigmoid (contrast=1.5)...\n";
+        auto sigmoid = flow::makeSigmoid();
+        sigmoid->setParams(1.5f, 100.0f, 0.0152f, 100.0f);
+        sigmoid->process(*flow);
 
     } else {
         // canon.xmp: just filmicrgb, then exposure

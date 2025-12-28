@@ -24,6 +24,7 @@ SRCS := \
 	src/main/flow/temperature.cpp \
 	src/main/flow/exposure.cpp \
 	src/main/flow/channelmixer.cpp \
+	src/main/flow/channelmixerrgb.cpp \
 	src/main/flow/colorin.cpp \
 	src/main/flow/colorout.cpp \
 	src/main/flow/gamma.cpp \
