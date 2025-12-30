@@ -191,9 +191,28 @@ When transpiling, map darktable pipeline state to Tree lookups:
     - Crops after decode using SONYRAWIMAGESIZE
     - Black/white from encrypted Sony metadata block
 
-    ### Canon CR2 (LibRaw - see imageio_libraw.c)
+    ### Canon CR2 (RawSpeed Cr2Decoder.cpp)
 
-    DT uses LibRaw for CR3 (Canon R-series). For CR2, uses RawSpeed Cr2Decoder.
+    DT uses RawSpeed for CR2, LibRaw only for CR3 (Canon R-series mirrorless).
+
+    **Format structure:**
+    - TIFF container with 4 IFDs (modern) or fewer (old 1D/1DS/D2000)
+    - IFD[3] contains raw data as Lossless JPEG (LJPEG)
+    - CANONCR2SLICE tag defines slice layout: (numSlices, sliceWidth, lastSliceWidth)
+    - Decoder must reassemble slices into final image
+
+    **ColorData versioning (MakerNotes):**
+    - Detected by count (582→v1, 653→v2) or version field (1-15)
+    - Each version has different offsets for WB and black/white levels:
+      - v1: WB@50, no black/white
+      - v2: WB@68, no black/white
+      - v3-v4: WB@126, black/white varies by sub-version
+    - MakerNotes are always 14-bit; scale when LJPEG precision differs
+
+    **Gotchas:**
+    - Double-height fix: Some cameras (5Ds) encode doubled width, halved height
+    - Old format (< 4 IFDs): Uses CANON_RAW_DATA_OFFSET instead of IFD[3]
+    - Slice width inconsistency in sRaw mode requires 3/2 correction
 
     Step 0. Generate DT reference for head:
         ```bash
