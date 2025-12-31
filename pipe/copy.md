@@ -343,6 +343,45 @@ corr: 1.06361997 1 0.92448926 0
 
 ---
 
+# colorout (verified working)
+
+Lab to sRGB color space conversion via color matrix + gamma.
+
+## Source
+- `dark/lib/desk/src/iop/colorout.c` → _transform_cmatrix, process_fastpath_apply_tonecurves
+- `dark/lib/desk/src/common/colorspaces_inline_conversions.h` → dt_Lab_to_XYZ, lab_f_inv
+- `dark/lib/desk/src/develop/imageop_math.h` → dt_iop_estimate_exp, dt_iop_eval_exp
+
+## Input/Output
+- **Input**: float32 Lab (4 channels from colorin)
+- **Output**: float32 sRGB (4 channels, gamma-encoded)
+
+## Process
+1. Convert Lab to XYZ using D50 white point
+2. Apply color matrix XYZ -> linear RGB
+3. Apply sRGB transfer function (with exponential extension for values >= 1.0)
+
+## Key Functions
+- `lab_f_inv()` - inverse of lab_f for Lab→XYZ
+- `dt_iop_estimate_exp()` - fits exponential curve for highlight extension
+- `dt_iop_eval_exp()` - evaluates exponential fit for values >= 1.0
+- `srgb_gamma()` - standard sRGB transfer function
+
+## Params (extracted via debug)
+```
+cmatrix[0]: 3.13423491 -1.61725771 -0.4906919
+cmatrix[1]: -0.97874099 1.91611922 0.0334379375
+cmatrix[2]: 0.0719688162 -0.229020134 1.40577972
+```
+
+## Tolerance
+**1e-5** (simple per-pixel). Max observed diff: 0.000000946.
+
+## Output
+`src/main/labs/mods/colorout.c` - 0 mismatches at 1e-3 tolerance (73,011,456 RGB values).
+
+---
+
 # copy(module)
 
 Copy DT module to match DT's output exactly.
@@ -380,25 +419,36 @@ Copy DT module to match DT's output exactly.
 
 This is the **correct pipeline order** from darktable source. XMP order is NOT pipe order.
 
+### Phase 1: Minimal Pipeline (phase1.xmp)
+
+Core modules only - RAW to displayable output with no color grading.
+
 | Order | Module | Status | Notes |
 |-------|--------|--------|-------|
 | 1 | rawprepare | ✓ done | Black/white point normalization |
-| 2 | invert | skip | Film negative inversion |
 | 3 | temperature | ✓ done | White balance (Bayer) |
 | 4 | highlights | ✓ done | Highlight reconstruction |
-| 5 | cacorrect | skip | Chromatic aberration (Bayer) |
-| 6 | hotpixels | skip | Hot pixel removal |
-| 7 | rawdenoise | skip | Raw denoising |
 | 8 | demosaic | ✓ done | Bayer → RGB |
-| 9-27 | *geometric/lens* | skip | Lens, flip, exposure, crop, etc. |
 | 28 | colorin | ✓ done | RGB → Lab |
-| 28.5 | channelmixerrgb | **next** | Color calibration |
-| 29-41 | *color/tone* | pending | Various color modules |
-| 44 | basecurve | pending | Scene → display (legacy) |
-| 45.3 | sigmoid | pending | Scene → display (modern) |
-| 46 | filmicrgb | pending | Scene → display (advanced) |
-| 70 | colorout | pending | Lab → output RGB |
-| 78 | gamma | pending | Final gamma |
+| 70 | colorout | ✓ done | Lab → sRGB |
+| 78 | gamma | **next** | Final gamma |
+
+### Phase 2: Scene-referred (future)
+
+| Order | Module | Notes |
+|-------|--------|-------|
+| 21 | exposure | Exposure compensation |
+| 28.5 | channelmixerrgb | Color calibration (complex) |
+| 45.3 | sigmoid | Scene → display |
+
+### Skipped Modules (disabled by default)
+
+| Module | Reason |
+|--------|--------|
+| invert | Film negatives only |
+| cacorrect | CA correction - enable when needed |
+| hotpixels | Stuck pixel removal - enable when needed |
+| rawdenoise | Raw denoising - enable when needed |
 
 Each module reads previous module's `_out` as its `_in`.
 
@@ -415,7 +465,9 @@ src/main/labs/mods/temperature.c  # done
 src/main/labs/mods/highlights.c   # done
 src/main/labs/mods/demosaic.c     # done
 src/main/labs/mods/colorin.c      # done
-src/main/labs/mods/channelmixerrgb.c  # next
+src/main/labs/mods/colorout.c     # done
+src/main/labs/mods/gamma.c        # next (phase1)
+src/test/raws/phase1.xmp          # minimal pipeline XMP
 ```
 
 Sequential. Each must pass before starting next.
