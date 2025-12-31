@@ -376,16 +376,29 @@ Copy DT module to match DT's output exactly.
    // Must be 100% match
    ```
 
-## Module Chain
+## DT IOP Order (v50_order from iop_order.c)
 
-| Module | Input | Output | Prev Module |
-|--------|-------|--------|-------------|
-| rawprepare | head PPM | bayer f32 | head |
-| temperature | bayer f32 | bayer f32 | rawprepare |
-| highlights | bayer f32 | bayer f32 | temperature |
-| demosaic | bayer f32 | RGB f32 | highlights |
-| colorin | RGB f32 | Lab f32 | demosaic |
-| ... | ... | ... | ... |
+This is the **correct pipeline order** from darktable source. XMP order is NOT pipe order.
+
+| Order | Module | Status | Notes |
+|-------|--------|--------|-------|
+| 1 | rawprepare | ✓ done | Black/white point normalization |
+| 2 | invert | skip | Film negative inversion |
+| 3 | temperature | ✓ done | White balance (Bayer) |
+| 4 | highlights | ✓ done | Highlight reconstruction |
+| 5 | cacorrect | skip | Chromatic aberration (Bayer) |
+| 6 | hotpixels | skip | Hot pixel removal |
+| 7 | rawdenoise | skip | Raw denoising |
+| 8 | demosaic | ✓ done | Bayer → RGB |
+| 9-27 | *geometric/lens* | skip | Lens, flip, exposure, crop, etc. |
+| 28 | colorin | ✓ done | RGB → Lab |
+| 28.5 | channelmixerrgb | **next** | Color calibration |
+| 29-41 | *color/tone* | pending | Various color modules |
+| 44 | basecurve | pending | Scene → display (legacy) |
+| 45.3 | sigmoid | pending | Scene → display (modern) |
+| 46 | filmicrgb | pending | Scene → display (advanced) |
+| 70 | colorout | pending | Lab → output RGB |
+| 78 | gamma | pending | Final gamma |
 
 Each module reads previous module's `_out` as its `_in`.
 
@@ -402,7 +415,7 @@ src/main/labs/mods/temperature.c  # done
 src/main/labs/mods/highlights.c   # done
 src/main/labs/mods/demosaic.c     # done
 src/main/labs/mods/colorin.c      # done
-...                               # next: check XMP for next module
+src/main/labs/mods/channelmixerrgb.c  # next
 ```
 
 Sequential. Each must pass before starting next.
