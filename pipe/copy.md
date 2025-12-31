@@ -430,8 +430,8 @@ Core modules only - RAW to displayable output with no color grading.
 | 4 | highlights | ✓ done | Highlight reconstruction |
 | 8 | demosaic | ✓ done | Bayer → RGB |
 | 28 | colorin | ✓ done | RGB → Lab |
-| 70 | colorout | ✓ done | Lab → sRGB |
-| 78 | gamma | **next** | Final gamma |
+| 70 | colorout | ✓ done | Lab → sRGB (gamma-encoded) |
+| 78 | gamma | skip | Display only (uint8 conversion) |
 
 ### Phase 2: Scene-referred (future)
 
@@ -465,8 +465,7 @@ src/main/labs/mods/temperature.c  # done
 src/main/labs/mods/highlights.c   # done
 src/main/labs/mods/demosaic.c     # done
 src/main/labs/mods/colorin.c      # done
-src/main/labs/mods/colorout.c     # done
-src/main/labs/mods/gamma.c        # next (phase1)
+src/main/labs/mods/colorout.c     # done (final sRGB output)
 src/test/raws/phase1.xmp          # minimal pipeline XMP
 ```
 
