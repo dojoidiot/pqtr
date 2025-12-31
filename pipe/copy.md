@@ -305,6 +305,44 @@ color_smoothing = 0 (disabled)
 
 ---
 
+# colorin (verified working)
+
+RGB to Lab color space conversion via color matrix.
+
+## Source
+- `dark/lib/desk/src/iop/colorin.c` → _cmatrix_fastpath_simple (lines 827-855)
+- `dark/lib/desk/src/common/colorspaces_inline_conversions.h` → dt_XYZ_to_Lab, dt_apply_color_matrix_by_row, lab_f
+
+## Input/Output
+- **Input**: float32 RGB (4 channels from demosaic)
+- **Output**: float32 Lab (4 channels, L*a*b* + alpha)
+
+## Process
+1. Apply correction coefficients (D65/as_shot if late_correction)
+2. Apply color matrix RGB -> XYZ
+3. Convert XYZ to Lab using D50 white point
+
+## Key Functions
+- `lab_f()` - fast cube root approximation using bit manipulation + Halley iteration
+- `dt_apply_color_matrix_by_row()` - matrix multiplication
+- `dt_XYZ_to_Lab()` - XYZ to Lab conversion with D50 normalization
+
+## Params (extracted via debug)
+```
+cmatrix[0]: 0.664328814 0.350094348 -0.0502231568
+cmatrix[1]: 0.270618916 0.986686289 -0.257305205
+cmatrix[2]: 0.0182029735 -0.155623421 0.962320447
+corr: 1.06361997 1 0.92448926 0
+```
+
+## Tolerance
+**1e-3** due to cube root approximation and matrix operations. Max observed diff: 0.00036.
+
+## Output
+`src/main/labs/mods/colorin.c` - 0 mismatches at 1e-3 tolerance (73,011,456 Lab values).
+
+---
+
 # copy(module)
 
 Copy DT module to match DT's output exactly.
@@ -345,7 +383,8 @@ Copy DT module to match DT's output exactly.
 | rawprepare | head PPM | bayer f32 | head |
 | temperature | bayer f32 | bayer f32 | rawprepare |
 | highlights | bayer f32 | bayer f32 | temperature |
-| demosaic | bayer f32 | RGBA f32 | highlights |
+| demosaic | bayer f32 | RGB f32 | highlights |
+| colorin | RGB f32 | Lab f32 | demosaic |
 | ... | ... | ... | ... |
 
 Each module reads previous module's `_out` as its `_in`.
@@ -362,8 +401,8 @@ src/main/labs/mods/rawprepare.c   # done
 src/main/labs/mods/temperature.c  # done
 src/main/labs/mods/highlights.c   # done
 src/main/labs/mods/demosaic.c     # done
-src/main/labs/mods/colorin.c      # next
-...
+src/main/labs/mods/colorin.c      # done
+...                               # next: check XMP for next module
 ```
 
 Sequential. Each must pass before starting next.
