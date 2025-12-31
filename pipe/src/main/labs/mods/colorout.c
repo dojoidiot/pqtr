@@ -173,8 +173,8 @@ static inline void dt_apply_transposed_color_matrix(const float in[4],
    From colorout.c - _transform_cmatrix_linear (lines 406-432)
    ============================================================================ */
 
-static void _transform_cmatrix_srgb(float *const restrict out,
-                                     const float *const restrict in,
+static void _transform_cmatrix_srgb(float *const out,
+                                     const float *const in,
                                      size_t npixels,
                                      const float cmatrix[4][4])
 {
