@@ -2,15 +2,20 @@
 
 **COPY, don't think.** When you start interpreting or improving, stop and ask.
 
-## Three Paths
+**Each module is an independent program.** The only common structure is PipeState, pre-populated. Code can be inlined. Size and idioms don't matter, copy does.
 
-Every module has three code paths to trace:
+**Dump runtime data, not sources.** When a module uses internal data (structs, LUTs), dump the exact runtime values from DT via fprintf and copy them. Don't trace back to where DT computed them.
 
-1. **DT Controller** - orchestrates pipeline, calls modules
-2. **Processing Code** - RawSpeed (head) or DT iop (modules)
-3. **PPM Debug Dump** - what DT writes, what we compare against
+## Path to Success (per module)
 
-Copy the processing code. Verify against the PPM dump. 100% match required.
+1. **Add fprintf to DT** - dump ALL runtime data the module uses (params, computed structs, LUTs)
+2. **Rebuild DT module** - `cmake --build . --target <module>`
+3. **Run darktable-cli** - capture stderr with all dumped values
+4. **Copy process() code** - inline all dependencies, no abstractions
+5. **Copy runtime data** - paste the exact values from step 3 into test
+6. **Test** - must be 100% pixel match
+
+Don't understand. Don't trace. Dump and copy.
 
 ## Metadata
 
@@ -149,7 +154,7 @@ typedef struct {
     uint32_t filters;              /* Bayer pattern (adjusted for row reversal) */
 
     /* Raw metadata - from head decoder */
-    float adobe_XYZ_to_CAM[4][3];  /* Color matrix from raw file */
+    float adobe_XYZ_to_CAM[4][3];  /* Color matrix from DT (cameras.xml) */
     float d65_color_matrix[9];      /* DNG embedded matrix (NAN if invalid) */
 
     /* Module outputs */
@@ -172,7 +177,7 @@ typedef struct {
 RAW file
     ↓
 Head decoder populates:
-    - adobe_XYZ_to_CAM (from raw metadata, NOT cameras.xml)
+    - adobe_XYZ_to_CAM (from DT - see Color Matrices section)
     - d65_color_matrix (from DNG, or NAN for ARW)
     - as_shot (from EXIF WB RGGB Levels)
     - filters, dimensions
@@ -184,7 +189,7 @@ Modules process, may set:
     - temperature.coeffs (temperature module)
 ```
 
-**Key insight**: All data comes from the raw file itself. No external camera databases needed.
+**Exception**: Color matrices come from DT (cameras.xml), not raw file. See Color Matrices section.
 
 ## filters Value
 
@@ -382,6 +387,36 @@ cmatrix[2]: 0.0719688162 -0.229020134 1.40577972
 
 ---
 
+# exposure (verified working)
+
+Exposure correction - linear brightness scaling.
+
+## Source
+- `dark/lib/desk/src/iop/exposure.c` → process() lines 541-566
+
+## Input/Output
+- **Input**: float32 RGB (3 channels)
+- **Output**: float32 RGB (3 channels)
+
+## Formula
+```c
+white = exp2f(-exposure)
+scale = 1.0 / (white - black)
+out[k] = (in[k] - black) * scale
+```
+
+## Params from XMP (phase2.xmp)
+```
+mode = 0 (manual)
+black = -0.000244140625
+exposure = 0.8
+```
+
+## Output
+`src/main/labs/mods/exposure.c` - 0 mismatches (73,011,456 RGB values).
+
+---
+
 # copy(module)
 
 Copy DT module to match DT's output exactly.
@@ -433,13 +468,28 @@ Core modules only - RAW to displayable output with no color grading.
 | 70 | colorout | ✓ done | Lab → sRGB (gamma-encoded) |
 | 78 | gamma | skip | Display only (uint8 conversion) |
 
-### Phase 2: Scene-referred (future)
+### Phase 2: Display-referred (phase2.xmp)
 
-| Order | Module | Notes |
-|-------|--------|-------|
-| 21 | exposure | Exposure compensation |
-| 28.5 | channelmixerrgb | Color calibration (complex) |
-| 45.3 | sigmoid | Scene → display |
+From Sony camera style (darktable_Sony_ILCE-7RM3.dtstyle):
+
+| Order | Module | Status | Notes |
+|-------|--------|--------|-------|
+| 21 | exposure | ✓ done | Brightness compensation |
+| 41.5 | colorbalancergb | ✓ done | Color grading (1e-2 tolerance) |
+| 46 | filmicrgb | ✓ done | Tone mapping (3e-2 tolerance) |
+| 54 | bilat | ✓ done | Local contrast (3e-1 tolerance) |
+
+### Phase 3: Fine-tuning (for optimizer-based Lightroom matching)
+
+| Order | Module | Status | LR Equivalent |
+|-------|--------|--------|---------------|
+| 9 | denoiseprofile | **skip** | Detail → Noise Reduction |
+| 14 | hazeremoval | pending | Dehaze |
+| 35 | sharpen | pending | Detail → Sharpening |
+| 48 | tonecurve | pending | Tone Curve |
+| 60 | colorzones | pending | HSL/Color |
+
+**Note on denoiseprofile**: This module requires external noise profile database (`share/darktable/noiseprofiles.json`) which breaks the XMP copy model. All parameters cannot come from XMP alone. Skip for now.
 
 ### Skipped Modules (disabled by default)
 
@@ -456,17 +506,37 @@ Each module reads previous module's `_out` as its `_in`.
 
 # Execution
 
+## Phase 1 (done)
 ```
-src/main/labs/sony.c              # Sony ARW decoder (done)
-src/main/labs/pipe_state.h        # pipeline state (done)
-src/main/labs/pipe_prepare.c      # derived value computation (done)
-src/main/labs/mods/rawprepare.c   # done
-src/main/labs/mods/temperature.c  # done
-src/main/labs/mods/highlights.c   # done
-src/main/labs/mods/demosaic.c     # done
-src/main/labs/mods/colorin.c      # done
-src/main/labs/mods/colorout.c     # done (final sRGB output)
-src/test/raws/phase1.xmp          # minimal pipeline XMP
+src/main/labs/sony.c              # Sony ARW decoder
+src/main/labs/pipe_state.h        # pipeline state
+src/main/labs/pipe_prepare.c      # derived value computation
+src/main/labs/mods/rawprepare.c   # black/white normalization
+src/main/labs/mods/temperature.c  # white balance
+src/main/labs/mods/highlights.c   # highlight reconstruction
+src/main/labs/mods/demosaic.c     # bayer → RGB
+src/main/labs/mods/colorin.c      # RGB → Lab
+src/main/labs/mods/colorout.c     # Lab → sRGB
+src/test/raws/phase1.xmp          # test XMP
+```
+
+## Phase 2 (pending)
+```
+src/main/labs/mods/exposure.c         # 21: brightness
+src/main/labs/mods/colorbalancergb.c  # 41.5: color grading
+src/main/labs/mods/filmicrgb.c        # 46: tone mapping
+src/main/labs/mods/bilat.c            # 54: local contrast
+src/test/raws/phase2.xmp              # test XMP
+```
+
+## Phase 3 (future - optimizer-based LR matching)
+```
+src/main/labs/mods/hazeremoval.c  # 14: dehaze
+src/main/labs/mods/sharpen.c      # 35: sharpening
+src/main/labs/mods/tonecurve.c    # 48: tone curve
+src/main/labs/mods/colorzones.c   # 60: HSL adjustments
+src/test/raws/phase3.xmp          # test XMP
+# NOTE: denoiseprofile (9) skipped - requires external noiseprofiles.json
 ```
 
 Sequential. Each must pass before starting next.
@@ -502,4 +572,10 @@ cd dark/lib/desk/build
 cmake --build . --target temperature
 ```
 
-**Key discovery**: Color matrix comes from raw file metadata, not cameras.xml. The raw file is self-describing.
+## Color Matrices
+
+Sony raw files embed a color matrix (MakerNotes 0x7800), but it produces different results than DT.
+
+**Rule**: Use DT's color matrices (from cameras.xml or DT debug output) to maintain test cycle compatibility.
+
+The embedded Sony matrix is Camera RGB → sRGB (direct), while DT uses Camera RGB → XYZ → Lab → XYZ → sRGB. These are fundamentally different color paths.

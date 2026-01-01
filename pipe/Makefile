@@ -4,135 +4,106 @@
 #   make        - build all tools
 #   make test   - run step 0 test
 #   make dark   - build XMP parser tool
+#   make labs   - build labs pipeline CLI
 #   make clean  - remove build artifacts
 
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 LDFLAGS := -lz
 
-# Source files (excluding process.cpp which needs Dawn)
-SRCS := \
-	src/main/flow/tree.cpp \
-	src/main/flow/swap.cpp \
-	src/main/flow/colorspace.cpp \
-	src/main/flow/png.cpp \
-	src/main/flow/jpg.cpp \
-	src/main/flow/head.cpp \
-	src/main/flow/rawprepare.cpp \
-	src/main/flow/highlights.cpp \
-	src/main/flow/demosaic.cpp \
-	src/main/flow/temperature.cpp \
-	src/main/flow/exposure.cpp \
-	src/main/flow/channelmixer.cpp \
-	src/main/flow/channelmixerrgb.cpp \
-	src/main/flow/colorin.cpp \
-	src/main/flow/colorout.cpp \
-	src/main/flow/gamma.cpp \
-	src/main/flow/sigmoid.cpp \
-	src/main/flow/filmicrgb.cpp \
-	src/main/flow/bilat.cpp \
-	src/main/flow/colorbalancergb.cpp \
-	src/main/flow/flip.cpp \
-	src/main/flow/colorequal.cpp \
-	src/main/flow/diff.cpp \
-	src/main/flow/sony/sony.cpp \
-	src/main/flow/sony/prepare.cpp \
-	src/main/flow/sony/stb_impl.cpp \
-	src/main/flow/canon/canon.cpp
+# Source files - auto-discovered via glob
+# New modules added to src/main/flow/ are automatically included
+SRCS := $(wildcard src/main/flow/*.cpp) \
+        $(wildcard src/main/flow/sony/*.cpp) \
+        $(wildcard src/main/flow/canon/*.cpp)
+
+# Labs sources - auto-discovered via glob
+LABS_SRCS := src/main/labs/labs.cpp \
+             $(wildcard src/main/labs/part/*.cpp) \
+             $(wildcard src/main/labs/step/*.cpp) \
+             $(wildcard src/main/labs/plug/*.cpp) \
+             $(wildcard src/main/labs/plug/sony/*.cpp) \
+             $(wildcard src/main/labs/plug/canon/*.cpp)
 
 # Build directory
 BUILD := tmp/build
 
 # Object files
 OBJS := $(SRCS:%.cpp=$(BUILD)/%.o)
+LABS_OBJS := $(LABS_SRCS:%.cpp=$(BUILD)/%.o)
 
 # Include paths
-INCLUDES := -I inc -I src/main/flow
+INCLUDES := -I inc -I src/main/flow -I src/main/labs/plug
 
 # Targets
-.PHONY: all test dark clean tidy test-rawprepare test-temperature test-demosaic test-colorin test-bilat ref
+.PHONY: all test dark labs clean tidy ref cli diff test-head-sony test-head-canon test-rawprepare test-phase1 test-phase2
 
-all: $(BUILD)/default $(BUILD)/dark
+all: $(BUILD)/dark $(BUILD)/labs $(BUILD)/diff
 
-# Module tests
-$(BUILD)/rawprepare: $(OBJS) $(BUILD)/src/test/rawprepare.o
+# Diff tool for binary comparison
+$(BUILD)/diff: src/main/labs/diff.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -o $@ $<
 
-$(BUILD)/temperature: $(OBJS) $(BUILD)/src/test/temperature.o
+diff: $(BUILD)/diff
+	@echo "Built: tmp/build/diff"
+
+# Head tests
+$(BUILD)/head_sony_test: src/test/labs/head_sony_test.cpp \
+                         $(wildcard src/main/labs/plug/sony/*.cpp)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^
 
-$(BUILD)/demosaic: $(OBJS) $(BUILD)/src/test/demosaic.o
+test-head-sony: $(BUILD)/diff $(BUILD)/head_sony_test
+	@echo "=== Testing Sony ARW Head ==="
+	./$(BUILD)/head_sony_test
+
+$(BUILD)/head_canon_test: src/test/labs/head_canon_test.cpp \
+                          $(wildcard src/main/labs/plug/canon/*.cpp)
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) $(INCLUDES) -o $@ $^
 
-$(BUILD)/colorin: $(OBJS) $(BUILD)/src/test/colorin.o
+test-head-canon: $(BUILD)/diff $(BUILD)/head_canon_test
+	@echo "=== Testing Canon CR2 Head ==="
+	./$(BUILD)/head_canon_test
+
+# Module tests (Phase 1: copy)
+$(BUILD)/rawprepare_test: src/test/labs/mods/rawprepare_test.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I src/main/labs -o $@ $<
 
-test-rawprepare: $(BUILD)/rawprepare
-	@./$(BUILD)/rawprepare
+test-rawprepare: $(BUILD)/diff $(BUILD)/rawprepare_test
+	@echo "=== Testing rawprepare ==="
+	./$(BUILD)/rawprepare_test
 
-test-temperature: $(BUILD)/temperature
-	@./$(BUILD)/temperature
-
-test-demosaic: $(BUILD)/demosaic
-	@./$(BUILD)/demosaic
-
-test-colorin: $(BUILD)/colorin
-	@./$(BUILD)/colorin
-
-$(BUILD)/bilat_test: $(OBJS) $(BUILD)/src/test/bilat_test.o
+# Phase 1 colorout test
+$(BUILD)/phase1_test: src/test/labs/phase1.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I src/main/labs -o $@ $<
 
-test-bilat: $(BUILD)/bilat_test
-	@./$(BUILD)/bilat_test
+test-phase1: $(BUILD)/phase1_test
+	@echo "=== Testing Phase 1 (colorout) ==="
+	@mkdir -p tmp/var
+	./$(BUILD)/phase1_test
 
-$(BUILD)/colorequal_test: $(OBJS) $(BUILD)/src/test/colorequal_test.o
+# Phase 2 final output test
+$(BUILD)/phase2_test: src/test/labs/phase2.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	$(CXX) $(CXXFLAGS) -I src/main/labs -o $@ $<
 
-test-colorequal: $(BUILD)/colorequal_test
-	@./$(BUILD)/colorequal_test
+test-phase2: $(BUILD)/phase2_test
+	@echo "=== Phase 2 Final Output ==="
+	@mkdir -p tmp/var
+	./$(BUILD)/phase2_test
 
-$(BUILD)/diff_test: $(OBJS) $(BUILD)/src/test/diff_test.o
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-
-test-diff: $(BUILD)/diff_test
-	@./$(BUILD)/diff_test
-
-$(BUILD)/phase4: $(OBJS) $(BUILD)/src/test/phase4.o
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-
-test-phase4: $(BUILD)/phase4
-	@./$(BUILD)/phase4
-
-$(BUILD)/cr2_test: $(OBJS) $(BUILD)/src/test/cr2_test.o
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-
-test-cr2: $(BUILD)/cr2_test
-	@./$(BUILD)/cr2_test
-
-$(BUILD)/cr2_pipeline: $(OBJS) $(BUILD)/src/test/cr2_pipeline.o
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
-
-test-cr2-pipeline: $(BUILD)/cr2_pipeline
-	@./$(BUILD)/cr2_pipeline
-
-# Generate reference files
-ref:
-	python3 scripts/gen_ref.py all
-
-# Default pipeline test
-$(BUILD)/default: $(OBJS) $(BUILD)/src/test/default.o
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+# Module tests will be added as modules are transpiled via copy.md
+# Template:
+# $(BUILD)/MODULE: $(OBJS) $(BUILD)/src/test/MODULE.o
+#	@mkdir -p $(dir $@)
+#	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+#
+# test-MODULE: $(BUILD)/MODULE
+#	@./$(BUILD)/MODULE
 
 # XMP parser tool (standalone, only needs tree.cpp for Tree)
 $(BUILD)/dark: $(BUILD)/src/test/dark.o $(BUILD)/src/main/flow/tree.o
@@ -149,6 +120,19 @@ test: $(BUILD)/default
 
 dark: $(BUILD)/dark
 	@echo "Built: tmp/build/dark"
+
+# Labs pipeline CLI
+$(BUILD)/labs: $(LABS_OBJS)
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+
+labs: $(BUILD)/labs
+	@echo "Built: tmp/build/labs"
+
+# Test labs pipeline
+test-labs: $(BUILD)/labs
+	@echo "=== Testing Labs Pipeline ==="
+	./$(BUILD)/labs --head src/test/labs/labs.ARW --pipe src/test/labs/labs.json
 
 clean:
 	rm -rf tmp/build tmp/var/pipe/*.png tmp/var/pipe/*.bin tmp/var/pipe/*.json tmp/var/pipe/*.tiff

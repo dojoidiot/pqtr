@@ -19,10 +19,3 @@ __pycache__/
 # Ignore all subdirectories in lib/ by default
 lib/*/
 
-# Dawn build artifacts (inside submodule)
-LABS/lib/dawn/build/
-LABS/lib/dawn/install/
-LABS/lib/dawn/out/
-
-# Dark (external project)
-dark/
