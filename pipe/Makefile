@@ -36,7 +36,7 @@ LABS_OBJS := $(LABS_SRCS:%.cpp=$(BUILD)/%.o)
 INCLUDES := -I inc -I src/main/flow -I src/main/labs/plug
 
 # Targets
-.PHONY: all test dark labs clean tidy ref cli diff test-head-sony test-head-canon test-rawprepare test-phase1 test-phase2
+.PHONY: all test dark labs clean tidy ref cli diff test-head-sony test-head-canon test-rawprepare test-phase1 test-phase2 gold test-gold
 
 all: $(BUILD)/dark $(BUILD)/labs $(BUILD)/diff
 
@@ -95,6 +95,19 @@ test-phase2: $(BUILD)/phase2_test
 	@echo "=== Phase 2 Final Output ==="
 	@mkdir -p tmp/var
 	./$(BUILD)/phase2_test
+
+# Gold pipeline test (full end-to-end)
+$(BUILD)/gold: src/test/labs/gold.cpp src/main/labs/plug/sony/sony.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -I src/main/labs/plug/sony -I LibRaw -o $@ $^ -L LibRaw/lib/.libs -lraw -lm
+
+gold: $(BUILD)/gold
+	@echo "Built: tmp/build/gold"
+
+test-gold: $(BUILD)/gold
+	@echo "=== Gold Pipeline Test ==="
+	@mkdir -p tmp/var
+	LD_LIBRARY_PATH=LibRaw/lib/.libs ./$(BUILD)/gold
 
 # Module tests will be added as modules are transpiled via copy.md
 # Template:
