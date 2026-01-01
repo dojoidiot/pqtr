@@ -411,3 +411,329 @@ int sony_write_ppm(const char* filename, const uint16_t* data, int width, int he
     fclose(f);
     return 0;
 }
+
+/* ============================================================================
+   Sony ARW metadata extraction - TIFF + MakerNotes parsing
+
+   Copied from pipe/src/main/flow/sony/prepare.cpp (git 224c1aa^)
+   Extracts values needed for decoding and PipeState initialization.
+   ============================================================================ */
+
+typedef struct {
+    int width;
+    int height;
+    int strip_offset;
+    uint16_t sony_curve[4];  /* Raw 16-bit values (decoder shifts >> 2 internally) */
+    int black_level;
+    int white_level;
+    float wb_rggb[4];        /* WB multipliers R,G,B,G2 normalized to G=1.0 */
+    float color_matrix[9];   /* Camera -> XYZ 3x3 matrix, scale 1/1024 */
+    uint32_t filters;        /* Bayer pattern code */
+    float exposure_bias;     /* Camera-specific EV from DT styles (Sony ILCE = 1.4) */
+} SonyARWMeta;
+
+/* Read uint16/32 little-endian */
+static inline uint16_t meta_read_u16(const uint8_t* p) {
+    return p[0] | ((uint16_t)p[1] << 8);
+}
+static inline uint32_t meta_read_u32(const uint8_t* p) {
+    return p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* IFD entry */
+typedef struct {
+    uint16_t tag;
+    uint16_t type;
+    uint32_t count;
+    uint32_t value_offset;
+} IFDEntry;
+
+static IFDEntry parse_ifd_entry(const uint8_t* data) {
+    IFDEntry e;
+    e.tag = meta_read_u16(data);
+    e.type = meta_read_u16(data + 2);
+    e.count = meta_read_u32(data + 4);
+    e.value_offset = meta_read_u32(data + 8);
+    return e;
+}
+
+/* Sony SR2SubIFD decryption (Dave Coffin's algorithm from dcraw) */
+static void decrypt_sr2(uint8_t* data, uint32_t length, uint32_t key)
+{
+    uint32_t pad[128] = {0};
+    uint32_t p;
+
+    for (p = 0; p < 4; p++)
+        pad[p] = key = key * 48828125 + 1;
+    pad[3] = pad[3] << 1 | (pad[0] ^ pad[2]) >> 31;
+    for (p = 4; p < 127; p++)
+        pad[p] = (pad[p-4] ^ pad[p-2]) << 1 | (pad[p-3] ^ pad[p-1]) >> 31;
+    for (p = 0; p < 127; p++)
+        pad[p] = ((pad[p] & 0xff) << 24) | ((pad[p] & 0xff00) << 8) |
+                 ((pad[p] >> 8) & 0xff00) | ((pad[p] >> 24) & 0xff);
+
+    uint32_t* d = (uint32_t*)data;
+    p = 127;
+    for (uint32_t i = 0; i < length / 4; i++) {
+        p++;
+        d[i] ^= pad[(p-1) & 127] = pad[p & 127] ^ pad[(p+64) & 127];
+    }
+}
+
+/* Extract metadata from Sony ARW file */
+int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
+{
+    memset(meta, 0, sizeof(*meta));
+
+    /* Defaults for Sony ARW */
+    meta->black_level = 512;
+    meta->white_level = 16383;  /* 14-bit max */
+    meta->wb_rggb[0] = 1.0f;
+    meta->wb_rggb[1] = 1.0f;
+    meta->wb_rggb[2] = 1.0f;
+    meta->wb_rggb[3] = 1.0f;
+    meta->filters = 0x94949494;  /* RGGB default */
+    meta->exposure_bias = 1.4f;  /* From DT Sony ILCE style */
+
+    FILE* f = fopen(filename, "rb");
+    if (!f) return -1;
+
+    fseek(f, 0, SEEK_END);
+    long file_size = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    /* Read first 1MB for metadata */
+    size_t read_size = (file_size < 1024*1024) ? file_size : 1024*1024;
+    uint8_t* data = (uint8_t*)malloc(read_size);
+    if (!data) { fclose(f); return -1; }
+
+    if (fread(data, 1, read_size, f) != read_size) {
+        free(data);
+        fclose(f);
+        return -1;
+    }
+    fclose(f);
+
+    /* Check TIFF header */
+    if (read_size < 8 || data[0] != 'I' || data[1] != 'I' ||
+        data[2] != 0x2a || data[3] != 0x00) {
+        free(data);
+        return -1;
+    }
+
+    uint32_t ifd0_offset = meta_read_u32(data + 4);
+    if (ifd0_offset + 2 > read_size) { free(data); return -1; }
+
+    /* Parse IFD0 */
+    uint16_t nentries = meta_read_u16(data + ifd0_offset);
+    uint32_t offset = ifd0_offset + 2;
+
+    uint32_t sub_ifd_offset = 0;
+    uint32_t exif_ifd_offset = 0;
+    uint32_t sr2_offset = 0, sr2_length = 0, sr2_key = 0;
+
+    for (int i = 0; i < nentries; i++) {
+        if (offset + 12 > read_size) break;
+        IFDEntry entry = parse_ifd_entry(data + offset);
+
+        /* Tag 0xc634 contains SR2SubIFD pointers */
+        if (entry.tag == 0xc634 && entry.value_offset + 100 <= read_size) {
+            uint16_t sr2_num = meta_read_u16(data + entry.value_offset);
+            for (int j = 0; j < sr2_num && j < 20; j++) {
+                uint32_t sr2_entry_off = entry.value_offset + 2 + j * 12;
+                if (sr2_entry_off + 12 > read_size) break;
+                IFDEntry se = parse_ifd_entry(data + sr2_entry_off);
+                if (se.tag == 0x7200) sr2_offset = se.value_offset;
+                if (se.tag == 0x7201) sr2_length = se.value_offset;
+                if (se.tag == 0x7221) sr2_key = se.value_offset;
+            }
+        }
+
+        if (entry.tag == 330) sub_ifd_offset = entry.value_offset;
+        else if (entry.tag == 34665) exif_ifd_offset = entry.value_offset;
+
+        offset += 12;
+    }
+
+    /* Parse EXIF IFD for MakerNotes */
+    uint32_t maker_note_offset = 0;
+    if (exif_ifd_offset > 0 && exif_ifd_offset + 2 <= read_size) {
+        uint16_t exif_nentries = meta_read_u16(data + exif_ifd_offset);
+        offset = exif_ifd_offset + 2;
+
+        for (int i = 0; i < exif_nentries; i++) {
+            if (offset + 12 > read_size) break;
+            IFDEntry entry = parse_ifd_entry(data + offset);
+            if (entry.tag == 37500) maker_note_offset = entry.value_offset;
+            offset += 12;
+        }
+    }
+
+    /* Parse Sony MakerNotes for tone curve */
+    int found_sony_curve = 0;
+    if (maker_note_offset > 0 && maker_note_offset + 12 <= read_size) {
+        uint32_t maker_ifd_offset = maker_note_offset;
+        /* Skip "SONY DSC " header if present */
+        if (data[maker_note_offset] == 'S' && data[maker_note_offset + 1] == 'O')
+            maker_ifd_offset += 12;
+
+        if (maker_ifd_offset + 2 <= read_size) {
+            uint16_t maker_nentries = meta_read_u16(data + maker_ifd_offset);
+            uint32_t sony_tag2010_offset = 0;
+
+            for (int i = 0; i < maker_nentries && i < 200; i++) {
+                uint32_t entry_off = maker_ifd_offset + 2 + i * 12;
+                if (entry_off + 12 > read_size) break;
+                IFDEntry entry = parse_ifd_entry(data + entry_off);
+
+                if (entry.tag == 0x2010)
+                    sony_tag2010_offset = entry.value_offset;
+            }
+
+            /* Parse tag 0x2010 sub-IFD for tone curve (0x7010) */
+            if (sony_tag2010_offset > 0 && sony_tag2010_offset + 2 <= read_size) {
+                uint16_t tag2010_nentries = meta_read_u16(data + sony_tag2010_offset);
+
+                for (int i = 0; i < tag2010_nentries && i < 100; i++) {
+                    uint32_t entry_off = sony_tag2010_offset + 2 + i * 12;
+                    if (entry_off + 12 > read_size) break;
+                    IFDEntry entry = parse_ifd_entry(data + entry_off);
+
+                    /* SonyToneCurve: tag 0x7010, 4 uint16 values */
+                    if (entry.tag == 0x7010 && entry.count >= 4 &&
+                        entry.value_offset + 8 <= read_size) {
+                        /* Return raw values - decoder does >> 2 internally */
+                        for (int j = 0; j < 4; j++) {
+                            meta->sony_curve[j] = meta_read_u16(data + entry.value_offset + j * 2);
+                        }
+                        found_sony_curve = 1;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Parse SubIFD for dimensions, strip offset, WB, color matrix */
+    if (sub_ifd_offset > 0 && sub_ifd_offset + 2 <= read_size) {
+        uint16_t sub_nentries = meta_read_u16(data + sub_ifd_offset);
+        offset = sub_ifd_offset + 2;
+
+        int found_wb = 0;
+
+        for (int i = 0; i < sub_nentries; i++) {
+            if (offset + 12 > read_size) break;
+            IFDEntry entry = parse_ifd_entry(data + offset);
+
+            /* Fallback: tone curve in SubIFD */
+            if (!found_sony_curve && entry.tag == 0x7010 && entry.count >= 4 &&
+                entry.value_offset + 8 <= read_size) {
+                for (int j = 0; j < 4; j++) {
+                    meta->sony_curve[j] = meta_read_u16(data + entry.value_offset + j * 2);
+                }
+                found_sony_curve = 1;
+            }
+
+            /* WB RGGB levels: tag 0x7313, 4 int16 values */
+            if (!found_wb && entry.tag == 0x7313 && entry.count == 4 &&
+                entry.value_offset + 8 <= read_size) {
+                uint16_t r = meta_read_u16(data + entry.value_offset);
+                uint16_t g1 = meta_read_u16(data + entry.value_offset + 2);
+                uint16_t g2 = meta_read_u16(data + entry.value_offset + 4);
+                uint16_t b = meta_read_u16(data + entry.value_offset + 6);
+                if (g1 > 0) {
+                    meta->wb_rggb[0] = (float)r / (float)g1;
+                    meta->wb_rggb[1] = 1.0f;
+                    meta->wb_rggb[2] = (float)b / (float)g1;
+                    meta->wb_rggb[3] = (float)g2 / (float)g1;
+                }
+                found_wb = 1;
+            }
+
+            /* Color matrix: tag 0x7800, 9 int16 values, scale 1/1024 */
+            if (entry.tag == 0x7800 && entry.count == 9 &&
+                entry.value_offset + 18 <= read_size) {
+                for (int j = 0; j < 9; j++) {
+                    int16_t val = (int16_t)meta_read_u16(data + entry.value_offset + j * 2);
+                    meta->color_matrix[j] = val / 1024.0f;
+                }
+            }
+
+            /* CFA pattern: tag 33422 */
+            if (entry.tag == 33422 && entry.value_offset + 8 <= read_size) {
+                uint8_t cfa[4];
+                for (int j = 0; j < 4; j++)
+                    cfa[j] = data[entry.value_offset + 4 + j];
+                /* Map pattern to filters code */
+                if (cfa[0] == 0 && cfa[1] == 1 && cfa[2] == 1 && cfa[3] == 2)
+                    meta->filters = 0x94949494;  /* RGGB */
+                else if (cfa[0] == 2 && cfa[1] == 1 && cfa[2] == 1 && cfa[3] == 0)
+                    meta->filters = 0x16161616;  /* BGGR */
+                else if (cfa[0] == 1 && cfa[1] == 0 && cfa[2] == 2 && cfa[3] == 1)
+                    meta->filters = 0x61616161;  /* GRBG */
+                else if (cfa[0] == 1 && cfa[1] == 2 && cfa[2] == 0 && cfa[3] == 1)
+                    meta->filters = 0x49494949;  /* GBRG */
+            }
+
+            /* Image dimensions */
+            if (entry.tag == 256) {
+                meta->width = (entry.type == 3) ? (entry.value_offset & 0xFFFF) : entry.value_offset;
+            }
+            else if (entry.tag == 257) {
+                meta->height = (entry.type == 3) ? (entry.value_offset & 0xFFFF) : entry.value_offset;
+            }
+            else if (entry.tag == 273) {
+                meta->strip_offset = entry.value_offset;
+            }
+
+            offset += 12;
+        }
+    }
+
+    /* Decrypt and parse SR2SubIFD for black level */
+    if (sr2_offset > 0 && sr2_length > 0 && sr2_key != 0 &&
+        sr2_offset + sr2_length <= read_size) {
+        uint8_t* sr2 = (uint8_t*)malloc(sr2_length);
+        if (sr2) {
+            memcpy(sr2, data + sr2_offset, sr2_length);
+            decrypt_sr2(sr2, sr2_length, sr2_key);
+
+            if (sr2_length >= 2) {
+                uint16_t sr2_nentries = meta_read_u16(sr2);
+                for (int i = 0; i < sr2_nentries && i < 200; i++) {
+                    uint32_t entry_off = 2 + i * 12;
+                    if (entry_off + 12 > sr2_length) break;
+                    IFDEntry entry = parse_ifd_entry(sr2 + entry_off);
+
+                    /* Black level: tag 0x7310, 4 int16 values */
+                    if (entry.tag == 0x7310 && entry.count == 4) {
+                        uint32_t rel_offset = entry.value_offset - sr2_offset;
+                        if (rel_offset + 8 <= sr2_length) {
+                            uint16_t min_black = 65535;
+                            for (int j = 0; j < 4; j++) {
+                                uint16_t bl = meta_read_u16(sr2 + rel_offset + j * 2);
+                                if (bl < min_black) min_black = bl;
+                            }
+                            meta->black_level = min_black;
+                        }
+                    }
+
+                    /* Color matrix from SR2 if not found in SubIFD */
+                    if (entry.tag == 0x7800 && entry.count == 9 && meta->color_matrix[0] == 0) {
+                        uint32_t rel_offset = entry.value_offset - sr2_offset;
+                        if (rel_offset + 18 <= sr2_length) {
+                            for (int j = 0; j < 9; j++) {
+                                int16_t val = (int16_t)meta_read_u16(sr2 + rel_offset + j * 2);
+                                meta->color_matrix[j] = val / 1024.0f;
+                            }
+                        }
+                    }
+                }
+            }
+            free(sr2);
+        }
+    }
+
+    free(data);
+    return 0;
+}

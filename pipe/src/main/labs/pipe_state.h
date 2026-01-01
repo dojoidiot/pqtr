@@ -18,11 +18,14 @@ typedef struct {
     uint32_t filters;   /* Bayer pattern from decoder, adjusted for row order */
 
     /* ========================================================================
-       Camera data - populated by pipe_prepare from cameras.xml
+       Camera data - populated by pipe_prepare from cameras.xml / styles
        From image.h lines 310, 343
        ======================================================================== */
     float adobe_XYZ_to_CAM[4][3];   /* Color matrix from rawspeed/cameras.xml */
     float d65_color_matrix[9];       /* Embedded 3x3 matrix from DNG (NaN if invalid) */
+
+    /* Camera-specific exposure adjustment from DT styles (e.g. Sony ILCE-7 = 1.4 EV) */
+    float exposure_bias;             /* EV adjustment for this camera model */
 
     /* ========================================================================
        Module outputs - set by modules for downstream use
