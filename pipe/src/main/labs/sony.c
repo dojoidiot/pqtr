@@ -495,7 +495,7 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
     meta->wb_rggb[2] = 1.0f;
     meta->wb_rggb[3] = 1.0f;
     meta->filters = 0x94949494;  /* RGGB default */
-    meta->exposure_bias = 1.4f;  /* From DT Sony ILCE style */
+    meta->exposure_bias = 1.05f;  /* Tuned to match DT output brightness */
 
     /* Sony ILCE-7M3 XYZ_to_CAM from cameras.xml (values / 10000) */
     meta->xyz_to_cam[0] =  0.7374f;  meta->xyz_to_cam[1] = -0.2389f;  meta->xyz_to_cam[2] = -0.0551f;
