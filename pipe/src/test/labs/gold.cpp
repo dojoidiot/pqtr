@@ -37,56 +37,14 @@ extern "C" {
 #include "../../main/labs/stb_image_write.h"
 
 /* ==========================================================================
-   Rec2020 matrices (from DT work profile)
+   Standard matrices are now in their respective modules:
+   - REC2020_to_XYZ, XYZ_to_REC2020: colorin.c
+   - XYZ_D50_to_sRGB, XYZ_D65_to_sRGB: colorout.c
+   - FILMIC_*_MATRIX_*: filmicrgb.c
+
+   Only camera-specific matrices (cam_to_xyz) need to be defined here
+   or read from RAW metadata.
    ========================================================================== */
-
-static const dt_colormatrix_t REC2020_to_XYZ = {
-    { 0.673474789f, 0.165675461f, 0.125049725f, 0.f },
-    { 0.279040545f, 0.675347328f, 0.045612101f, 0.f },
-    { -0.001932710f, 0.029981442f, 0.796851277f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-
-static const dt_colormatrix_t XYZ_to_REC2020 = {
-    { 1.647250295f, -0.393625855f, -0.235971376f, 0.f },
-    { -0.682616651f, 1.647609591f, 0.012813044f, 0.f },
-    { 0.029678674f, -0.062945843f, 1.253884912f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-
-/* sRGB output matrix (XYZ D50 -> sRGB) */
-static const float SRGB_CMATRIX[4][4] = {
-    { 3.1338561f, -1.6168667f, -0.4906146f, 0.f },
-    { -0.9787684f, 1.9161415f, 0.0334540f, 0.f },
-    { 0.0719453f, -0.2289914f, 1.4052427f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-
-/* Filmicrgb matrices (for scene -> display) */
-static const dt_colormatrix_t FILMIC_INPUT_TRANS = {
-    { 0.406808585f, 0.617819786f, 0.045817729f, 0.f },
-    { 0.067756809f, 0.748962402f, 0.100109629f, 0.f },
-    { 0.022140555f, -0.015321350f, 0.587274075f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-static const dt_colormatrix_t FILMIC_OUTPUT = {
-    { 2.837817192f, -2.337296247f, 0.177027255f, 0.f },
-    { -0.241587654f, 1.529518247f, -0.241881117f, 0.f },
-    { -0.113289982f, 0.128020823f, 1.689797878f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-static const dt_colormatrix_t FILMIC_EXPORT_INPUT_TRANS = {
-    { 0.298672199f, 0.706104636f, 0.065669231f, 0.f },
-    { 0.095901854f, 0.719828308f, 0.101098664f, 0.f },
-    { 0.022459989f, 0.044898711f, 0.526734650f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
-static const dt_colormatrix_t FILMIC_EXPORT_OUTPUT = {
-    { 4.862406731f, -4.789227962f, 0.313011587f, 0.f },
-    { -0.626189709f, 2.022818327f, -0.310180575f, 0.f },
-    { -0.153957039f, 0.031788439f, 1.911581993f, 0.f },
-    { 0.f, 0.f, 0.f, 0.f }
-};
 
 /* ==========================================================================
    Main pipeline
@@ -277,12 +235,7 @@ int main(int argc, char** argv)
     /* Rec2020 -> XYZ -> sRGB with gamma */
     float* srgb = (float*)malloc(npixels * 4 * sizeof(float));
 
-    /* sRGB matrix: XYZ D65 -> sRGB */
-    const float xyz_to_srgb[3][3] = {
-        {  3.2404542f, -1.5371385f, -0.4985314f },
-        { -0.9692660f,  1.8760108f,  0.0415560f },
-        {  0.0556434f, -0.2040259f,  1.0572252f }
-    };
+    /* Use XYZ_D65_to_sRGB from colorout.c */
 
     for (size_t i = 0; i < npixels; i++) {
         float* in = rec2020 + i * 4;
@@ -294,11 +247,11 @@ int main(int argc, char** argv)
         xyz[1] = REC2020_to_XYZ[1][0] * in[0] + REC2020_to_XYZ[1][1] * in[1] + REC2020_to_XYZ[1][2] * in[2];
         xyz[2] = REC2020_to_XYZ[2][0] * in[0] + REC2020_to_XYZ[2][1] * in[1] + REC2020_to_XYZ[2][2] * in[2];
 
-        /* XYZ -> linear sRGB */
+        /* XYZ -> linear sRGB (using XYZ_D65_to_sRGB from colorout.c) */
         float lin[3];
-        lin[0] = xyz_to_srgb[0][0] * xyz[0] + xyz_to_srgb[0][1] * xyz[1] + xyz_to_srgb[0][2] * xyz[2];
-        lin[1] = xyz_to_srgb[1][0] * xyz[0] + xyz_to_srgb[1][1] * xyz[1] + xyz_to_srgb[1][2] * xyz[2];
-        lin[2] = xyz_to_srgb[2][0] * xyz[0] + xyz_to_srgb[2][1] * xyz[1] + xyz_to_srgb[2][2] * xyz[2];
+        lin[0] = XYZ_D65_to_sRGB[0][0] * xyz[0] + XYZ_D65_to_sRGB[0][1] * xyz[1] + XYZ_D65_to_sRGB[0][2] * xyz[2];
+        lin[1] = XYZ_D65_to_sRGB[1][0] * xyz[0] + XYZ_D65_to_sRGB[1][1] * xyz[1] + XYZ_D65_to_sRGB[1][2] * xyz[2];
+        lin[2] = XYZ_D65_to_sRGB[2][0] * xyz[0] + XYZ_D65_to_sRGB[2][1] * xyz[1] + XYZ_D65_to_sRGB[2][2] * xyz[2];
 
         /* sRGB gamma */
         for (int c = 0; c < 3; c++) {

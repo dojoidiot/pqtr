@@ -38,6 +38,25 @@ typedef struct {
 static const float d50_inv[4] = { 1.0f/0.9642f, 1.0f, 1.0f/0.8249f, 0.0f };
 
 /* ============================================================================
+   Rec2020 <-> XYZ matrices (D65 white point)
+   Computed from Rec2020 primaries in colorspaces.c
+   ============================================================================ */
+
+static const float REC2020_to_XYZ[4][4] = {
+    { 0.673474789f, 0.165675461f, 0.125049725f, 0.f },
+    { 0.279040545f, 0.675347328f, 0.045612101f, 0.f },
+    { -0.001932710f, 0.029981442f, 0.796851277f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+static const float XYZ_to_REC2020[4][4] = {
+    { 1.647250295f, -0.393625855f, -0.235971376f, 0.f },
+    { -0.682616651f, 1.647609591f, 0.012813044f, 0.f },
+    { 0.029678674f, -0.062945843f, 1.253884912f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+/* ============================================================================
    From colorspaces_inline_conversions.h - cbrt functions (lines 143-165)
 
    Fast cube root approximation using bit manipulation + Halley iteration

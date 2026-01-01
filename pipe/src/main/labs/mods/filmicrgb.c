@@ -34,6 +34,54 @@ static const filmic_matrix_t LMS_D65_to_filmlightRGB_D65_trans
 static const float D65_r = 0.21902143f;
 static const float D65_g = 0.54371398f;
 
+/* ============================================================================
+   Rec2020 work profile matrices (for scene -> display conversion)
+   From DT colorspaces.c Rec2020 primaries
+   ============================================================================ */
+
+static const dt_colormatrix_t FILMIC_INPUT_MATRIX_TRANS = {
+    { 0.406808585f, 0.617819786f, 0.045817729f, 0.f },
+    { 0.067756809f, 0.748962402f, 0.100109629f, 0.f },
+    { 0.022140555f, -0.015321350f, 0.587274075f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+static const dt_colormatrix_t FILMIC_OUTPUT_MATRIX = {
+    { 2.837817192f, -2.337296247f, 0.177027255f, 0.f },
+    { -0.241587654f, 1.529518247f, -0.241881117f, 0.f },
+    { -0.113289982f, 0.128020823f, 1.689797878f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+static const dt_colormatrix_t FILMIC_OUTPUT_MATRIX_TRANS = {
+    { 2.837817192f, -0.241587654f, -0.113289982f, 0.f },
+    { -2.337296247f, 1.529518247f, 0.128020823f, 0.f },
+    { 0.177027255f, -0.241881117f, 1.689797878f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+/* Export profile matrices (sRGB target) */
+static const dt_colormatrix_t FILMIC_EXPORT_INPUT_MATRIX_TRANS = {
+    { 0.298672199f, 0.706104636f, 0.065669231f, 0.f },
+    { 0.095901854f, 0.719828308f, 0.101098664f, 0.f },
+    { 0.022459989f, 0.044898711f, 0.526734650f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+static const dt_colormatrix_t FILMIC_EXPORT_OUTPUT_MATRIX = {
+    { 4.862406731f, -4.789227962f, 0.313011587f, 0.f },
+    { -0.626189709f, 2.022818327f, -0.310180575f, 0.f },
+    { -0.153957039f, 0.031788439f, 1.911581993f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
+static const dt_colormatrix_t FILMIC_EXPORT_OUTPUT_MATRIX_TRANS = {
+    { 4.862406731f, -0.626189709f, -0.153957039f, 0.f },
+    { -4.789227962f, 2.022818327f, 0.031788439f, 0.f },
+    { 0.313011587f, -0.310180575f, 1.911581993f, 0.f },
+    { 0.f, 0.f, 0.f, 0.f }
+};
+
 /* ========== Spline type enum ========== */
 typedef enum {
     DT_FILMIC_CURVE_POLY_4 = 0,
