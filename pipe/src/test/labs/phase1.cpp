@@ -54,9 +54,9 @@ int main() {
 
     /* Load colorin output (Lab) from DT dump */
     printf("[1/4] Loading colorin output from DT dump...\n");
-    FILE* f_in = fopen("/tmp/dtdump/export/0001_colorout_cpu_in_C.pfm", "rb");
+    FILE* f_in = fopen("/tmp/dtdump/export/0000_colorout_cpu_in_C.pfm", "rb");
     if (!f_in) {
-        fprintf(stderr, "ERROR: Cannot open /tmp/dtdump/export/0001_colorout_cpu_in_C.pfm\n");
+        fprintf(stderr, "ERROR: Cannot open /tmp/dtdump/export/0000_colorout_cpu_in_C.pfm\n");
         fprintf(stderr, "Run: darktable-cli src/test/raws/sony.ARW src/test/raws/phase1.xmp "
                        "/tmp/out.png --core --disable-opencl --dump-pipe colorout --dumpdir /tmp/dtdump\n");
         return 1;
@@ -84,7 +84,7 @@ int main() {
 
     /* Load reference output from DT dump */
     printf("[2/4] Loading reference output from DT dump...\n");
-    FILE* f_ref = fopen("/tmp/dtdump/export/0002_colorout_cpu_out_C.pfm", "rb");
+    FILE* f_ref = fopen("/tmp/dtdump/export/0001_colorout_cpu_out_C.pfm", "rb");
     if (!f_ref) {
         fprintf(stderr, "ERROR: Cannot open reference\n");
         free(lab);
