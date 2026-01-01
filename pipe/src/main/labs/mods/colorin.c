@@ -120,8 +120,8 @@ static inline void dt_RGB_to_Lab(const float rgb[4],
    From colorin.c - _cmatrix_fastpath_simple (lines 827-855)
    ============================================================================ */
 
-static void _cmatrix_fastpath_simple(float *const restrict out,
-                                     const float *const restrict in,
+static void _cmatrix_fastpath_simple(float *const out,
+                                     const float *const in,
                                      size_t npixels,
                                      const float cmatrix[4][4],
                                      const float corr[4])

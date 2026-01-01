@@ -236,6 +236,7 @@ namespace sony
                 const uint8_t *dp = row_data;
                 uint16_t *row_out = output + (row * width);
                 int col = 0;
+                int block_num = 0;
 
                 while (col < raw_width - 30)
                 {
@@ -245,6 +246,16 @@ namespace sony
                     uint16_t min = (val >> 11) & 0x7FF;
                     uint8_t imax = (val >> 22) & 0x0F;
                     uint8_t imin = (val >> 26) & 0x0F;
+
+                    // Debug: print first block of last row
+                    if (row == height - 1 && block_num == 0) {
+                        fprintf(stderr, "Last row, block 0:\n");
+                        fprintf(stderr, "  Raw bytes: ");
+                        for (int b = 0; b < 16; b++) fprintf(stderr, "%02x ", dp[b]);
+                        fprintf(stderr, "\n");
+                        fprintf(stderr, "  val = 0x%08x\n", val);
+                        fprintf(stderr, "  max=%d min=%d imax=%d imin=%d\n", max, min, imax, imin);
+                    }
 
                     int sh = 0;
                     uint16_t range = max - min;
@@ -256,29 +267,54 @@ namespace sony
 
                     for (int i = 0; i < 16; i++)
                     {
-                        if (i == imax)
-                            pix[i] = max;
-                        else if (i == imin)
-                            pix[i] = min;
+                        int p;
+                        const char* src = "delta";
+                        if (i == imax) {
+                            p = max;
+                            src = "max";
+                        }
+                        else if (i == imin) {
+                            p = min;
+                            src = "min";
+                        }
                         else
                         {
                             int byte_offset = bit >> 3;
                             int bit_offset = bit & 7;
                             uint16_t delta_bits = dp[byte_offset] | (dp[byte_offset + 1] << 8);
                             uint16_t delta = (delta_bits >> bit_offset) & 0x7F;
-                            pix[i] = (delta << sh) + min;
+                            p = (delta << sh) + min;
+                            if (p > 0x7ff) p = 0x7ff;  // clamp like RawSpeed
+                            // Debug: show bit extraction
+                            if (row == height - 1 && block_num == 0 && i < 4) {
+                                fprintf(stderr, "  i=%d: bit=%d, byte=%d, off=%d, dp[%d]=0x%02x, dp[%d]=0x%02x, delta_bits=0x%04x, delta=%d, p=%d\n",
+                                    i, bit, byte_offset, bit_offset, byte_offset, dp[byte_offset], byte_offset+1, dp[byte_offset+1], delta_bits, delta, p);
+                            }
                             bit += 7;
                         }
+                        // Debug: print first few pixels of last row block 0
+                        if (row == height - 1 && block_num == 0 && i < 4) {
+                            fprintf(stderr, "  pix[%d] = %d (%s)\n", i, p, src);
+                        }
+                        // DT's PPM does not have the << 1 shift
+                        // Output p directly (11-bit values 0-2047)
+                        pix[i] = p;
                     }
 
                     for (int i = 0; i < 16; i++, col += 2)
                     {
-                        if (col < width)
+                        if (col < width) {
                             row_out[col] = pix[i];
+                            // Debug: verify value written
+                            if (row == height - 1 && block_num == 0 && col < 8) {
+                                fprintf(stderr, "  row_out[%d] = %d\n", col, row_out[col]);
+                            }
+                        }
                     }
 
                     col -= (col & 1) ? 1 : 31;
                     dp += 16;
+                    block_num++;
                 }
             }
 

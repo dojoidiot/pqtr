@@ -12,6 +12,7 @@
 #include <string.h>
 #include <stdint.h>
 #include "../pipe_state.h"
+#include "../common.h"
 
 /* ============================================================================
    From demosaic.c - dt_iop_demosaic_params_t (lines 148-162)
@@ -32,14 +33,7 @@ typedef struct {
     int cs_enabled;         /* FALSE */
 } DemosaicParams;
 
-/* ============================================================================
-   From imageop_math.h - FC function (line 154-157)
-   ============================================================================ */
-
-static inline int FC(const size_t row, const size_t col, const uint32_t filters)
-{
-    return filters >> (((row << 1 & 14) + (col & 1)) << 1) & 3;
-}
+/* FC() is in common.h */
 
 /* ============================================================================
    From common/math.h - helper functions (lines 119-130)
@@ -299,8 +293,8 @@ static void rcd_ppg_border(float *const out,
    Main RCD demosaic algorithm
    ============================================================================ */
 
-static void rcd_demosaic(float *const restrict out,
-                         const float *const restrict in,
+static void rcd_demosaic(float *const out,
+                         const float *const in,
                          const int width,
                          const int height,
                          const uint32_t filters,
@@ -328,7 +322,7 @@ static void rcd_demosaic(float *const restrict out,
         float *const P_CDiff_Hpf = dt_alloc_align_float((size_t) DT_RCD_TILESIZE * DT_RCD_TILESIZE / 2);
         float *const Q_CDiff_Hpf = dt_alloc_align_float((size_t) DT_RCD_TILESIZE * DT_RCD_TILESIZE / 2);
 
-        float (*const rgb)[DT_RCD_TILESIZE * DT_RCD_TILESIZE] = (void *)dt_alloc_align_float((size_t)3 * DT_RCD_TILESIZE * DT_RCD_TILESIZE);
+        float (*const rgb)[DT_RCD_TILESIZE * DT_RCD_TILESIZE] = (float (*)[DT_RCD_TILESIZE * DT_RCD_TILESIZE])dt_alloc_align_float((size_t)3 * DT_RCD_TILESIZE * DT_RCD_TILESIZE);
 
         /* No overlapping use so re-use same buffer */
         float *const lpf = PQ_Dir;

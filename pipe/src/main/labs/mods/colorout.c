@@ -156,14 +156,14 @@ static inline float linear_to_sRGB(const float linear)
 }
 
 /* ============================================================================
-   From colorout.c - dt_apply_transposed_color_matrix (inline)
+   From colorout.c - apply transposed color matrix (local version)
    ============================================================================ */
 
-static inline void dt_apply_transposed_color_matrix(const float in[4],
-                                                     const float row0[4],
-                                                     const float row1[4],
-                                                     const float row2[4],
-                                                     float out[4])
+static inline void colorout_apply_matrix(const float in[4],
+                                          const float row0[4],
+                                          const float row1[4],
+                                          const float row2[4],
+                                          float out[4])
 {
     for (int r = 0; r < 4; r++)
         out[r] = row0[r] * in[0] + row1[r] * in[1] + row2[r] * in[2];

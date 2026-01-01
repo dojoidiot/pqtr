@@ -6,6 +6,7 @@
 // Uses: diff --bits
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstdint>
 #include <fstream>
 #include <vector>
@@ -59,13 +60,22 @@ int main()
            meta.wb_rggb[0], meta.wb_rggb[1], meta.wb_rggb[2], meta.wb_rggb[3]);
     printf("  Bayer: %zu pixels (%zu bytes)\n", bayer.size(), bayer.bytes());
 
-    // Write our output
+    // Write our output with reversed rows (to match DT's PPM format)
+    // DT's dt_write_pfm reverses rows: row_in = height - 1 - row
     const char* out_path = "/tmp/head_sony_bayer.bin";
-    if (!write_file(out_path, bayer.ptr(), bayer.bytes())) {
-        fprintf(stderr, "Cannot write output\n");
-        return 1;
+    {
+        std::ofstream f(out_path, std::ios::binary);
+        if (!f) {
+            fprintf(stderr, "Cannot write output\n");
+            return 1;
+        }
+        const uint16_t* data = bayer.ptr();
+        for (int row = meta.height - 1; row >= 0; row--) {
+            f.write(reinterpret_cast<const char*>(data + row * meta.width),
+                    meta.width * sizeof(uint16_t));
+        }
     }
-    printf("Wrote: %s\n", out_path);
+    printf("Wrote: %s (rows reversed to match PPM)\n", out_path);
 
     // Load reference
     auto ref_data = read_file("src/test/dark/head_sony_bayer.bin");
@@ -91,13 +101,13 @@ int main()
         return 1;
     }
 
-    // Run diff
+    // Run diff against DT reference PPM (strip 13-byte header)
     printf("\nRunning diff...\n");
-    char cmd[512];
-    snprintf(cmd, sizeof(cmd),
-             "./tmp/build/diff src/test/dark/head_sony_bayer.bin %s --bits",
-             out_path);
-    int ret = system(cmd);
 
-    return ret;
+    // Strip PPM header and compare
+    // head_sony.ppm is DT's rawprepare input (13-byte header: "P5\n6048 4024\n")
+    int ret = system("tail -c +14 src/test/dark/head_sony.ppm > /tmp/head_sony_ref.bin && "
+                     "./tmp/build/diff /tmp/head_sony_ref.bin /tmp/head_sony_bayer.bin --bits");
+
+    return WEXITSTATUS(ret);
 }
