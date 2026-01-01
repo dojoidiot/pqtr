@@ -427,9 +427,11 @@ typedef struct {
     int black_level;
     int white_level;
     float wb_rggb[4];        /* WB multipliers R,G,B,G2 normalized to G=1.0 */
-    float color_matrix[9];   /* Camera -> XYZ 3x3 matrix, scale 1/1024 */
+    float color_matrix[9];   /* Camera -> XYZ 3x3 matrix, scale 1/1024 (from embedded) */
     uint32_t filters;        /* Bayer pattern code */
     float exposure_bias;     /* Camera-specific EV from DT styles (Sony ILCE = 1.4) */
+    float xyz_to_cam[9];     /* XYZ->CAM matrix from cameras.xml (scaled by 10000) */
+    float d65_coeffs[4];     /* D65 WB multipliers computed from xyz_to_cam */
 } SonyARWMeta;
 
 /* Read uint16/32 little-endian */
@@ -494,6 +496,42 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
     meta->wb_rggb[3] = 1.0f;
     meta->filters = 0x94949494;  /* RGGB default */
     meta->exposure_bias = 1.4f;  /* From DT Sony ILCE style */
+
+    /* Sony ILCE-7M3 XYZ_to_CAM from cameras.xml (values / 10000) */
+    meta->xyz_to_cam[0] =  0.7374f;  meta->xyz_to_cam[1] = -0.2389f;  meta->xyz_to_cam[2] = -0.0551f;
+    meta->xyz_to_cam[3] = -0.5435f;  meta->xyz_to_cam[4] =  1.3162f;  meta->xyz_to_cam[5] =  0.2519f;
+    meta->xyz_to_cam[6] = -0.1006f;  meta->xyz_to_cam[7] =  0.1795f;  meta->xyz_to_cam[8] =  0.6552f;
+
+    /* Compute D65coeffs from xyz_to_cam matrix (same as pipe_prepare.c) */
+    {
+        /* sRGB D65 RGB_to_XYZ */
+        static const float RGB_to_XYZ[3][3] = {
+            { 0.412453f, 0.357580f, 0.180423f },
+            { 0.212671f, 0.715160f, 0.072169f },
+            { 0.019334f, 0.119193f, 0.950227f }
+        };
+
+        /* RGB_to_CAM = XYZ_to_CAM * RGB_to_XYZ */
+        float RGB_to_CAM[3][3];
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++) {
+                RGB_to_CAM[i][j] = 0.0f;
+                for (int k = 0; k < 3; k++)
+                    RGB_to_CAM[i][j] += meta->xyz_to_cam[i*3+k] * RGB_to_XYZ[k][j];
+            }
+
+        /* mul = 1/row_sum, then normalize by green */
+        float mul[3];
+        for (int i = 0; i < 3; i++) {
+            float sum = RGB_to_CAM[i][0] + RGB_to_CAM[i][1] + RGB_to_CAM[i][2];
+            mul[i] = (sum != 0.0f) ? 1.0f / sum : 0.0f;
+        }
+
+        meta->d65_coeffs[0] = mul[0] / mul[1];  /* R */
+        meta->d65_coeffs[1] = 1.0f;             /* G */
+        meta->d65_coeffs[2] = mul[2] / mul[1];  /* B */
+        meta->d65_coeffs[3] = 1.0f;             /* G2 */
+    }
 
     FILE* f = fopen(filename, "rb");
     if (!f) return -1;

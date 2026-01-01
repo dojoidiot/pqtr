@@ -86,6 +86,8 @@ int main(int argc, char** argv)
     printf("WB RGGB: %.4f %.4f %.4f %.4f\n",
            meta.wb_rggb[0], meta.wb_rggb[1], meta.wb_rggb[2], meta.wb_rggb[3]);
     printf("Exposure bias: %.1f EV\n", meta.exposure_bias);
+    printf("D65coeffs: %.4f %.4f %.4f (from cameras.xml)\n",
+           meta.d65_coeffs[0], meta.d65_coeffs[1], meta.d65_coeffs[2]);
 
     /* ======================================================================
        2. Setup PipeState from extracted metadata
@@ -104,17 +106,14 @@ int main(int argc, char** argv)
     state.chroma.as_shot[3] = meta.wb_rggb[3];
     state.chroma.late_correction = 1;
 
-    /* D65coeffs from DT (computed from cameras.xml matrix, not raw file) */
-    state.chroma.D65coeffs[0] = 2.671514144;
-    state.chroma.D65coeffs[1] = 1.000000000;
-    state.chroma.D65coeffs[2] = 1.347009702;
-    state.chroma.D65coeffs[3] = INFINITY;
+    /* D65coeffs computed from cameras.xml matrix */
+    state.chroma.D65coeffs[0] = meta.d65_coeffs[0];
+    state.chroma.D65coeffs[1] = meta.d65_coeffs[1];
+    state.chroma.D65coeffs[2] = meta.d65_coeffs[2];
+    state.chroma.D65coeffs[3] = meta.d65_coeffs[3];
 
     /* Exposure bias from camera style */
     state.exposure_bias = meta.exposure_bias;
-
-    printf("D65coeffs: %.4f %.4f %.4f\n",
-           state.chroma.D65coeffs[0], state.chroma.D65coeffs[1], state.chroma.D65coeffs[2]);
 
     /* ======================================================================
        3. Decode RAW with sony.c (COPIED from DT/RawSpeed)
