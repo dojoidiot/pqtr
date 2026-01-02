@@ -14,8 +14,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <stddef.h>
 #include "../pipe_state.h"
-#include "../common.h"
+
+/* ============================================================================
+   Inlined from common.h - FC (Filter Color) for Bayer index
+   ============================================================================ */
+
+#ifndef FC_DEFINED
+#define FC_DEFINED
+static inline int FC(const size_t row, const size_t col, const uint32_t filters)
+{
+    return (filters >> (((row << 1 & 14) + (col & 1)) << 1)) & 3;
+}
+#endif
 
 /* ============================================================================
    From common/dttypes.h (guarded to avoid redefinition)

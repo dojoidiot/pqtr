@@ -19,3 +19,9 @@ __pycache__/
 # Ignore all subdirectories in lib/ by default
 lib/*/
 
+
+# Project temp directories
+last/
+ImageMagick/
+inc/
+pipe/lib/*/

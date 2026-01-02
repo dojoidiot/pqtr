@@ -28,9 +28,8 @@ extern "C" {
 #include "../../main/labs/pipe_prepare.c"
 }
 
-/* All modules */
+/* All modules (types inlined into each module) */
 extern "C" {
-#include "../../main/labs/mods/types.h"
 #include "../../main/labs/mods/rawprepare.c"
 #include "../../main/labs/mods/temperature.c"
 #include "../../main/labs/mods/highlights.c"

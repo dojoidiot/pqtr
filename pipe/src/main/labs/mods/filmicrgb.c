@@ -10,7 +10,21 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "types.h"
+/* ============================================================================
+   Inlined types (GPU shader compatible)
+   ============================================================================ */
+
+typedef float dt_colormatrix_t[4][4];
+typedef float dt_aligned_pixel_t[4];
+
+#ifndef SQF_DEFINED
+#define SQF_DEFINED
+static inline float sqf(const float x) { return x * x; }
+#endif
+
+#ifndef FLT_MAX
+#define FLT_MAX 3.402823466e+38f
+#endif
 
 /* ========== Local types for filmic (uses 3x4 matrices internally) ========== */
 typedef float filmic_matrix_t[3][4];

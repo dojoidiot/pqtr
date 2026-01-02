@@ -22,18 +22,20 @@
 #include <stdint.h>
 #include <float.h>
 
-#include "types.h"
-
 /* ============================================================================
-   Type definitions (use shared types.h)
+   Inlined types (GPU shader compatible)
    ============================================================================ */
 
-#ifndef for_four_channels
+typedef float dt_colormatrix_t[4][4];
+typedef float dt_aligned_pixel_t[4];
+
+#ifndef SQF_DEFINED
+#define SQF_DEFINED
+static inline float sqf(const float x) { return x * x; }
+#endif
+
 #define for_four_channels(c) for(int c = 0; c < 4; c++)
-#endif
-#ifndef for_three_channels
 #define for_three_channels(c) for(int c = 0; c < 3; c++)
-#endif
 #define DT_FMA(a, b, c) ((a) * (b) + (c))
 
 #define NORM_MIN 1.52587890625e-05f  /* from colorspaces_inline_conversions.h */
