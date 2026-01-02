@@ -20,25 +20,44 @@ typedef float dt_colormatrix_t[4][4];
 
 /* ============ Math helpers ============ */
 
+#ifndef SQF_DEFINED
+#define SQF_DEFINED
 static inline float sqf(float x) { return x * x; }
+#endif
 
+#ifndef DT_FAST_HYPOTF_DEFINED
+#define DT_FAST_HYPOTF_DEFINED
 static inline float dt_fast_hypotf(float x, float y)
 {
     return sqrtf(x * x + y * y);
 }
+#endif
 
+#ifndef SCALAR_PRODUCT_DEFINED
+#define SCALAR_PRODUCT_DEFINED
 static inline float scalar_product(const float a[4], const float b[4])
 {
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 }
+#endif
 
+#ifndef CLAMP
 #define CLAMP(x, low, high) (((x) > (high)) ? (high) : (((x) < (low)) ? (low) : (x)))
+#endif
+#ifndef CLAMPF
 #define CLAMPF(x, low, high) CLAMP(x, low, high)
+#endif
+#ifndef MAX
 #define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#endif
+#ifndef MIN
 #define MIN(a, b) (((a) < (b)) ? (a) : (b))
+#endif
 
 /* ============ Matrix operations ============ */
 
+#ifndef DT_COLORMATRIX_MUL_DEFINED
+#define DT_COLORMATRIX_MUL_DEFINED
 static inline void dt_colormatrix_mul(dt_colormatrix_t dst, const dt_colormatrix_t m1, const dt_colormatrix_t m2)
 {
     for(int k = 0; k < 3; k++)
@@ -54,7 +73,10 @@ static inline void dt_colormatrix_mul(dt_colormatrix_t dst, const dt_colormatrix
     }
     for(int i = 0; i < 4; i++) dst[3][i] = 0.0f;
 }
+#endif
 
+#ifndef DT_COLORMATRIX_TRANSPOSE_DEFINED
+#define DT_COLORMATRIX_TRANSPOSE_DEFINED
 static inline void dt_colormatrix_transpose(dt_colormatrix_t dst, const dt_colormatrix_t src)
 {
     for(int i = 0; i < 3; i++)
@@ -62,7 +84,10 @@ static inline void dt_colormatrix_transpose(dt_colormatrix_t dst, const dt_color
             dst[i][j] = src[j][i];
     for(int i = 0; i < 4; i++) dst[i][3] = dst[3][i] = 0.0f;
 }
+#endif
 
+#ifndef DT_APPLY_TRANSPOSED_DEFINED
+#define DT_APPLY_TRANSPOSED_DEFINED
 static inline void dt_apply_transposed_color_matrix(const dt_aligned_pixel_t in,
                                                      const dt_colormatrix_t matrix,
                                                      dt_aligned_pixel_t out)
@@ -71,6 +96,7 @@ static inline void dt_apply_transposed_color_matrix(const dt_aligned_pixel_t in,
         out[i] = matrix[0][i] * in[0] + matrix[1][i] * in[1] + matrix[2][i] * in[2];
     out[3] = 0.0f;
 }
+#endif
 
 static inline void dot_product(const dt_aligned_pixel_t in,
                                const dt_colormatrix_t matrix,
@@ -108,26 +134,26 @@ static const dt_colormatrix_t LMS_2006_D65_to_XYZ_D65
         { -0.12546960f,  0.20478038f,  1.74274183f, 0.f },
         { 0.f, 0.f, 0.f, 0.f } };
 
-/* Filmlight grading RGB matrices */
-static const dt_colormatrix_t filmlightRGB_D65_to_LMS_D65
+/* Filmlight grading RGB matrices (4x4 versions for colorbalancergb) */
+static const dt_colormatrix_t filmlightRGB_D65_to_LMS_D65_4x4
     = { { 0.95f, 0.38f, 0.00f, 0.f },
         { 0.05f, 0.62f, 0.03f, 0.f },
         { 0.00f, 0.00f, 0.97f, 0.f },
         { 0.f, 0.f, 0.f, 0.f } };
 
-static const dt_colormatrix_t filmlightRGB_D65_to_LMS_D65_trans
+static const dt_colormatrix_t filmlightRGB_D65_to_LMS_D65_trans_4x4
     = { { 0.95f, 0.05f, 0.00f, 0.f },
         { 0.38f, 0.62f, 0.00f, 0.f },
         { 0.00f, 0.03f, 0.97f, 0.f },
         { 0.f, 0.f, 0.f, 0.f } };
 
-static const dt_colormatrix_t LMS_D65_to_filmlightRGB_D65
+static const dt_colormatrix_t LMS_D65_to_filmlightRGB_D65_4x4
     = { {  1.0877193f, -0.66666667f,  0.02061856f, 0.f },
         { -0.0877193f,  1.66666667f, -0.05154639f, 0.f },
         {  0.0f,        0.0f,         1.03092784f, 0.f },
         { 0.f, 0.f, 0.f, 0.f } };
 
-static const dt_colormatrix_t LMS_D65_to_filmlightRGB_D65_trans
+static const dt_colormatrix_t LMS_D65_to_filmlightRGB_D65_trans_4x4
     = { {  1.0877193f, -0.0877193f,  0.0f, 0.f },
         { -0.66666667f, 1.66666667f, 0.0f, 0.f },
         {  0.02061856f, -0.05154639f, 1.03092784f, 0.f },
@@ -135,16 +161,21 @@ static const dt_colormatrix_t LMS_D65_to_filmlightRGB_D65_trans
 
 /* ============ Color space conversions ============ */
 
+#ifndef GRADING_RGB_LMS_DEFINED
+#define GRADING_RGB_LMS_DEFINED
 static inline void gradingRGB_to_LMS(const dt_aligned_pixel_t RGB, dt_aligned_pixel_t LMS)
 {
-    dt_apply_transposed_color_matrix(RGB, filmlightRGB_D65_to_LMS_D65_trans, LMS);
+    dt_apply_transposed_color_matrix(RGB, filmlightRGB_D65_to_LMS_D65_trans_4x4, LMS);
 }
 
 static inline void LMS_to_gradingRGB(const dt_aligned_pixel_t LMS, dt_aligned_pixel_t RGB)
 {
-    dt_apply_transposed_color_matrix(LMS, LMS_D65_to_filmlightRGB_D65_trans, RGB);
+    dt_apply_transposed_color_matrix(LMS, LMS_D65_to_filmlightRGB_D65_trans_4x4, RGB);
 }
+#endif
 
+#ifndef LMS_YRG_DEFINED
+#define LMS_YRG_DEFINED
 static inline void LMS_to_Yrg(const dt_aligned_pixel_t LMS, dt_aligned_pixel_t Yrg)
 {
     const float Y = 0.68990272f * LMS[0] + 0.34832189f * LMS[1];
@@ -199,6 +230,7 @@ static inline void Ych_to_Yrg(const dt_aligned_pixel_t Ych, dt_aligned_pixel_t Y
     Yrg[1] = r;
     Yrg[2] = g;
 }
+#endif /* LMS_YRG_DEFINED */
 
 static inline void make_Ych(const float Y, const float c, const float h, dt_aligned_pixel_t Ych)
 {
@@ -224,6 +256,8 @@ static inline void LMS_to_XYZ(const dt_aligned_pixel_t LMS, dt_aligned_pixel_t X
 
 /* ============ Gamut checking ============ */
 
+#ifndef GAMUT_CHECK_YRG_DEFINED
+#define GAMUT_CHECK_YRG_DEFINED
 static inline void gamut_check_Yrg(dt_aligned_pixel_t Ych)
 {
     /* Check if the color fits in Yrg and LMS cone space
@@ -258,6 +292,7 @@ static inline void gamut_check_Yrg(dt_aligned_pixel_t Ych)
     /* Overwrite chroma with the sanitized value */
     Ych[1] = max_c;
 }
+#endif /* GAMUT_CHECK_YRG_DEFINED */
 
 /* ============ XYZ/xyY conversions ============ */
 
@@ -269,6 +304,8 @@ static inline void dt_D65_XYZ_to_xyY(const dt_aligned_pixel_t XYZ, dt_aligned_pi
     xyY[2] = XYZ[1];
 }
 
+#ifndef DT_XYY_TO_XYZ_DEFINED
+#define DT_XYY_TO_XYZ_DEFINED
 static inline void dt_xyY_to_XYZ(const dt_aligned_pixel_t xyY, dt_aligned_pixel_t XYZ)
 {
     const float x = xyY[0];
@@ -278,6 +315,7 @@ static inline void dt_xyY_to_XYZ(const dt_aligned_pixel_t xyY, dt_aligned_pixel_
     XYZ[1] = Y;
     XYZ[2] = Y * (1.f - x - y) / y;
 }
+#endif
 
 /* ============ darktable UCS 2022 ============ */
 
@@ -738,4 +776,64 @@ void colorbalancergb_process(const float *in, float *out,
         out[k+2] = pix_out[2];
         out[k+3] = in[k+3];
     }
+}
+
+/* Reset - values from DT phase2.xmp dump */
+void colorbalancergb_reset(ColorBalanceRGBData *d)
+{
+    memset(d, 0, sizeof(*d));
+
+    /* DT runtime values from phase2.xmp dump */
+    d->global[0] = -0.000000119f;
+    d->global[1] = 0.0f;
+    d->global[2] = 0.0f;
+    d->global[3] = 0.0f;
+
+    d->shadows[0] = 0.999999881f;
+    d->shadows[1] = 1.0f;
+    d->shadows[2] = 1.0f;
+    d->shadows[3] = 1.0f;
+
+    d->highlights[0] = 0.999999881f;
+    d->highlights[1] = 1.0f;
+    d->highlights[2] = 1.0f;
+    d->highlights[3] = 1.0f;
+
+    d->midtones[0] = 1.000000119f;
+    d->midtones[1] = 1.0f;
+    d->midtones[2] = 1.0f;
+    d->midtones[3] = 1.0f;
+
+    for (int c = 0; c < 4; c++) {
+        d->chroma[c] = 0.0f;
+        d->saturation[c] = 0.0f;
+        d->brilliance[c] = 0.0f;
+    }
+
+    d->midtones_Y = 1.0f;
+    d->contrast = 1.0f;
+
+    d->chroma_global = 0.0f;
+    d->vibrance = 0.0f;           /* DT default */
+    d->saturation_global = 0.0f;  /* DT default */
+    d->brilliance_global = 0.0f;
+
+    d->hue_angle = 0.0f;
+
+    /* DT computed weights */
+    d->shadows_weight = 4.0f;
+    d->highlights_weight = 4.0f;
+    d->midtones_weight = 8.0f;
+    d->mask_grey_fulcrum = 0.5f;
+
+    d->white_fulcrum = 1.0f;
+    d->grey_fulcrum = 0.184499994f;
+
+    /* Identity gamut LUT */
+    for (int i = 0; i < LUT_ELEM; i++) {
+        d->gamut_LUT[i] = 1.0f;
+    }
+
+    d->max_chroma = 128.0f;
+    d->saturation_formula = 1;  /* from DT dump */
 }

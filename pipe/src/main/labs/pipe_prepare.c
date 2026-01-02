@@ -8,6 +8,7 @@
 */
 
 #include <math.h>
+#include <string.h>
 #include "pipe_state.h"
 
 /* ============================================================================
@@ -121,4 +122,41 @@ void pipe_prepare(PipeState *state)
         state->chroma.D65coeffs[2] = 1.0;
         state->chroma.D65coeffs[3] = 1.0;
     }
+}
+
+/* ============================================================================
+   pipe_state_init_sony - initialize PipeState with exact DT values
+
+   This is the COPY approach: dump all runtime values from DT and use them
+   directly. No computation, no tracing - just copy the exact state.
+
+   Dumped from: darktable-cli src/test/raws/sony.ARW
+   ============================================================================ */
+
+void pipe_state_init_sony(PipeState *state)
+{
+    memset(state, 0, sizeof(*state));
+
+    /* From PQTR_PIPESTATE dump */
+    state->width = 6048;
+    state->height = 4024;
+    state->filters = 2492765332;  /* 0x94949494 = RGGB */
+
+    /* temperature output */
+    state->temperature.enabled = 1;
+    state->temperature.coeffs[0] = 2.511718750f;
+    state->temperature.coeffs[1] = 1.000000000f;
+    state->temperature.coeffs[2] = 1.457031250f;
+    state->temperature.coeffs[3] = 0.000000000f;
+
+    /* chroma state */
+    state->chroma.late_correction = 1;
+    state->chroma.as_shot[0] = 2.511718750;
+    state->chroma.as_shot[1] = 1.000000000;
+    state->chroma.as_shot[2] = 1.457031250;
+    state->chroma.as_shot[3] = 0.000000000;
+    state->chroma.D65coeffs[0] = 2.671514144;
+    state->chroma.D65coeffs[1] = 1.000000000;
+    state->chroma.D65coeffs[2] = 1.347009702;
+    state->chroma.D65coeffs[3] = INFINITY;  /* DT has inf here */
 }

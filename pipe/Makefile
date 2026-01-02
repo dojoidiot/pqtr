@@ -96,10 +96,10 @@ test-phase2: $(BUILD)/phase2_test
 	@mkdir -p tmp/var
 	./$(BUILD)/phase2_test
 
-# Gold pipeline test (full end-to-end)
-$(BUILD)/gold: src/test/labs/gold.cpp src/main/labs/plug/sony/sony.cpp
+# Gold pipeline test (full end-to-end) - uses sony.c decoder, no LibRaw
+$(BUILD)/gold: src/test/labs/gold.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -I src/main/labs/plug/sony -I LibRaw -o $@ $^ -L LibRaw/lib/.libs -lraw -lm
+	$(CXX) $(CXXFLAGS) -o $@ $< -lm
 
 gold: $(BUILD)/gold
 	@echo "Built: tmp/build/gold"
@@ -107,7 +107,7 @@ gold: $(BUILD)/gold
 test-gold: $(BUILD)/gold
 	@echo "=== Gold Pipeline Test ==="
 	@mkdir -p tmp/var
-	LD_LIBRARY_PATH=LibRaw/lib/.libs ./$(BUILD)/gold
+	./$(BUILD)/gold
 
 # Module tests will be added as modules are transpiled via copy.md
 # Template:

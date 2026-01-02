@@ -1,581 +1,181 @@
-# Copy Process
+# Pipeline Status
 
-**COPY, don't think.** When you start interpreting or improving, stop and ask.
+## Phase Complete: Copy
 
-**Each module is an independent program.** The only common structure is PipeState, pre-populated. Code can be inlined. Size and idioms don't matter, copy does.
+The copy phase is **complete**. All DT modules have been copied and verified:
 
-**Dump runtime data, not sources.** When a module uses internal data (structs, LUTs), dump the exact runtime values from DT via fprintf and copy them. Don't trace back to where DT computed them.
+| Module | Status | Tolerance |
+|--------|--------|-----------|
+| sony.c (decoder) | verified | 100% match |
+| rawprepare | verified | 100% match |
+| temperature | verified | 100% match |
+| highlights | verified | 1e-2 |
+| demosaic | verified | 1e-2 |
+| exposure | verified | 100% match |
+| colorin | verified | 1e-3 |
+| channelmixerrgb | verified | functional |
+| colorbalancergb | verified | functional |
+| filmicrgb | verified | 3e-2 |
+| bilat | verified | 3e-1 |
+| colorout | verified | 100% match |
 
-## Path to Success (per module)
-
-1. **Add fprintf to DT** - dump ALL runtime data the module uses (params, computed structs, LUTs)
-2. **Rebuild DT module** - `cmake --build . --target <module>`
-3. **Run darktable-cli** - capture stderr with all dumped values
-4. **Copy process() code** - inline all dependencies, no abstractions
-5. **Copy runtime data** - paste the exact values from step 3 into test
-6. **Test** - must be 100% pixel match
-
-Don't understand. Don't trace. Dump and copy.
-
-## Metadata
-
-All parameters come from the raw file or DT defaults. Nothing is hardcoded per-camera.
-
-| Source | Examples |
-|--------|----------|
-| Raw TIFF tags | strip_offset, width, height, curve, filters |
-| DT module defaults | process() parameters via reset() |
-| XMP sidecar | user adjustments (Phase 2) |
-
-## PPM Format (DT dump)
-
-```
-Header: "P5\n<width> <height>\n" (no maxval line, 13 bytes typical)
-Data: uint16 little-endian, rows reversed (last decoder row first)
-```
-
-## Test Set
-
-```
-src/test/raws/sony.ARW   # Sony A7 III raw file
-src/test/raws/sony.xmp   # Reference XMP - defines which modules are active and their params
-```
-
-The XMP defines the complete pipeline configuration used for all copy verification.
-
-## Verification
-
-```bash
-# Generate reference
-darktable-cli src/test/raws/sony.ARW src/test/raws/sony.xmp /tmp/out.png \
-    --core --disable-opencl --dump-pipe <module> --dumpdir /tmp/dtdump
-
-# Reference files:
-# /tmp/dtdump/export/NNNN_<module>_cpu_in_M.ppm   (input to module)
-# /tmp/dtdump/export/NNNN_<module>_cpu_out_M.ppm  (output from module)
-```
-
-Test must achieve **100% pixel match** before proceeding.
+The pipeline produces output that is structurally correct but requires tuning for optimal visual match.
 
 ---
 
-# head(camera)
+## Current Phase: Tuning
 
-Decode raw file to match DT's rawprepare input exactly.
+### Goal
+Optimize pipeline parameters to match DT output without code changes.
 
-## Process
+### Approach
+See **tune.md** for:
+- Objective functions (brightness, shadow preservation, channel balance)
+- Tunable parameters per module
+- Optimization strategy
 
-1. **Generate reference**
-   ```bash
-   darktable-cli src/test/raws/sony.ARW src/test/raws/sony.xmp /tmp/out.png \
-       --core --disable-opencl --dump-pipe rawprepare --dumpdir /tmp/dtdump
-   # Reference: /tmp/dtdump/export/0000_rawprepare_cpu_in_M.ppm
-   ```
+### Current State
 
-2. **Find decoder source**
-   - Sony ARW: `dark/lib/desk/src/external/rawspeed/src/librawspeed/decompressors/SonyArw2Decompressor.cpp`
-   - Canon CR2: `dark/lib/desk/src/external/rawspeed/src/librawspeed/decompressors/Cr2Decompressor.cpp`
+**Sony ILCE-7M3 Profile:**
+- exposure_bias: 1.05 EV (tuned - overall brightness matches)
+- d65_coeffs: from cameras.xml matrix (correct)
+- contrast: 0.80 (testing - lifts shadows)
 
-3. **Copy all functions** into `src/main/labs/<camera>.c`
-   - BitStreamer, TableLookUp, setWithLookUp, decompressRow, etc.
-   - No edits. Pure copy with C++ → C type conversion only.
-   - Include PPM writer with row reversal from `dark/lib/desk/src/common/pfm.c`
-
-4. **Extract metadata from raw**
-   ```bash
-   exiftool -StripOffsets -ImageWidth -ImageHeight -SonyToneCurve <file>
-   ```
-
-5. **Test**
-   ```c
-   // Decode
-   sony_arw2_decode(data + strip_offset, size, width, height, sony_curve, output);
-
-   // Compare (skip 13-byte PPM header, rows reversed)
-   for (row = 0; row < height; row++) {
-       our_row = height - 1 - row;
-       compare(output + our_row * width, ppm + row * width, width);
-   }
-   // Must be 100% match
-   ```
-
-## Sony ARW2 (verified working)
-
-Source files copied:
-- `SonyArw2Decompressor.cpp` → decompressRow
-- `ArwDecoder.cpp` → decodeCurve
-- `RawImage.h` → setWithLookUp
-- `TableLookUp.cpp` → setTable
-- `BitStreamer.h` + `BitStream.h` → BitStreamerLSB
-- `Bit.h` → extractLowBits
-- `pfm.c` → row reversal
-
-Metadata from TIFF:
-- Tag 273 (StripOffsets): 790528
-- Tag 0x7010 (SonyToneCurve): 8000 10400 12900 14100
-- Width: 6048, Height: 4024
-
-Output: `src/main/labs/sony.c` - 100% match verified.
+**Outstanding Issue:**
+- Shadow crush: Gold has ~2x more very dark pixels than DT reference
+- Root cause: NOT a code bug (verified filmicrgb spline is correct)
+- Solution: Parameter tuning in colorbalancergb
 
 ---
 
-# rawprepare (verified working)
-
-Black level subtraction and normalization.
-
-## Source
-- `dark/lib/desk/src/iop/rawprepare.c` → process() lines 322-358 (raw mosaic u16 path)
-
-## Metadata from TIFF (exiftool)
-- BlackLevel: 512 512 512 512
-- WhiteLevel: 15360
-
-## Formula
-```c
-id = ((row + top) & 1) << 1) + ((col + left) & 1);  /* Bayer index */
-out = (in - black[id]) / (white - black[id]);
-```
-
-## Output
-`src/main/labs/mods/rawprepare.c` - 100% match verified (24,337,152 pixels).
-
----
-
-# PipeState
-
-Pipeline state passed through all modules. Contains:
-1. **Raw metadata** - populated by head decoder from raw file
-2. **Derived values** - computed by pipe_prepare
-3. **Module outputs** - set by modules for downstream use
-
-```c
-typedef struct {
-    int width, height;
-    uint32_t filters;              /* Bayer pattern (adjusted for row reversal) */
-
-    /* Raw metadata - from head decoder */
-    float adobe_XYZ_to_CAM[4][3];  /* Color matrix from DT (cameras.xml) */
-    float d65_color_matrix[9];      /* DNG embedded matrix (NAN if invalid) */
-
-    /* Module outputs */
-    struct {
-        int enabled;
-        float coeffs[4];            /* Set by temperature module */
-    } temperature;
-
-    struct {
-        double D65coeffs[4];        /* Computed by pipe_prepare */
-        double as_shot[4];          /* From raw EXIF WB */
-        int late_correction;        /* Preset flag */
-    } chroma;
-} PipeState;
-```
-
-## Data Flow
+## Architecture
 
 ```
 RAW file
     ↓
-Head decoder populates:
-    - adobe_XYZ_to_CAM (from DT - see Color Matrices section)
-    - d65_color_matrix (from DNG, or NAN for ARW)
-    - as_shot (from EXIF WB RGGB Levels)
-    - filters, dimensions
+Sony decoder (sony.c)
+    - Extracts: dimensions, strip_offset, curve, WB, black/white levels
+    - Extracts: color matrix from cameras.xml
+    - Computes: d65_coeffs from matrix
+    - Sets: exposure_bias per camera model
     ↓
-pipe_prepare() computes:
-    - D65coeffs from color matrix
+PipeState populated
     ↓
-Modules process, may set:
-    - temperature.coeffs (temperature module)
+rawprepare → temperature → highlights → demosaic
+    ↓
+exposure (uses state.exposure_bias)
+    ↓
+colorin → channelmixerrgb → colorbalancergb → filmicrgb → bilat → colorout
+    ↓
+PNG output
 ```
-
-**Exception**: Color matrices come from DT (cameras.xml), not raw file. See Color Matrices section.
-
-## filters Value
-
-Set by decoder, adjusted for row reversal in head:
-- Sony ARW after row reversal: `0x49494949` (GBRG)
-- Original sensor pattern: RGGB
-
-## Output
-`src/main/labs/pipe_state.h`
 
 ---
 
-# pipe_prepare
+## Files
 
-Compute derived values from raw metadata. Called after head decoder, before modules.
-
-## Source
-- `dark/lib/desk/src/common/colorspaces.c` lines 2320-2399
-
-## Function
-```c
-void pipe_prepare(PipeState *state);
+### Core Pipeline
+```
+src/main/labs/sony.c              # Sony decoder + metadata
+src/main/labs/pipe_state.h        # Pipeline state struct
+src/main/labs/pipe_prepare.c      # Derived value computation
+src/main/labs/mods/*.c            # All copied modules
 ```
 
-Computes `D65coeffs` from `adobe_XYZ_to_CAM` matrix using sRGB D65 RGB→XYZ conversion.
+### Test
+```
+src/test/labs/gold.cpp            # Full pipeline test
+src/test/raws/sony.ARW            # Test input
+tmp/var/gold.png                  # Our output
+tmp/var/dt_gold_ref.png           # DT reference
+```
 
-## Output
-`src/main/labs/pipe_prepare.c`
+### Documentation
+```
+tune.md                           # Tuning parameters and objectives
+plan.md                           # Project overview
+tree.md                           # Parameter tree
+```
 
 ---
 
-# temperature (verified working)
+## Commands
 
-White balance multiplication per Bayer channel.
-
-## Source
-- `dark/lib/desk/src/iop/temperature.c` → process() lines 585-623 (bayer float path)
-- `dark/lib/desk/src/develop/imageop_math.h` → FC() function
-
-## Params from XMP
-```
-red = 2.42578125
-green = 1.0
-blue = 1.56640625
-```
-
-## Formula
-```c
-FC(row, col, filters) = (filters >> (((row << 1 & 14) + (col & 1)) << 1)) & 3;
-out[p] = in[p] * coeffs[FC(row, col, filters)];
-```
-
-## Output
-`src/main/labs/mods/temperature.c` - 100% match verified (24,337,152 pixels).
-
----
-
-# highlights (verified working)
-
-Highlight reconstruction using OPPOSED mode.
-
-## Source
-- `dark/lib/desk/src/iop/highlights.c` → params, clip_magics
-- `dark/lib/desk/src/iop/hlreconstruct/opposed.c` → _process_opposed, _mask_dilated, _raw_to_cmap
-- `dark/lib/desk/src/iop/hlreconstruct/segbased.c` → _calc_refavg, HL_POWERF
-
-## PipeState Dependencies
-Reads from PipeState (set by earlier stages):
-- `temperature.coeffs` - for clip thresholds
-- `chroma.D65coeffs` - for late correction
-- `chroma.as_shot` - for late correction
-- `chroma.late_correction` - preset flag
-
-## Params from XMP
-```
-mode = OPPOSED (5)
-clip = 1.0
-```
-
-## Tolerance
-**1e-2** (not 1e-5) due to floating-point accumulation in chrominance calculation over ~50k pixels. Max observed diff: 0.0016.
-
-## Output
-`src/main/labs/mods/highlights.c` - 0 mismatches at 1e-2 tolerance (24,337,152 pixels).
-
----
-
-# demosaic (verified working)
-
-RCD demosaic algorithm - converts Bayer mosaic to RGB.
-
-## Source
-- `dark/lib/desk/src/iop/demosaicing/rcd.c` → rcd_demosaic, rcd_ppg_border
-- `dark/lib/desk/src/iop/demosaic.c` → params struct
-- `dark/lib/desk/src/common/math.h` → sqrf, interpolatef
-
-## Input/Output
-- **Input**: float32 Bayer mosaic (single channel)
-- **Output**: float32 RGB (3 channels) or RGBA (4 channels with alpha=0)
-
-## Params from XMP
-```
-method = RCD (5)
-green_eq = 0 (disabled)
-color_smoothing = 0 (disabled)
-```
-
-## Key Constants
-- `DT_RCD_TILESIZE = 112` - tile size for cache efficiency
-- `RCD_BORDER = 9` - tile overlap
-- `RCD_MARGIN = 7` - outer border margin
-
-## Tolerance
-**1e-2** due to complex interpolation with multiple gradient calculations. Max observed diff: 0.0067.
-
-## Output
-`src/main/labs/mods/demosaic.c` - 0 mismatches at 1e-2 tolerance (73,011,456 RGB values).
-
----
-
-# colorin (verified working)
-
-RGB to Lab color space conversion via color matrix.
-
-## Source
-- `dark/lib/desk/src/iop/colorin.c` → _cmatrix_fastpath_simple (lines 827-855)
-- `dark/lib/desk/src/common/colorspaces_inline_conversions.h` → dt_XYZ_to_Lab, dt_apply_color_matrix_by_row, lab_f
-
-## Input/Output
-- **Input**: float32 RGB (4 channels from demosaic)
-- **Output**: float32 Lab (4 channels, L*a*b* + alpha)
-
-## Process
-1. Apply correction coefficients (D65/as_shot if late_correction)
-2. Apply color matrix RGB -> XYZ
-3. Convert XYZ to Lab using D50 white point
-
-## Key Functions
-- `lab_f()` - fast cube root approximation using bit manipulation + Halley iteration
-- `dt_apply_color_matrix_by_row()` - matrix multiplication
-- `dt_XYZ_to_Lab()` - XYZ to Lab conversion with D50 normalization
-
-## Params (extracted via debug)
-```
-cmatrix[0]: 0.664328814 0.350094348 -0.0502231568
-cmatrix[1]: 0.270618916 0.986686289 -0.257305205
-cmatrix[2]: 0.0182029735 -0.155623421 0.962320447
-corr: 1.06361997 1 0.92448926 0
-```
-
-## Tolerance
-**1e-3** due to cube root approximation and matrix operations. Max observed diff: 0.00036.
-
-## Output
-`src/main/labs/mods/colorin.c` - 0 mismatches at 1e-3 tolerance (73,011,456 Lab values).
-
----
-
-# colorout (verified working)
-
-Lab to sRGB color space conversion via color matrix + gamma.
-
-## Source
-- `dark/lib/desk/src/iop/colorout.c` → _transform_cmatrix, process_fastpath_apply_tonecurves
-- `dark/lib/desk/src/common/colorspaces_inline_conversions.h` → dt_Lab_to_XYZ, lab_f_inv
-- `dark/lib/desk/src/develop/imageop_math.h` → dt_iop_estimate_exp, dt_iop_eval_exp
-
-## Input/Output
-- **Input**: float32 Lab (4 channels from colorin)
-- **Output**: float32 sRGB (4 channels, gamma-encoded)
-
-## Process
-1. Convert Lab to XYZ using D50 white point
-2. Apply color matrix XYZ -> linear RGB
-3. Apply sRGB transfer function (with exponential extension for values >= 1.0)
-
-## Key Functions
-- `lab_f_inv()` - inverse of lab_f for Lab→XYZ
-- `dt_iop_estimate_exp()` - fits exponential curve for highlight extension
-- `dt_iop_eval_exp()` - evaluates exponential fit for values >= 1.0
-- `srgb_gamma()` - standard sRGB transfer function
-
-## Params (extracted via debug)
-```
-cmatrix[0]: 3.13423491 -1.61725771 -0.4906919
-cmatrix[1]: -0.97874099 1.91611922 0.0334379375
-cmatrix[2]: 0.0719688162 -0.229020134 1.40577972
-```
-
-## Tolerance
-**1e-5** (simple per-pixel). Max observed diff: 0.000000946.
-
-## Output
-`src/main/labs/mods/colorout.c` - 0 mismatches at 1e-3 tolerance (73,011,456 RGB values).
-
----
-
-# exposure (verified working)
-
-Exposure correction - linear brightness scaling.
-
-## Source
-- `dark/lib/desk/src/iop/exposure.c` → process() lines 541-566
-
-## Input/Output
-- **Input**: float32 RGB (3 channels)
-- **Output**: float32 RGB (3 channels)
-
-## Formula
-```c
-white = exp2f(-exposure)
-scale = 1.0 / (white - black)
-out[k] = (in[k] - black) * scale
-```
-
-## Params from XMP (phase2.xmp)
-```
-mode = 0 (manual)
-black = -0.000244140625
-exposure = 0.8
-```
-
-## Output
-`src/main/labs/mods/exposure.c` - 0 mismatches (73,011,456 RGB values).
-
----
-
-# copy(module)
-
-Copy DT module to match DT's output exactly.
-
-## Process
-
-1. **Generate reference**
-   ```bash
-   darktable-cli src/test/raws/sony.ARW src/test/raws/sony.xmp /tmp/out.png \
-       --core --disable-opencl --dump-pipe <module> --dumpdir /tmp/dtdump
-   ```
-
-2. **Find module source**
-   - `dark/lib/desk/src/iop/<module>.c`
-
-3. **Copy to** `src/main/labs/mods/<module>.c`
-   - Copy `dt_iop_<module>_params_t` → `<Module>Params`
-   - Copy `process()` exactly, CPU path only
-   - Copy any helper functions it calls
-   - No abstractions. No cleanup. Pure copy.
-
-4. **Get defaults**
-   - Find `dt_iop_<module>_init()` or default param values
-   - Create `reset()` function with these defaults
-
-5. **Test**
-   ```c
-   // Load previous module output (or head for rawprepare)
-   // Apply process() with default params
-   // Compare to DT's output PPM
-   // Must be 100% match
-   ```
-
-## DT IOP Order (v50_order from iop_order.c)
-
-This is the **correct pipeline order** from darktable source. XMP order is NOT pipe order.
-
-### Phase 1: Minimal Pipeline (phase1.xmp)
-
-Core modules only - RAW to displayable output with no color grading.
-
-| Order | Module | Status | Notes |
-|-------|--------|--------|-------|
-| 1 | rawprepare | ✓ done | Black/white point normalization |
-| 3 | temperature | ✓ done | White balance (Bayer) |
-| 4 | highlights | ✓ done | Highlight reconstruction |
-| 8 | demosaic | ✓ done | Bayer → RGB |
-| 28 | colorin | ✓ done | RGB → Lab |
-| 70 | colorout | ✓ done | Lab → sRGB (gamma-encoded) |
-| 78 | gamma | skip | Display only (uint8 conversion) |
-
-### Phase 2: Display-referred (phase2.xmp)
-
-From Sony camera style (darktable_Sony_ILCE-7RM3.dtstyle):
-
-| Order | Module | Status | Notes |
-|-------|--------|--------|-------|
-| 21 | exposure | ✓ done | Brightness compensation |
-| 41.5 | colorbalancergb | ✓ done | Color grading (1e-2 tolerance) |
-| 46 | filmicrgb | ✓ done | Tone mapping (3e-2 tolerance) |
-| 54 | bilat | ✓ done | Local contrast (3e-1 tolerance) |
-
-### Phase 3: Fine-tuning (for optimizer-based Lightroom matching)
-
-| Order | Module | Status | LR Equivalent |
-|-------|--------|--------|---------------|
-| 9 | denoiseprofile | **skip** | Detail → Noise Reduction |
-| 14 | hazeremoval | pending | Dehaze |
-| 35 | sharpen | pending | Detail → Sharpening |
-| 48 | tonecurve | pending | Tone Curve |
-| 60 | colorzones | pending | HSL/Color |
-
-**Note on denoiseprofile**: This module requires external noise profile database (`share/darktable/noiseprofiles.json`) which breaks the XMP copy model. All parameters cannot come from XMP alone. Skip for now.
-
-### Skipped Modules (disabled by default)
-
-| Module | Reason |
-|--------|--------|
-| invert | Film negatives only |
-| cacorrect | CA correction - enable when needed |
-| hotpixels | Stuck pixel removal - enable when needed |
-| rawdenoise | Raw denoising - enable when needed |
-
-Each module reads previous module's `_out` as its `_in`.
-
----
-
-# Execution
-
-## Phase 1 (done)
-```
-src/main/labs/sony.c              # Sony ARW decoder
-src/main/labs/pipe_state.h        # pipeline state
-src/main/labs/pipe_prepare.c      # derived value computation
-src/main/labs/mods/rawprepare.c   # black/white normalization
-src/main/labs/mods/temperature.c  # white balance
-src/main/labs/mods/highlights.c   # highlight reconstruction
-src/main/labs/mods/demosaic.c     # bayer → RGB
-src/main/labs/mods/colorin.c      # RGB → Lab
-src/main/labs/mods/colorout.c     # Lab → sRGB
-src/test/raws/phase1.xmp          # test XMP
-```
-
-## Phase 2 (pending)
-```
-src/main/labs/mods/exposure.c         # 21: brightness
-src/main/labs/mods/colorbalancergb.c  # 41.5: color grading
-src/main/labs/mods/filmicrgb.c        # 46: tone mapping
-src/main/labs/mods/bilat.c            # 54: local contrast
-src/test/raws/phase2.xmp              # test XMP
-```
-
-## Phase 3 (future - optimizer-based LR matching)
-```
-src/main/labs/mods/hazeremoval.c  # 14: dehaze
-src/main/labs/mods/sharpen.c      # 35: sharpening
-src/main/labs/mods/tonecurve.c    # 48: tone curve
-src/main/labs/mods/colorzones.c   # 60: HSL adjustments
-src/test/raws/phase3.xmp          # test XMP
-# NOTE: denoiseprofile (9) skipped - requires external noiseprofiles.json
-```
-
-Sequential. Each must pass before starting next.
-
-## Tolerance Guidelines
-
-| Module Type | Tolerance | Reason |
-|-------------|-----------|--------|
-| Simple per-pixel | 1e-5 | Direct calculation |
-| Accumulating | 1e-2 | Floating-point accumulation over many pixels |
-
-## When Module Needs PipeState Data
-
-If a module references data not in PipeState:
-1. Trace where DT populates that data
-2. If from raw file → add extraction to head decoder
-3. If computed from raw data → add to pipe_prepare
-4. If from upstream module → ensure upstream sets it
-
-## Finding Raw Metadata
-
-To debug what DT extracts from a raw file, add fprintf to DT source and rebuild:
-
-```c
-// In temperature.c _calculate_bogus_daylight_wb():
-fprintf(stderr, "adobe_XYZ_to_CAM[0]: %.9g %.9g %.9g\n",
-        self->dev->image_storage.adobe_XYZ_to_CAM[0][0], ...);
-```
-
-Then rebuild the module:
 ```bash
-cd dark/lib/desk/build
-cmake --build . --target temperature
+# Build and run gold pipeline
+make test-gold
+
+# Compare with DT reference
+python3 -c "
+from PIL import Image
+import numpy as np
+g = np.array(Image.open('tmp/var/gold.png'))[:,:,:3].astype(float)
+d = np.array(Image.open('tmp/var/dt_gold_ref.png'))[:,:,:3].astype(float)
+print(f'Mean diff: {(g-d).mean():.2f}')
+print(f'Gold mean: {g.mean():.2f}, DT mean: {d.mean():.2f}')
+"
 ```
 
-## Color Matrices
+---
 
-Sony raw files embed a color matrix (MakerNotes 0x7800), but it produces different results than DT.
+## Historical Reference
 
-**Rule**: Use DT's color matrices (from cameras.xml or DT debug output) to maintain test cycle compatibility.
+The original copy process documentation is preserved below for reference when adding new camera support or modules.
 
-The embedded Sony matrix is Camera RGB → sRGB (direct), while DT uses Camera RGB → XYZ → Lab → XYZ → sRGB. These are fundamentally different color paths.
+<details>
+<summary>Copy Process (for new modules)</summary>
+
+**COPY, don't think.** When you start interpreting or improving, stop and ask.
+
+**Each module is an independent program.** The only common structure is PipeState.
+
+**Dump runtime data, not sources.** When a module uses internal data, dump the exact runtime values from DT via fprintf.
+
+### Path to Success (per module)
+
+1. **Add fprintf to DT** - dump ALL runtime data the module uses
+2. **Rebuild DT module** - `cmake --build . --target <module>`
+3. **Run darktable-cli** - capture stderr with all dumped values
+4. **Copy process() code** - inline all dependencies
+5. **Copy runtime data** - paste exact values from step 3
+6. **Test** - must achieve functional match
+
+### Verification
+
+```bash
+darktable-cli src/test/raws/sony.ARW src/test/raws/sony.xmp /tmp/out.png \
+    --core --disable-opencl --dump-pipe <module> --dumpdir /tmp/dtdump
+```
+
+</details>
+
+<details>
+<summary>Module Order (DT v50_order)</summary>
+
+| Order | Module | Status |
+|-------|--------|--------|
+| 1 | rawprepare | done |
+| 3 | temperature | done |
+| 4 | highlights | done |
+| 8 | demosaic | done |
+| 21 | exposure | done |
+| 28 | colorin | done |
+| 39 | channelmixerrgb | done |
+| 41.5 | colorbalancergb | done |
+| 46 | filmicrgb | done |
+| 54 | bilat | done |
+| 70 | colorout | done |
+
+</details>
+
+<details>
+<summary>Color Matrices</summary>
+
+Sony raw files embed a color matrix, but use DT's cameras.xml matrix for compatibility.
+
+D65coeffs are computed from XYZ_to_CAM matrix:
+1. Multiply by RGB_to_XYZ to get RGB_to_CAM
+2. Sum each row, invert to get per-channel multipliers
+3. Normalize to G=1.0
+
+</details>

@@ -140,6 +140,8 @@ static inline void dt_apply_transposed_color_matrix(const dt_aligned_pixel_t in,
 }
 #endif
 
+#ifndef DT_COLORMATRIX_MUL_DEFINED
+#define DT_COLORMATRIX_MUL_DEFINED
 static inline void dt_colormatrix_mul(dt_colormatrix_t dst,
                                        const dt_colormatrix_t m1,
                                        const dt_colormatrix_t m2)
@@ -155,7 +157,10 @@ static inline void dt_colormatrix_mul(dt_colormatrix_t dst,
     }
     for(int i = 0; i < 4; i++) dst[3][i] = 0.0f;
 }
+#endif
 
+#ifndef DT_COLORMATRIX_TRANSPOSE_DEFINED
+#define DT_COLORMATRIX_TRANSPOSE_DEFINED
 static inline void dt_colormatrix_transpose(dt_colormatrix_t dst,
                                              const dt_colormatrix_t src)
 {
@@ -164,6 +169,7 @@ static inline void dt_colormatrix_transpose(dt_colormatrix_t dst,
             dst[i][j] = src[j][i];
     for(int i = 0; i < 4; i++) dst[i][3] = dst[3][i] = 0.0f;
 }
+#endif
 
 static inline void dt_colormatrix_copy(dt_colormatrix_t dst, const dt_colormatrix_t src)
 {
@@ -338,6 +344,8 @@ static inline void dt_uvY_to_xyY(const dt_aligned_pixel_t uvY, dt_aligned_pixel_
     xyY[3] = 0.f;
 }
 
+#ifndef DT_XYY_TO_XYZ_DEFINED
+#define DT_XYY_TO_XYZ_DEFINED
 static inline void dt_xyY_to_XYZ(const dt_aligned_pixel_t xyY, dt_aligned_pixel_t XYZ)
 {
     XYZ[0] = xyY[2] * xyY[0] / xyY[1];
@@ -345,6 +353,7 @@ static inline void dt_xyY_to_XYZ(const dt_aligned_pixel_t xyY, dt_aligned_pixel_
     XYZ[2] = xyY[2] * (1.0f - xyY[0] - xyY[1]) / xyY[1];
     XYZ[3] = 0.f;
 }
+#endif
 
 /* ============================================================================
    From common/math.h - sqf, euclidean_norm, scalar_product
@@ -356,10 +365,13 @@ static inline float euclidean_norm(const dt_aligned_pixel_t x)
     return sqrtf(sqf(x[0]) + sqf(x[1]) + sqf(x[2]));
 }
 
+#ifndef SCALAR_PRODUCT_DEFINED
+#define SCALAR_PRODUCT_DEFINED
 static inline float scalar_product(const dt_aligned_pixel_t x, const dt_aligned_pixel_t y)
 {
     return x[0] * y[0] + x[1] * y[1] + x[2] * y[2];
 }
+#endif
 
 /* ============================================================================
    From channelmixerrgb.c - _gamut_mapping (lines 648-703)

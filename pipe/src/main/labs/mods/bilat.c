@@ -17,13 +17,13 @@
 #define CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
 #define CLAMPS(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
 
-static inline float *dt_alloc_align_float(size_t n) { return (float*)malloc(n * sizeof(float)); }
-static inline void dt_free_align(void *p) { free(p); }
-static inline float dt_fast_expf(float x) { return expf(x); }
+/* Note: dt_alloc_align_float, dt_free_align, dt_aligned_pixel_t, for_four_channels
+ * are already defined in demosaic.c which is included first in gold.cpp */
 
-typedef float dt_aligned_pixel_t[4];
-#define for_four_channels(c) for(int c = 0; c < 4; c++)
-#define copy_pixel(dst, src) do { for(int _c=0;_c<4;_c++) (dst)[_c]=(src)[_c]; } while(0)
+#ifndef DT_FAST_EXPF_DEFINED
+#define DT_FAST_EXPF_DEFINED
+static inline float dt_fast_expf(float x) { return expf(x); }
+#endif
 
 /* Count leading zeros - portable version */
 static inline int my_clz(unsigned int x) {

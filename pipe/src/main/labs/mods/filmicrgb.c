@@ -40,9 +40,9 @@ static const float D65_g = 0.54371398f;
    ============================================================================ */
 
 static const dt_colormatrix_t FILMIC_INPUT_MATRIX_TRANS = {
-    { 0.406808585f, 0.617819786f, 0.045817729f, 0.f },
-    { 0.067756809f, 0.748962402f, 0.100109629f, 0.f },
-    { 0.022140555f, -0.015321350f, 0.587274075f, 0.f },
+    { 0.406808585f, 0.067756809f, 0.022140555f, 0.f },
+    { 0.617819786f, 0.748962402f, -0.015321350f, 0.f },
+    { 0.045817729f, 0.100109629f, 0.587274075f, 0.f },
     { 0.f, 0.f, 0.f, 0.f }
 };
 
@@ -62,9 +62,9 @@ static const dt_colormatrix_t FILMIC_OUTPUT_MATRIX_TRANS = {
 
 /* Export profile matrices (sRGB target) */
 static const dt_colormatrix_t FILMIC_EXPORT_INPUT_MATRIX_TRANS = {
-    { 0.298672199f, 0.706104636f, 0.065669231f, 0.f },
-    { 0.095901854f, 0.719828308f, 0.101098664f, 0.f },
-    { 0.022459989f, 0.044898711f, 0.526734650f, 0.f },
+    { 0.298672199f, 0.095901854f, 0.022459989f, 0.f },
+    { 0.706104636f, 0.719828308f, 0.044898711f, 0.f },
+    { 0.065669231f, 0.101098664f, 0.526734650f, 0.f },
     { 0.f, 0.f, 0.f, 0.f }
 };
 
@@ -124,10 +124,13 @@ typedef struct {
 /* sqf and FLT_MAX are in types.h */
 static inline float clamp_simd(float x) { return CLAMP(x, 0.0f, 1.0f); }
 
+#ifndef DT_FAST_HYPOTF_DEFINED
+#define DT_FAST_HYPOTF_DEFINED
 static inline float dt_fast_hypotf(float a, float b)
 {
     return sqrtf(a * a + b * b);
 }
+#endif
 
 static inline float max3f(const dt_aligned_pixel_t p)
 {
@@ -149,6 +152,8 @@ static inline void dt_apply_transposed_color_matrix(const dt_aligned_pixel_t in,
 #endif
 
 /* ========== Filmlight RGB <-> LMS ========== */
+#ifndef GRADING_RGB_LMS_DEFINED
+#define GRADING_RGB_LMS_DEFINED
 static inline void gradingRGB_to_LMS(const dt_aligned_pixel_t RGB, dt_aligned_pixel_t LMS)
 {
     dt_apply_transposed_color_matrix(RGB, filmlightRGB_D65_to_LMS_D65_trans, LMS);
@@ -158,8 +163,11 @@ static inline void LMS_to_gradingRGB(const dt_aligned_pixel_t LMS, dt_aligned_pi
 {
     dt_apply_transposed_color_matrix(LMS, LMS_D65_to_filmlightRGB_D65_trans, RGB);
 }
+#endif
 
 /* ========== LMS <-> Yrg ========== */
+#ifndef LMS_YRG_DEFINED
+#define LMS_YRG_DEFINED
 static inline void LMS_to_Yrg(const dt_aligned_pixel_t LMS, dt_aligned_pixel_t Yrg)
 {
     const float Y = 0.68990272f * LMS[0] + 0.34832189f * LMS[1];
@@ -190,8 +198,11 @@ static inline void Yrg_to_LMS(const dt_aligned_pixel_t Yrg, dt_aligned_pixel_t L
     const float a = (denom == 0.f) ? 0.f : Y / denom;
     for (int c = 0; c < 4; c++) LMS[c] = lms[c] * a;
 }
+#endif
 
 /* ========== Yrg <-> Ych ========== */
+#ifndef YRG_YCH_DEFINED
+#define YRG_YCH_DEFINED
 static inline void Yrg_to_Ych(const dt_aligned_pixel_t Yrg, dt_aligned_pixel_t Ych)
 {
     const float Y = Yrg[0];
@@ -218,6 +229,7 @@ static inline void Ych_to_Yrg(const dt_aligned_pixel_t Ych, dt_aligned_pixel_t Y
     Yrg[1] = r;
     Yrg[2] = g;
 }
+#endif
 
 /* ========== RGB <-> Ych ========== */
 static inline void RGB_to_Ych(const dt_aligned_pixel_t in,
@@ -243,6 +255,8 @@ static inline void Ych_to_RGB(const dt_aligned_pixel_t in,
 }
 
 /* ========== Gamut checking ========== */
+#ifndef GAMUT_CHECK_YRG_DEFINED
+#define GAMUT_CHECK_YRG_DEFINED
 static inline void gamut_check_Yrg(dt_aligned_pixel_t Ych)
 {
     dt_aligned_pixel_t Yrg = { 0.f };
@@ -258,6 +272,7 @@ static inline void gamut_check_Yrg(dt_aligned_pixel_t Ych)
 
     Ych[1] = max_c;
 }
+#endif
 
 static inline float _clip_chroma_white_raw(const float coeffs[3], const float target_white, const float Y,
                                            const float cos_h, const float sin_h)
@@ -554,10 +569,6 @@ void filmicrgb_process(const float *in, float *out, int width, int height,
         gamut_mapping(Ych_final, Ych_original, pix_out, input_matrix_trans, output_matrix, output_matrix_trans,
                       export_input_matrix_trans, export_output_matrix, export_output_matrix_trans,
                       display_black, display_white, 0.0f, use_output_profile);
-
-        if (k == 0 || k == 2832) {
-            fprintf(stderr, "DBG k=%zu pix_out(final)=%.9f %.9f %.9f\n", k, pix_out[0], pix_out[1], pix_out[2]);
-        }
 
         for(int c = 0; c < 4; c++) out[k + c] = pix_out[c];
     }

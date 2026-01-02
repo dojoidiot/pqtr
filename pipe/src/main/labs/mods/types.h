@@ -21,8 +21,8 @@ typedef float dt_aligned_pixel_t[4];
    Common math functions
    ========================================================================== */
 
-#ifndef LABS_SQF_DEFINED
-#define LABS_SQF_DEFINED
+#ifndef SQF_DEFINED
+#define SQF_DEFINED
 static inline float sqf(const float x) { return x * x; }
 #endif
 

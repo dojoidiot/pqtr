@@ -220,7 +220,7 @@ void highlights_process_opposed(
         {
             for (int mcol = 1; mcol < (int)mwidth - 1; mcol++)
             {
-                char mbuff[3] = { 0, 0, 0 };
+                char mbuff[4] = { 0, 0, 0, 0 };  /* R, G1, B, G2 */
                 const size_t grp = 3 * (mrow * width + mcol);
                 for (int y = -1; y < 2; y++)
                 {
@@ -232,6 +232,8 @@ void highlights_process_opposed(
                         mbuff[color] += clipped ? 1 : 0;
                     }
                 }
+                /* Combine G1 (color 1) and G2 (color 3) into green channel */
+                mbuff[1] = mbuff[1] | mbuff[3];
                 for_three_channels(c)
                 {
                     mask[c * msize + mrow * mwidth + mcol] = mbuff[c] ? 1 : 0;
