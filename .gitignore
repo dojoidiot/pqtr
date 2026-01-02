@@ -23,5 +23,4 @@ lib/*/
 # Project temp directories
 last/
 ImageMagick/
-inc/
 pipe/lib/*/
