@@ -13,7 +13,10 @@ CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 
 BUILD := tmp/build
 
-.PHONY: all gold test-gold test-head-sony test-head-canon test-phase1 test-phase2 clean tidy
+.PHONY: all gold test-gold test-phase1 test-phase2 dt-dumps test-all clean tidy
+
+DT_CLI := ./dark/lib/desk/build/bin/darktable-cli
+DT_OPTS := --core --disable-opencl
 
 all: $(BUILD)/gold
 
@@ -48,6 +51,19 @@ test-phase2: $(BUILD)/phase2_test
 	@echo "=== Phase 2 Final Output ==="
 	@mkdir -p tmp/var
 	./$(BUILD)/phase2_test
+
+# Generate DT dumps for phase tests
+dt-dumps:
+	@echo "=== Generating DT dumps ==="
+	@mkdir -p /tmp/dtdump
+	$(DT_CLI) src/test/raws/sony.ARW src/test/raws/phase1.xmp /tmp/out.png $(DT_OPTS) --dump-pipe colorout --dumpdir /tmp/dtdump
+	$(DT_CLI) src/test/raws/sony.ARW src/test/raws/phase2.xmp /tmp/out.png $(DT_OPTS) --dump-pipe bilat --dumpdir /tmp/dtdump
+
+# Run all tests
+test-all: dt-dumps test-gold test-phase1 test-phase2
+	@echo ""
+	@echo "=== All tests complete ==="
+	@ls -la tmp/var/*.png
 
 clean:
 	rm -rf tmp/build tmp/var/*.png tmp/var/*.bin
