@@ -733,3 +733,14 @@ void channelmixerrgb_reset(ChannelMixerRGBData *d)
     d->apply_grey = 0;
     d->version = CHANNELMIXERRGB_V_3;
 }
+
+/* ============================================================================
+   Helper: return ChannelMixerRGBData with defaults (D65, identity mix)
+   ============================================================================ */
+
+static inline ChannelMixerRGBData channelmixerrgb_defaults(void)
+{
+    ChannelMixerRGBData d;
+    channelmixerrgb_reset(&d);
+    return d;
+}

@@ -252,3 +252,16 @@ void colorout_reset(ColoroutParams* p)
     p->filename[0] = '\0';
     p->intent = 0;         /* DT_INTENT_PERCEPTUAL */
 }
+
+/* ============================================================================
+   Helper: return ColoroutParams with defaults (sRGB output)
+   ============================================================================ */
+
+static inline ColoroutParams colorout_defaults(void)
+{
+    ColoroutParams p;
+    p.type = 1;            /* DT_COLORSPACE_SRGB */
+    p.filename[0] = '\0';
+    p.intent = 0;          /* DT_INTENT_PERCEPTUAL */
+    return p;
+}

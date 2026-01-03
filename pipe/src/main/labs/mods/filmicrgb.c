@@ -650,3 +650,14 @@ void filmicrgb_reset(FilmicRGBData *data)
     data->spline.M5[2] = 0.000000000f;
     data->spline.M5[3] = 0.000000000f;
 }
+
+/* ============================================================================
+   Helper: return FilmicRGBData with defaults (V5 tone mapping)
+   ============================================================================ */
+
+static inline FilmicRGBData filmicrgb_defaults(void)
+{
+    FilmicRGBData d;
+    filmicrgb_reset(&d);
+    return d;
+}

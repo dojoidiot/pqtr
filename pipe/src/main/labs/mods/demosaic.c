@@ -628,6 +628,28 @@ void demosaic_reset(DemosaicParams* p)
     p->cs_enabled = 0;         /* FALSE */
 }
 
+/* ============================================================================
+   Helper: return DemosaicParams with defaults (RCD method)
+   ============================================================================ */
+
+static inline DemosaicParams demosaic_defaults(void)
+{
+    DemosaicParams p;
+    p.green_eq = 0;
+    p.median_thrs = 0.0f;
+    p.color_smoothing = 0;
+    p.demosaicing_method = 5;  /* RCD */
+    p.lmmse_refine = 1;
+    p.dual_thrs = 0.2f;
+    p.cs_radius = 0.0f;
+    p.cs_thrs = 0.40f;
+    p.cs_boost = 0.0f;
+    p.cs_iter = 8;
+    p.cs_center = 0.0f;
+    p.cs_enabled = 0;
+    return p;
+}
+
 #undef DT_RCD_TILESIZE
 #undef RCD_BORDER
 #undef RCD_MARGIN

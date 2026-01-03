@@ -32,3 +32,19 @@ void exposure_process(const float *in, float *out,
         out[k] = (in[k] - black) * scale;
     }
 }
+
+/* ============================================================================
+   Helper: return ExposureParams with defaults (no correction)
+   ============================================================================ */
+
+static inline ExposureParams exposure_defaults(void)
+{
+    ExposureParams p;
+    p.mode = 0;                    /* EXPOSURE_MODE_MANUAL */
+    p.black = 0.0f;
+    p.exposure = 0.0f;             /* 0 EV = no change */
+    p.deflicker_percentile = 50.0f;
+    p.deflicker_target_level = -4.0f;
+    p.compensate_exposure_bias = 0;
+    return p;
+}

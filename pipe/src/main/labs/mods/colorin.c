@@ -209,3 +209,20 @@ void colorin_reset(ColorinParams* p)
     p->type_work = 10;     /* DT_COLORSPACE_LIN_REC2020 */
     p->filename_work[0] = '\0';
 }
+
+/* ============================================================================
+   Helper: return ColorinParams with defaults (enhanced matrix, Rec2020 work)
+   ============================================================================ */
+
+static inline ColorinParams colorin_defaults(void)
+{
+    ColorinParams p;
+    p.type = 6;            /* DT_COLORSPACE_ENHANCED_MATRIX */
+    p.filename[0] = '\0';
+    p.intent = 0;          /* DT_INTENT_PERCEPTUAL */
+    p.normalize = 0;       /* DT_NORMALIZE_OFF */
+    p.blue_mapping = 0;
+    p.type_work = 10;      /* DT_COLORSPACE_LIN_REC2020 */
+    p.filename_work[0] = '\0';
+    return p;
+}

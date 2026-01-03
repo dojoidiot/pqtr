@@ -164,3 +164,7 @@ void rawprepare_reset(RawprepareParams* p,
     p->raw_white_point = white_point;
     p->flat_field = 0;
 }
+
+/* Note: No rawprepare_defaults() - all fields are image metadata.
+   RawprepareData must be computed from PipeState via rawprepare_commit_params().
+   See mods/ARCHITECTURE.md */

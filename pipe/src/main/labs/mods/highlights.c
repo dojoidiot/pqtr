@@ -364,3 +364,25 @@ void highlights_reset(HighlightsParams *p,
     p->recovery = 0;
     p->solid_color = 0.0f;
 }
+
+/* ============================================================================
+   Helper: return HighlightsData with defaults (OPPOSED mode)
+   ============================================================================ */
+
+static inline HighlightsData highlights_defaults(void)
+{
+    HighlightsData d;
+    d.mode = DT_IOP_HIGHLIGHTS_OPPOSED;
+    d.blendL = 1.0f;
+    d.blendC = 0.0f;
+    d.strength = 1.0f;
+    d.clip = 1.0f;
+    d.noise_level = 0.0f;
+    d.iterations = 30;
+    d.scales = 6;
+    d.candidating = 0.4f;
+    d.combine = 2.0f;
+    d.recovery = 0;
+    d.solid_color = 0.0f;
+    return d;
+}

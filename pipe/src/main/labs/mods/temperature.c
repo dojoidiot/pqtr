@@ -126,3 +126,7 @@ void temperature_reset(TemperatureParams* p,
     p->various = various;
     p->preset = preset;
 }
+
+/* Note: No temperature_defaults() - coefficients come from raw metadata.
+   TemperatureData must be computed from as-shot WB in image header.
+   See mods/ARCHITECTURE.md */

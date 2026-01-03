@@ -837,3 +837,14 @@ void colorbalancergb_reset(ColorBalanceRGBData *d)
     d->max_chroma = 128.0f;
     d->saturation_formula = 1;  /* from DT dump */
 }
+
+/* ============================================================================
+   Helper: return ColorBalanceRGBData with defaults (neutral grading)
+   ============================================================================ */
+
+static inline ColorBalanceRGBData colorbalancergb_defaults(void)
+{
+    ColorBalanceRGBData d;
+    colorbalancergb_reset(&d);
+    return d;
+}

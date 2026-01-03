@@ -509,3 +509,18 @@ void bilat_process(
         memcpy(out, in, (size_t)width * height * 4 * sizeof(float));
     }
 }
+
+/* ============================================================================
+   Helper: return BilatData with defaults (local laplacian, subtle contrast)
+   ============================================================================ */
+
+static inline BilatData bilat_defaults(void)
+{
+    BilatData d;
+    d.mode = 1;       /* local_laplacian mode */
+    d.sigma_r = 0.5f; /* highlights compression */
+    d.sigma_s = 0.5f; /* shadows lift */
+    d.detail = 0.0f;  /* clarity (local contrast) */
+    d.midtone = 0.2f; /* sigma for tone separation */
+    return d;
+}
