@@ -76,10 +76,12 @@ namespace pqtr
     class Flow
     {
     public:
+        virtual ~Flow() = default;
         virtual Stem &head() = 0;                // the head information
         virtual Stem &flow() = 0;                // the flow step information
         virtual Stem &tail() = 0;                // the tail information
-        virtual void *data() = 0;                // current flow data - width/height are in info tree
+        virtual void *data() = 0;                // current flow data
+        virtual void resize(size_t bytes) = 0;   // resize data buffer
         virtual std::string json() = 0;          // serialize to JSON
         virtual void read(std::string json) = 0; // deserialize from JSON
     };
@@ -118,19 +120,140 @@ namespace pqtr
     class Pipe
     {
     public:
-        // Tail type needs to be one of PNG or JPG
-        virtual void join(std::unique_ptr<Head> head, std::unique_ptr<Tail> tail) = 0;
+        virtual ~Pipe() = default;
 
-        // join a module step to the body step list.  Module name is the module params tree stem name
-        virtual void join(std::string name, std::unique_ptr<Step> step) = 0;
+        // Fluent builder API
+        virtual Pipe& head(std::unique_ptr<Head> head) = 0;
+        virtual Pipe& body(std::string name, std::unique_ptr<Step> step) = 0;
+        virtual Pipe& tail(std::unique_ptr<Tail> tail) = 0;
 
         // pump the pipe from head to tail through the step body.
         virtual void *pump(void *data, size_t size) = 0;
     };
 
     // Make a pipe.
-    std::unique_ptr<Pipe> make();
+    std::unique_ptr<Pipe> pipe();
 
-    // Make a flow.
-    std::unique_ptr<Flow> makeFlow();
+    // ============================================================================
+    // Plugs - Heads, Tails (use std::make_unique to create)
+    // ============================================================================
+
+    // Sony ARW head - loads metadata and raw data from ARW file
+    class SonyHead : public Head
+    {
+    public:
+        std::unique_ptr<Flow> load(Flow &flow, const void *bytes, size_t size) override;
+    };
+
+    // JSON tail - saves flow metadata to JSON file
+    class JsonTail : public Tail
+    {
+        std::string path_;
+    public:
+        explicit JsonTail(const std::string &path) : path_(path) {}
+        void *save(Flow &flow) override;
+    };
+
+    // PNG tail - saves flow data as PNG
+    class PngTail : public Tail
+    {
+        std::string path_;
+    public:
+        explicit PngTail(const std::string &path) : path_(path) {}
+        void *save(Flow &flow) override;
+    };
+
+    // ============================================================================
+    // Steps - Module adapters (use std::make_unique to create)
+    // ============================================================================
+
+    // rawprepare: uint16 bayer → float bayer (normalized)
+    class RawprepareStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // temperature: white balance on bayer
+    class TemperatureStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // highlights: highlight recovery
+    class HighlightsStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // demosaic: bayer → RGB
+    class DemosaicStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // exposure: exposure compensation
+    class ExposureStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // colorin: Camera RGB → Rec2020
+    class ColorinStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // channelmixerrgb: chromatic adaptation
+    class ChannelMixerStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // colorbalancergb: color grading
+    class ColorBalanceStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // filmicrgb: tone mapping
+    class FilmicStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // bilat: local contrast
+    class BilatStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // colorout: Rec2020 → sRGB
+    class ColoroutStep : public Step
+    {
+    public:
+        void *exec(Flow &flow) override;
+    };
+
+    // dump: write buffer to binary file for comparison
+    class DumpStep : public Step
+    {
+        std::string path_;
+        size_t elem_size_;  // bytes per element (4 for float, 1 for bayer float)
+        int channels_;      // 1 for bayer, 4 for RGBA
+    public:
+        // elem_size: 4 for float, channels: 1 for bayer, 4 for RGBA
+        DumpStep(const std::string &path, int channels = 4)
+            : path_(path), elem_size_(sizeof(float)), channels_(channels) {}
+        void *exec(Flow &flow) override;
+    };
 }

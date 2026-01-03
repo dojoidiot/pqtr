@@ -10,15 +10,35 @@
 #include <stdint.h>
 #include <stdio.h>
 
+/* Inlined types (GPU shader compatible) */
+#ifndef DT_ALIGNED_PIXEL_T_DEFINED
+#define DT_ALIGNED_PIXEL_T_DEFINED
+typedef float dt_aligned_pixel_t[4];
+#endif
+
+#ifndef FOR_FOUR_CHANNELS_DEFINED
+#define FOR_FOUR_CHANNELS_DEFINED
+#define for_four_channels(c) for(int c = 0; c < 4; c++)
+#endif
+
+#ifndef DT_ALLOC_ALIGN_FLOAT_DEFINED
+#define DT_ALLOC_ALIGN_FLOAT_DEFINED
+static inline float* dt_alloc_align_float(size_t count)
+{
+    return (float*)malloc(count * sizeof(float));
+}
+static inline void dt_free_align(void* ptr)
+{
+    free(ptr);
+}
+#endif
+
 /* Replace DT macros */
 #define DT_OMP_FOR()
 #define dt_omploop_sfence()
 #define MIN(a,b) ((a) < (b) ? (a) : (b))
 #define CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
 #define CLAMPS(x, lo, hi) ((x) < (lo) ? (lo) : ((x) > (hi) ? (hi) : (x)))
-
-/* Note: dt_alloc_align_float, dt_free_align, dt_aligned_pixel_t, for_four_channels
- * are already defined in demosaic.c which is included first in gold.cpp */
 
 #ifndef DT_FAST_EXPF_DEFINED
 #define DT_FAST_EXPF_DEFINED

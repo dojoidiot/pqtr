@@ -93,22 +93,25 @@ static inline float _safe_in(float a, float scale)
    Memory allocation helpers (simplified versions of DT functions)
    ============================================================================ */
 
-static float* dt_alloc_align_float(size_t count)
+#ifndef DT_ALLOC_ALIGN_FLOAT_DEFINED
+#define DT_ALLOC_ALIGN_FLOAT_DEFINED
+static inline float* dt_alloc_align_float(size_t count)
 {
     return (float*)aligned_alloc(64, count * sizeof(float));
 }
 
-static float* dt_calloc_align_float(size_t count)
+static inline float* dt_calloc_align_float(size_t count)
 {
     float* ptr = dt_alloc_align_float(count);
     if (ptr) memset(ptr, 0, count * sizeof(float));
     return ptr;
 }
 
-static void dt_free_align(void* ptr)
+static inline void dt_free_align(void* ptr)
 {
     free(ptr);
 }
+#endif
 
 /* ============================================================================
    From rcd.c - rcd_ppg_border (lines 86-268)
