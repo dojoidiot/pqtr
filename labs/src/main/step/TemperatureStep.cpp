@@ -1,6 +1,6 @@
 // TemperatureStep.cpp - white balance on bayer
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -9,27 +9,43 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/temperature.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class TemperatureStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* TemperatureStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
-    // Setup temperature data exactly as pipe/gold.cpp
+    // Setup temperature data from camera WB
     TemperatureData data;
-    data.coeffs[0] = static_cast<float>(state.chroma.as_shot[0]);
-    data.coeffs[1] = static_cast<float>(state.chroma.as_shot[1]);
-    data.coeffs[2] = static_cast<float>(state.chroma.as_shot[2]);
-    data.coeffs[3] = static_cast<float>(state.chroma.as_shot[1]);  // Note: uses [1] not [3]
+    data.coeffs[0] = static_cast<float>(flow.chroma().asShot(0));
+    data.coeffs[1] = static_cast<float>(flow.chroma().asShot(1));
+    data.coeffs[2] = static_cast<float>(flow.chroma().asShot(2));
+    data.coeffs[3] = static_cast<float>(flow.chroma().asShot(1));  // Note: uses [1] not [3]
     data.preset = 4;
+
+    // Build local PipeState for C module
+    PipeState state;
+    state.width = width;
+    state.height = height;
+    state.filters = flow.filters();
 
     // Process
     float* in = static_cast<float*>(flow.data());
     std::vector<float> out(npixels);
 
     temperature_process(in, out.data(), &state, &data);
+
+    // Write temperature output back to flow
+    flow.temperature().enabled(state.temperature.enabled != 0);
+    for (int k = 0; k < 4; k++)
+        flow.temperature().coeff(k, state.temperature.coeffs[k]);
 
     // Record params in flow (camera WB from head)
     Stem& m = flow.flow().next("temperature");
@@ -46,4 +62,6 @@ void* TemperatureStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> temperatureStep() { return std::make_unique<TemperatureStep>(); }
+
+}  // namespace pqtr::Labs

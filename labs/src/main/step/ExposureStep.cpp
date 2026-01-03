@@ -1,6 +1,6 @@
 // ExposureStep.cpp - exposure compensation
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -9,19 +9,25 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/exposure.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class ExposureStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* ExposureStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
+    float exposureBias = flow.exposureBias();
 
     // Setup params exactly as pipe/gold.cpp
     ExposureParams params;
     params.mode = 0;
     params.black = 0.0f;
-    params.exposure = state.exposure_bias;  // From PipeState
+    params.exposure = exposureBias;  // From camera metadata
     params.deflicker_percentile = 50.0f;
     params.deflicker_target_level = -4.0f;
     params.compensate_exposure_bias = 0;
@@ -41,9 +47,11 @@ void* ExposureStep::exec(Flow& flow) {
 
     std::memcpy(flow.data(), out.data(), npixels * 4 * sizeof(float));
 
-    std::cout << "ExposureStep: " << state.exposure_bias << " EV\n";
+    std::cout << "ExposureStep: " << exposureBias << " EV\n";
 
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> exposureStep() { return std::make_unique<ExposureStep>(); }
+
+}  // namespace pqtr::Labs

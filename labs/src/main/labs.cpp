@@ -3,7 +3,7 @@
 // Future: GPU shaders, CMA-ES tuning
 // Decoders are in pipe/src/main/labs/sony.c (pure C)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 
 int main(int argc, char* argv[])

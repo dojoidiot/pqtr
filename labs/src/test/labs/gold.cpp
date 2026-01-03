@@ -1,9 +1,29 @@
 // Gold integration test - Full pipeline matching pipe/gold.cpp
 // With stage dumps for comparison against pipe reference
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
+
+namespace pqtr::Labs {
+    std::unique_ptr<Head> sonyHead();
+    std::unique_ptr<Step> rawprepareStep();
+    std::unique_ptr<Step> temperatureStep();
+    std::unique_ptr<Step> highlightsStep();
+    std::unique_ptr<Step> demosaicStep();
+    std::unique_ptr<Step> exposureStep();
+    std::unique_ptr<Step> colorinStep();
+    std::unique_ptr<Step> channelmixerStep();
+    std::unique_ptr<Step> colorbalanceStep();
+    std::unique_ptr<Step> filmicStep();
+    std::unique_ptr<Step> bilatStep();
+    std::unique_ptr<Step> coloroutStep();
+    std::unique_ptr<Step> dumpStep(const std::string &path, int channels = 4);
+    std::unique_ptr<Tail> jsonTail(const std::string &path);
+    std::unique_ptr<Tail> pngTail(const std::string &path);
+}
+
+using namespace pqtr::Labs;
 
 int main() {
     // Create output directory
@@ -12,47 +32,47 @@ int main() {
     auto pipe = pqtr::pipe();
 
     // Head: Sony ARW decoder
-    pipe->head(std::make_unique<pqtr::SonyHead>())
+    pipe->head(sonyHead())
 
         // Sensor stage (bayer, 1 channel)
-        .body("rawprepare", std::make_unique<pqtr::RawprepareStep>())
-        .body("dump_01", std::make_unique<pqtr::DumpStep>("tmp/var/labs/01_rawprepare.bin", 1))
+        .body("rawprepare", rawprepareStep())
+        .body("dump_01", dumpStep("tmp/var/labs/01_rawprepare.bin", 1))
 
-        .body("temperature", std::make_unique<pqtr::TemperatureStep>())
-        .body("dump_02", std::make_unique<pqtr::DumpStep>("tmp/var/labs/02_temperature.bin", 1))
+        .body("temperature", temperatureStep())
+        .body("dump_02", dumpStep("tmp/var/labs/02_temperature.bin", 1))
 
-        .body("highlights", std::make_unique<pqtr::HighlightsStep>())
-        .body("dump_03", std::make_unique<pqtr::DumpStep>("tmp/var/labs/03_highlights.bin", 1))
+        .body("highlights", highlightsStep())
+        .body("dump_03", dumpStep("tmp/var/labs/03_highlights.bin", 1))
 
         // Camera stage (RGBA, 4 channels)
-        .body("demosaic", std::make_unique<pqtr::DemosaicStep>())
-        .body("dump_04", std::make_unique<pqtr::DumpStep>("tmp/var/labs/04_demosaic.bin", 4))
+        .body("demosaic", demosaicStep())
+        .body("dump_04", dumpStep("tmp/var/labs/04_demosaic.bin", 4))
 
-        .body("exposure", std::make_unique<pqtr::ExposureStep>())
-        .body("dump_05", std::make_unique<pqtr::DumpStep>("tmp/var/labs/05_exposure.bin", 4))
+        .body("exposure", exposureStep())
+        .body("dump_05", dumpStep("tmp/var/labs/05_exposure.bin", 4))
 
         // Scene stage (Rec2020 RGBA, 4 channels)
-        .body("colorin", std::make_unique<pqtr::ColorinStep>())
-        .body("dump_06", std::make_unique<pqtr::DumpStep>("tmp/var/labs/06_colorin.bin", 4))
+        .body("colorin", colorinStep())
+        .body("dump_06", dumpStep("tmp/var/labs/06_colorin.bin", 4))
 
-        .body("channelmixer", std::make_unique<pqtr::ChannelMixerStep>())
-        .body("dump_07", std::make_unique<pqtr::DumpStep>("tmp/var/labs/07_channelmixer.bin", 4))
+        .body("channelmixer", channelmixerStep())
+        .body("dump_07", dumpStep("tmp/var/labs/07_channelmixer.bin", 4))
 
-        .body("colorbalance", std::make_unique<pqtr::ColorBalanceStep>())
-        .body("dump_08", std::make_unique<pqtr::DumpStep>("tmp/var/labs/08_colorbalance.bin", 4))
+        .body("colorbalance", colorbalanceStep())
+        .body("dump_08", dumpStep("tmp/var/labs/08_colorbalance.bin", 4))
 
-        .body("filmic", std::make_unique<pqtr::FilmicStep>())
-        .body("dump_09", std::make_unique<pqtr::DumpStep>("tmp/var/labs/09_filmic.bin", 4))
+        .body("filmic", filmicStep())
+        .body("dump_09", dumpStep("tmp/var/labs/09_filmic.bin", 4))
 
-        .body("bilat", std::make_unique<pqtr::BilatStep>())
-        .body("dump_10", std::make_unique<pqtr::DumpStep>("tmp/var/labs/10_bilat.bin", 4))
+        .body("bilat", bilatStep())
+        .body("dump_10", dumpStep("tmp/var/labs/10_bilat.bin", 4))
 
-        .body("colorout", std::make_unique<pqtr::ColoroutStep>())
-        .body("dump_11", std::make_unique<pqtr::DumpStep>("tmp/var/labs/11_colorout.bin", 4))
+        .body("colorout", coloroutStep())
+        .body("dump_11", dumpStep("tmp/var/labs/11_colorout.bin", 4))
 
         // Tails
-        .tail(std::make_unique<pqtr::JsonTail>("tmp/var/labs/gold.json"))
-        .tail(std::make_unique<pqtr::PngTail>("tmp/var/labs/gold.png"));
+        .tail(jsonTail("tmp/var/labs/gold.json"))
+        .tail(pngTail("tmp/var/labs/gold.png"));
 
     // Pass ARW filename to pump
     const char* arw = "src/test/raws/sony.ARW";

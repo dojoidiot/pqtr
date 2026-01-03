@@ -1,6 +1,6 @@
 // FilmicStep.cpp - tone mapping (HDR → SDR)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
 
@@ -8,12 +8,17 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/filmicrgb.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class FilmicStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* FilmicStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     FilmicRGBData data;
@@ -45,4 +50,6 @@ void* FilmicStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> filmicStep() { return std::make_unique<FilmicStep>(); }
+
+}  // namespace pqtr::Labs

@@ -1,19 +1,21 @@
 // Unit test - Mock pipe test (no pipe/ linkage)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
+
+using namespace pqtr::Labs;
 
 namespace {
 
 // MockHead - creates flow with test data
-class MockHead : public pqtr::Head {
+class MockHead : public Head {
 public:
-    std::unique_ptr<pqtr::Flow> load(pqtr::Flow& flow, const void* bytes, size_t size) override {
+    std::unique_ptr<Flow> load(Flow& flow, const void* bytes, size_t size) override {
         std::string name = "mock-image";
-        flow.head().leaf(pqtr::NAME).text(name);
-        flow.head().leaf(pqtr::WIDTH).dial(100);
-        flow.head().leaf(pqtr::HEIGHT).dial(100);
+        flow.head().leaf(NAME).text(name);
+        flow.head().leaf(WIDTH).dial(100);
+        flow.head().leaf(HEIGHT).dial(100);
 
         std::cout << "MockHead: loaded " << size << " bytes\n";
         (void)bytes;
@@ -22,12 +24,12 @@ public:
 };
 
 // MockStep - logs execution
-class MockStep : public pqtr::Step {
+class MockStep : public Step {
     std::string id_;
 public:
     explicit MockStep(const std::string& id) : id_(id) {}
 
-    void* exec(pqtr::Flow& flow) override {
+    void* exec(Flow& flow) override {
         std::cout << "MockStep[" << id_ << "]: exec\n";
         flow.flow().next(id_).leaf("done").dial(1);
         return flow.data();
@@ -35,9 +37,9 @@ public:
 };
 
 // MockTail - outputs result
-class MockTail : public pqtr::Tail {
+class MockTail : public Tail {
 public:
-    void* save(pqtr::Flow& flow) override {
+    void* save(Flow& flow) override {
         std::cout << "MockTail: save\n";
         std::cout << "Flow JSON:\n" << flow.json() << "\n";
         return nullptr;

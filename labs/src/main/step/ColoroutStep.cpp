@@ -1,6 +1,6 @@
 // ColoroutStep.cpp - Rec2020 → sRGB with gamma
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cmath>
 
@@ -16,12 +16,17 @@ static const float REC2020_to_XYZ[4][4] = {
     { 0.f, 0.f, 0.f, 0.f }
 };
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class ColoroutStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* ColoroutStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     // Record in flow
@@ -61,4 +66,6 @@ void* ColoroutStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> coloroutStep() { return std::make_unique<ColoroutStep>(); }
+
+}  // namespace pqtr::Labs

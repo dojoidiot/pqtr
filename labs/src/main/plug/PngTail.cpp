@@ -1,6 +1,6 @@
 // PngTail.cpp - saves flow data as PNG (using stb_image_write for compatibility with pipe)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <vector>
 #include <cstdint>
@@ -9,12 +9,19 @@
 #define STB_IMAGE_WRITE_IMPLEMENTATION
 #include "../../../../pipe/src/main/labs/stb_image_write.h"
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class PngTail : public Tail
+{
+    std::string path_;
+public:
+    explicit PngTail(const std::string &path) : path_(path) {}
+    void *save(Flow &flow) override;
+};
 
 void* PngTail::save(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     // Ensure parent directory exists
@@ -47,4 +54,8 @@ void* PngTail::save(Flow& flow) {
     return nullptr;
 }
 
-}  // namespace pqtr
+std::unique_ptr<Tail> pngTail(const std::string &path) {
+    return std::make_unique<PngTail>(path);
+}
+
+}  // namespace pqtr::Labs

@@ -1,6 +1,6 @@
 // SonyHead.cpp - Sony ARW head using pipe/src/main/labs/sony.c
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <fstream>
 #include <vector>
 #include <cstring>
@@ -29,7 +29,13 @@ extern "C" {
                          uint16_t* output);
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class SonyHead : public Head
+{
+public:
+    std::unique_ptr<Flow> load(Flow &flow, const void *bytes, size_t size) override;
+};
 
 std::unique_ptr<Flow> SonyHead::load(Flow& flow, const void* bytes, size_t size) {
     // bytes is the filename
@@ -42,21 +48,20 @@ std::unique_ptr<Flow> SonyHead::load(Flow& flow, const void* bytes, size_t size)
         return nullptr;
     }
 
-    // Populate PipeState directly (execution state)
-    PipeState& state = flow.state();
-    state.width = meta.width;
-    state.height = meta.height;
-    state.filters = meta.filters;
-    state.chroma.as_shot[0] = meta.wb_rggb[0];
-    state.chroma.as_shot[1] = meta.wb_rggb[1];
-    state.chroma.as_shot[2] = meta.wb_rggb[2];
-    state.chroma.as_shot[3] = meta.wb_rggb[3];
-    state.chroma.late_correction = 1;
-    state.chroma.D65coeffs[0] = meta.d65_coeffs[0];
-    state.chroma.D65coeffs[1] = meta.d65_coeffs[1];
-    state.chroma.D65coeffs[2] = meta.d65_coeffs[2];
-    state.chroma.D65coeffs[3] = meta.d65_coeffs[3];
-    state.exposure_bias = meta.exposure_bias;
+    // Populate Flow execution state
+    flow.width(meta.width);
+    flow.height(meta.height);
+    flow.filters(meta.filters);
+    flow.chroma().asShot(0, meta.wb_rggb[0]);
+    flow.chroma().asShot(1, meta.wb_rggb[1]);
+    flow.chroma().asShot(2, meta.wb_rggb[2]);
+    flow.chroma().asShot(3, meta.wb_rggb[3]);
+    flow.chroma().lateCorrection(true);
+    flow.chroma().D65(0, meta.d65_coeffs[0]);
+    flow.chroma().D65(1, meta.d65_coeffs[1]);
+    flow.chroma().D65(2, meta.d65_coeffs[2]);
+    flow.chroma().D65(3, meta.d65_coeffs[3]);
+    flow.exposureBias(meta.exposure_bias);
 
     // Also populate head stem for persistence/JSON
     Stem& h = flow.head();
@@ -102,4 +107,8 @@ std::unique_ptr<Flow> SonyHead::load(Flow& flow, const void* bytes, size_t size)
     return nullptr;
 }
 
-}  // namespace pqtr
+std::unique_ptr<Head> sonyHead() {
+    return std::make_unique<SonyHead>();
+}
+
+}  // namespace pqtr::Labs

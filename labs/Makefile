@@ -47,6 +47,7 @@ PIPE_TEST := src/test/pipe/gold.cpp
 BUILD := tmp/build
 
 OBJS := $(SRCS:%.cpp=$(BUILD)/%.o)
+PIPE_OBJS := $(PIPE_SRCS:%.c=$(BUILD)/%.o)
 UNIT_OBJS := $(UNIT_SRCS:%.cpp=$(BUILD)/%.o)
 INT_CPP_OBJS := $(INT_CPP:%.cpp=$(BUILD)/%.o)
 INT_C_OBJS := $(INT_C:%.c=$(BUILD)/%.o)
@@ -61,7 +62,7 @@ INCLUDES := -I inc -I src
 
 all: $(BUILD)/labs
 
-$(BUILD)/labs: $(OBJS)
+$(BUILD)/labs: $(OBJS) $(PIPE_OBJS)
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
 

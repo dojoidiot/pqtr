@@ -2,12 +2,16 @@
 //
 // Stem, Flow, and Pipe implementations
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <map>
 #include <sstream>
 #include <cstring>
 
-namespace pqtr
+extern "C" {
+#include "../../../../pipe/src/main/labs/pipe_state.h"
+}
+
+namespace pqtr::Labs
 {
     using Name = std::string;
     using Text = std::string;
@@ -155,9 +159,35 @@ namespace pqtr
     // FlowImpl
     // -------------------------------------------------------------------------
 
+    class TemperatureImpl : public Flow::Temperature
+    {
+        PipeState &state_;
+    public:
+        TemperatureImpl(PipeState &s) : state_(s) {}
+        bool enabled() override { return state_.temperature.enabled != 0; }
+        void enabled(bool v) override { state_.temperature.enabled = v ? 1 : 0; }
+        float coeff(int ch) override { return state_.temperature.coeffs[ch]; }
+        void coeff(int ch, float v) override { state_.temperature.coeffs[ch] = v; }
+    };
+
+    class ChromaImpl : public Flow::Chroma
+    {
+        PipeState &state_;
+    public:
+        ChromaImpl(PipeState &s) : state_(s) {}
+        double D65(int ch) override { return state_.chroma.D65coeffs[ch]; }
+        void D65(int ch, double v) override { state_.chroma.D65coeffs[ch] = v; }
+        double asShot(int ch) override { return state_.chroma.as_shot[ch]; }
+        void asShot(int ch, double v) override { state_.chroma.as_shot[ch] = v; }
+        bool lateCorrection() override { return state_.chroma.late_correction != 0; }
+        void lateCorrection(bool v) override { state_.chroma.late_correction = v ? 1 : 0; }
+    };
+
     class FlowImpl : public Flow
     {
         PipeState state_;                // execution state (C struct)
+        TemperatureImpl temp_;
+        ChromaImpl chroma_;
         Hold<StemImpl> head_;            // persistence (tree)
         Hold<StemImpl> flow_;
         Hold<StemImpl> tail_;
@@ -166,6 +196,8 @@ namespace pqtr
     public:
         FlowImpl()
             : state_{}
+            , temp_(state_)
+            , chroma_(state_)
             , head_(std::make_unique<StemImpl>())
             , flow_(std::make_unique<StemImpl>())
             , tail_(std::make_unique<StemImpl>())
@@ -173,14 +205,41 @@ namespace pqtr
             memset(&state_, 0, sizeof(state_));
         }
 
-        PipeState &state() override { return state_; }
+        // Image geometry
+        int width() override { return state_.width; }
+        void width(int v) override { state_.width = v; }
+        int height() override { return state_.height; }
+        void height(int v) override { state_.height = v; }
+        uint32_t filters() override { return state_.filters; }
+        void filters(uint32_t v) override { state_.filters = v; }
+
+        // Camera data
+        float exposureBias() override { return state_.exposure_bias; }
+        void exposureBias(float v) override { state_.exposure_bias = v; }
+
+        // Temperature and chroma
+        Temperature &temperature() override { return temp_; }
+        Chroma &chroma() override { return chroma_; }
+
+        // Color matrices
+        float adobeXYZtoCAM(int row, int col) override { return state_.adobe_XYZ_to_CAM[row][col]; }
+        void adobeXYZtoCAM(int row, int col, float v) override { state_.adobe_XYZ_to_CAM[row][col] = v; }
+        float d65ColorMatrix(int idx) override { return state_.d65_color_matrix[idx]; }
+        void d65ColorMatrix(int idx, float v) override { state_.d65_color_matrix[idx] = v; }
+
+        // Tree persistence
         Stem &head() override { return *head_; }
         Stem &flow() override { return *flow_; }
         Stem &tail() override { return *tail_; }
+
+        // Pixel data buffer
         void *data() override { return data_.data(); }
         void resize(size_t bytes) override { data_.resize(bytes); }
 
         std::vector<uint8_t> &buffer() { return data_; }
+
+        // C interop - returns internal PipeState for C modules
+        PipeState &nativeState() { return state_; }
 
         Text json() override
         {
@@ -261,6 +320,12 @@ namespace pqtr
         }
     };
 
+    // Helper to get native state from Flow (for C module interop)
+    inline PipeState &nativeState(Flow &flow)
+    {
+        return static_cast<FlowImpl&>(flow).nativeState();
+    }
+
     // -------------------------------------------------------------------------
     // PipeImpl
     // -------------------------------------------------------------------------
@@ -312,14 +377,12 @@ namespace pqtr
         }
     };
 
-    // -------------------------------------------------------------------------
-    // Factory
-    // -------------------------------------------------------------------------
+} // namespace pqtr::Labs
 
-    std::unique_ptr<Pipe> pipe()
+namespace pqtr
+{
+    std::unique_ptr<Labs::Pipe> pipe()
     {
-        return std::make_unique<PipeImpl>();
+        return std::make_unique<Labs::PipeImpl>();
     }
-
-
-} // namespace pqtr
+}

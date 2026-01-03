@@ -1,6 +1,6 @@
 // DemosaicStep.cpp - bayer → RGB
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -9,12 +9,17 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/demosaic.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class DemosaicStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* DemosaicStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     // Setup params exactly as pipe/gold.cpp
@@ -24,6 +29,12 @@ void* DemosaicStep::exec(Flow& flow) {
     params.dual_thrs = 0.2f;
     params.cs_thrs = 0.40f;
     params.cs_iter = 8;
+
+    // Build local PipeState for C module
+    PipeState state;
+    state.width = width;
+    state.height = height;
+    state.filters = flow.filters();
 
     // Input is float bayer, output is float RGBA (4 channels)
     float* in = static_cast<float*>(flow.data());
@@ -47,4 +58,6 @@ void* DemosaicStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> demosaicStep() { return std::make_unique<DemosaicStep>(); }
+
+}  // namespace pqtr::Labs

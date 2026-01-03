@@ -1,6 +1,6 @@
 // RawprepareStep.cpp - uint16 bayer → float bayer (normalized)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <vector>
 #include <cstring>
@@ -9,12 +9,17 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/rawprepare.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class RawprepareStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* RawprepareStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     // Get black/white from head stem (these are metadata, not in PipeState)
@@ -55,4 +60,6 @@ void* RawprepareStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> rawprepareStep() { return std::make_unique<RawprepareStep>(); }
+
+}  // namespace pqtr::Labs

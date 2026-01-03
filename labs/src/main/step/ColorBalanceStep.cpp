@@ -1,6 +1,6 @@
 // ColorBalanceStep.cpp - color grading
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
 
@@ -8,12 +8,17 @@ extern "C" {
 #include "../../../../pipe/src/main/labs/mods/colorbalancergb.c"
 }
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class ColorBalanceStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* ColorBalanceStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
     size_t npixels = static_cast<size_t>(width) * height;
 
     ColorBalanceRGBData data;
@@ -57,4 +62,6 @@ void* ColorBalanceStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> colorbalanceStep() { return std::make_unique<ColorBalanceStep>(); }
+
+}  // namespace pqtr::Labs

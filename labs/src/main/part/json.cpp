@@ -2,10 +2,10 @@
 //
 // Provides stem_to_json() and json_to_stem() functions
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <sstream>
 
-namespace pqtr
+namespace pqtr::Labs
 {
     using Text = std::string;
 
@@ -176,4 +176,4 @@ namespace pqtr
         parse_object(json, pos, stem);
     }
 
-} // namespace pqtr
+} // namespace pqtr::Labs

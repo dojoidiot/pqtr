@@ -1,15 +1,22 @@
 // Integration test - Sony ARW head test
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
+
+namespace pqtr::Labs {
+    std::unique_ptr<Head> sonyHead();
+    std::unique_ptr<Tail> jsonTail(const std::string &path);
+}
+
+using namespace pqtr::Labs;
 
 int main() {
     std::cout << "=== integration test: sony ===\n\n";
 
     auto pipe = pqtr::pipe();
-    pipe->head(std::make_unique<pqtr::SonyHead>())
-        .tail(std::make_unique<pqtr::JsonTail>("tmp/var/labs.json"));
+    pipe->head(sonyHead())
+        .tail(jsonTail("tmp/var/labs.json"));
 
     // Pass ARW filename to pump
     const char* arw = "src/test/raws/sony.ARW";

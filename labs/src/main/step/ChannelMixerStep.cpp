@@ -1,6 +1,6 @@
 // ChannelMixerStep.cpp - chromatic adaptation (CAT16)
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <cstring>
 
@@ -23,12 +23,17 @@ static const float XYZ_to_REC2020[4][4] = {
     { 0.f, 0.f, 0.f, 0.f }
 };
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class ChannelMixerStep : public Step
+{
+public:
+    void *exec(Flow &flow) override;
+};
 
 void* ChannelMixerStep::exec(Flow& flow) {
-    PipeState& state = flow.state();
-    int width = state.width;
-    int height = state.height;
+    int width = flow.width();
+    int height = flow.height();
 
     // Matrices for Rec2020 pipeline
     dt_colormatrix_t rec2020_to_xyz_4x4 = {
@@ -97,4 +102,6 @@ void* ChannelMixerStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> channelmixerStep() { return std::make_unique<ChannelMixerStep>(); }
+
+}  // namespace pqtr::Labs

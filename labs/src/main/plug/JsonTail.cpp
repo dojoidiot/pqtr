@@ -1,11 +1,19 @@
 // JsonTail.cpp - Saves flow JSON to file
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <fstream>
 #include <iostream>
 #include <sys/stat.h>
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class JsonTail : public Tail
+{
+    std::string path_;
+public:
+    explicit JsonTail(const std::string &path) : path_(path) {}
+    void *save(Flow &flow) override;
+};
 
 void* JsonTail::save(Flow& flow) {
     // Ensure parent directory exists
@@ -28,4 +36,8 @@ void* JsonTail::save(Flow& flow) {
     return nullptr;
 }
 
-}  // namespace pqtr
+std::unique_ptr<Tail> jsonTail(const std::string &path) {
+    return std::make_unique<JsonTail>(path);
+}
+
+}  // namespace pqtr::Labs

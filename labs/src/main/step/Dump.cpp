@@ -1,10 +1,21 @@
 // Dump.cpp - DumpStep that writes buffer to binary file for comparison
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <iostream>
 #include <fstream>
 
-namespace pqtr {
+namespace pqtr::Labs {
+
+class DumpStep : public Step
+{
+    std::string path_;
+    size_t elem_size_;
+    int channels_;
+public:
+    DumpStep(const std::string &path, int channels = 4)
+        : path_(path), elem_size_(sizeof(float)), channels_(channels) {}
+    void *exec(Flow &flow) override;
+};
 
 void* DumpStep::exec(Flow& flow) {
     int width = static_cast<int>(flow.head().leaf(WIDTH).dial());
@@ -23,4 +34,6 @@ void* DumpStep::exec(Flow& flow) {
     return flow.data();
 }
 
-}  // namespace pqtr
+std::unique_ptr<Step> dumpStep(const std::string &path, int channels) { return std::make_unique<DumpStep>(path, channels); }
+
+}  // namespace pqtr::Labs

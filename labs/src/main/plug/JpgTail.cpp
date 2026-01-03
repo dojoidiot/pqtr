@@ -3,14 +3,14 @@
 // Usage: auto tail = std::make_unique<JpgTail>();
 //        auto tail = std::make_unique<JpgTail>(95);  // custom quality
 
-#include "labs.hpp"
+#include "pqtr.hpp"
 #include <vector>
 #include <cstdint>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 
-using namespace pqtr;
+using namespace pqtr::Labs;
 
 namespace {
 
