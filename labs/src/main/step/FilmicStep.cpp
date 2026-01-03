@@ -19,8 +19,14 @@ void* FilmicStep::exec(Flow& flow) {
     FilmicRGBData data;
     filmicrgb_reset(&data);
 
-    // Record in flow
-    flow.flow().next("filmic").leaf("enabled").dial(1);
+    // Record in flow (defaults from filmicrgb_reset)
+    Stem& m = flow.flow().next("filmic");
+    m.leaf("grey_source").dial(data.grey_source);
+    m.leaf("black_source").dial(data.black_source);
+    m.leaf("white_source").dial(data.white_source);
+    m.leaf("dynamic_range").dial(data.dynamic_range);
+    m.leaf("contrast").dial(data.contrast);
+    m.leaf("saturation").dial(data.saturation);
 
     // Process
     float* in = static_cast<float*>(flow.data());

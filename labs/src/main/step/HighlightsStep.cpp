@@ -28,6 +28,12 @@ void* HighlightsStep::exec(Flow& flow) {
 
     highlights_process(in, out.data(), &state, &data);
 
+    // Record params in flow (algorithm defaults)
+    Stem& m = flow.flow().next("highlights");
+    m.leaf("mode").dial(static_cast<float>(params.mode));
+    m.leaf("clip").dial(params.clip);
+    m.leaf("candidating").dial(params.candidating);
+
     std::memcpy(flow.data(), out.data(), npixels * sizeof(float));
 
     std::cout << "HighlightsStep: OPPOSED mode\n";

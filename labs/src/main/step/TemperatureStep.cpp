@@ -31,6 +31,13 @@ void* TemperatureStep::exec(Flow& flow) {
 
     temperature_process(in, out.data(), &state, &data);
 
+    // Record params in flow (camera WB from head)
+    Stem& m = flow.flow().next("temperature");
+    m.leaf("coeff_r").dial(data.coeffs[0]);
+    m.leaf("coeff_g").dial(data.coeffs[1]);
+    m.leaf("coeff_b").dial(data.coeffs[2]);
+    m.leaf("preset").dial(static_cast<float>(data.preset));
+
     std::memcpy(flow.data(), out.data(), npixels * sizeof(float));
 
     std::cout << "TemperatureStep: WB R=" << data.coeffs[0]

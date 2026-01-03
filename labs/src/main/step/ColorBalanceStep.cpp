@@ -33,8 +33,15 @@ void* ColorBalanceStep::exec(Flow& flow) {
         { 0.0f, 0.0f, 0.0f, 0.0f }
     };
 
-    // Record in flow
-    flow.flow().next("colorbalance").leaf("enabled").dial(1);
+    // Record in flow (defaults from colorbalancergb_reset)
+    Stem& m = flow.flow().next("colorbalance");
+    m.leaf("shadows_weight").dial(data.shadows_weight);
+    m.leaf("highlights_weight").dial(data.highlights_weight);
+    m.leaf("midtones_weight").dial(data.midtones_weight);
+    m.leaf("mask_grey_fulcrum").dial(data.mask_grey_fulcrum);
+    m.leaf("chroma_global").dial(data.chroma_global);
+    m.leaf("vibrance").dial(data.vibrance);
+    m.leaf("contrast").dial(data.contrast);
 
     // Process
     float* in = static_cast<float*>(flow.data());

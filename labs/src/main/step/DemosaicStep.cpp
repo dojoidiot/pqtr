@@ -31,6 +31,13 @@ void* DemosaicStep::exec(Flow& flow) {
 
     demosaic_process(in, out.data(), &state, &params);
 
+    // Record params in flow (algorithm defaults)
+    Stem& m = flow.flow().next("demosaic");
+    m.leaf("method").dial(static_cast<float>(params.demosaicing_method));
+    m.leaf("dual_thrs").dial(params.dual_thrs);
+    m.leaf("cs_thrs").dial(params.cs_thrs);
+    m.leaf("cs_iter").dial(static_cast<float>(params.cs_iter));
+
     // Resize flow buffer for RGBA
     flow.resize(npixels * 4 * sizeof(float));
     std::memcpy(flow.data(), out.data(), npixels * 4 * sizeof(float));

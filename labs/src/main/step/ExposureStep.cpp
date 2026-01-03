@@ -32,6 +32,13 @@ void* ExposureStep::exec(Flow& flow) {
 
     exposure_process(in, out.data(), width, height, 4, &params);
 
+    // Record params in flow (exposure from head, rest defaults)
+    Stem& m = flow.flow().next("exposure");
+    m.leaf("mode").dial(static_cast<float>(params.mode));
+    m.leaf("black").dial(params.black);
+    m.leaf("exposure").dial(params.exposure);
+    m.leaf("compensate_exposure_bias").dial(static_cast<float>(params.compensate_exposure_bias));
+
     std::memcpy(flow.data(), out.data(), npixels * 4 * sizeof(float));
 
     std::cout << "ExposureStep: " << state.exposure_bias << " EV\n";

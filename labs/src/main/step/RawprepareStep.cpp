@@ -40,6 +40,11 @@ void* RawprepareStep::exec(Flow& flow) {
 
     rawprepare_process(in, out.data(), width, height, width, height, &data);
 
+    // Record params in flow (metadata from head)
+    Stem& m = flow.flow().next("rawprepare");
+    m.leaf("black").dial(static_cast<float>(black));
+    m.leaf("white").dial(static_cast<float>(white));
+
     // Resize flow buffer and copy result
     flow.resize(npixels * sizeof(float));
     std::memcpy(flow.data(), out.data(), npixels * sizeof(float));

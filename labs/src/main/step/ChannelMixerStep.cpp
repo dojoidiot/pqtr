@@ -74,7 +74,13 @@ void* ChannelMixerStep::exec(Flow& flow) {
 
     // Record in flow
     Stem& m = flow.flow().next("channelmixer");
-    m.leaf("adaptation").dial(static_cast<float>(DT_ADAPTATION_CAT16));
+    m.leaf("adaptation").dial(static_cast<float>(data.adaptation));
+    m.leaf("illuminant_0").dial(data.illuminant[0]);
+    m.leaf("illuminant_1").dial(data.illuminant[1]);
+    m.leaf("illuminant_2").dial(data.illuminant[2]);
+    m.leaf("p").dial(data.p);
+    m.leaf("gamut").dial(data.gamut);
+    m.leaf("clip").dial(static_cast<float>(data.clip));
 
     // Process in-place
     float* in = static_cast<float*>(flow.data());
