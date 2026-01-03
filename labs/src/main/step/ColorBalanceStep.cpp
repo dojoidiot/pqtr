@@ -11,8 +11,9 @@ extern "C" {
 namespace pqtr {
 
 void* ColorBalanceStep::exec(Flow& flow) {
-    int width = static_cast<int>(flow.head().leaf(WIDTH).dial());
-    int height = static_cast<int>(flow.head().leaf(HEIGHT).dial());
+    PipeState& state = flow.state();
+    int width = state.width;
+    int height = state.height;
     size_t npixels = static_cast<size_t>(width) * height;
 
     ColorBalanceRGBData data;

@@ -42,56 +42,30 @@ std::unique_ptr<Flow> SonyHead::load(Flow& flow, const void* bytes, size_t size)
         return nullptr;
     }
 
-    // Populate head stem with metadata
-    Stem& h = flow.head();
+    // Populate PipeState directly (execution state)
+    PipeState& state = flow.state();
+    state.width = meta.width;
+    state.height = meta.height;
+    state.filters = meta.filters;
+    state.chroma.as_shot[0] = meta.wb_rggb[0];
+    state.chroma.as_shot[1] = meta.wb_rggb[1];
+    state.chroma.as_shot[2] = meta.wb_rggb[2];
+    state.chroma.as_shot[3] = meta.wb_rggb[3];
+    state.chroma.late_correction = 1;
+    state.chroma.D65coeffs[0] = meta.d65_coeffs[0];
+    state.chroma.D65coeffs[1] = meta.d65_coeffs[1];
+    state.chroma.D65coeffs[2] = meta.d65_coeffs[2];
+    state.chroma.D65coeffs[3] = meta.d65_coeffs[3];
+    state.exposure_bias = meta.exposure_bias;
 
+    // Also populate head stem for persistence/JSON
+    Stem& h = flow.head();
     std::string name = filename;
     h.leaf(NAME).text(name);
     h.leaf(WIDTH).dial(static_cast<float>(meta.width));
     h.leaf(HEIGHT).dial(static_cast<float>(meta.height));
     h.leaf(BLACK).dial(static_cast<float>(meta.black_level));
     h.leaf(WHITE).dial(static_cast<float>(meta.white_level));
-
-    // Bayer filter pattern (stored as hex string to preserve uint32 precision)
-    char filters_hex[16];
-    snprintf(filters_hex, sizeof(filters_hex), "0x%08x", meta.filters);
-    std::string filters_str(filters_hex);
-    h.leaf("filters").text(filters_str);
-
-    // Exposure bias
-    h.leaf("exposure_bias").dial(meta.exposure_bias);
-
-    // White balance RGGB
-    Stem& wb = h.next("wb");
-    wb.leaf("r").dial(meta.wb_rggb[0]);
-    wb.leaf("g1").dial(meta.wb_rggb[1]);
-    wb.leaf("b").dial(meta.wb_rggb[2]);
-    wb.leaf("g2").dial(meta.wb_rggb[3]);
-
-    // D65 coefficients
-    Stem& d65 = h.next("d65");
-    d65.leaf("r").dial(meta.d65_coeffs[0]);
-    d65.leaf("g1").dial(meta.d65_coeffs[1]);
-    d65.leaf("b").dial(meta.d65_coeffs[2]);
-    d65.leaf("g2").dial(meta.d65_coeffs[3]);
-
-    // Color matrix (3x3)
-    Stem& cm = h.next("color_matrix");
-    for (int i = 0; i < 9; i++) {
-        cm.leaf(std::to_string(i)).dial(meta.color_matrix[i]);
-    }
-
-    // XYZ to CAM matrix
-    Stem& xyz = h.next("xyz_to_cam");
-    for (int i = 0; i < 9; i++) {
-        xyz.leaf(std::to_string(i)).dial(meta.xyz_to_cam[i]);
-    }
-
-    // Sony curve values
-    Stem& curve = h.next("sony_curve");
-    for (int i = 0; i < 4; i++) {
-        curve.leaf(std::to_string(i)).dial(static_cast<float>(meta.sony_curve[i]));
-    }
 
     // Read full file for compressed data
     std::ifstream file(filename, std::ios::binary | std::ios::ate);

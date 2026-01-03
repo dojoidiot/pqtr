@@ -12,11 +12,12 @@ extern "C" {
 namespace pqtr {
 
 void* RawprepareStep::exec(Flow& flow) {
-    int width = static_cast<int>(flow.head().leaf(WIDTH).dial());
-    int height = static_cast<int>(flow.head().leaf(HEIGHT).dial());
+    PipeState& state = flow.state();
+    int width = state.width;
+    int height = state.height;
     size_t npixels = static_cast<size_t>(width) * height;
 
-    // Get black/white from head (camera-specific)
+    // Get black/white from head stem (these are metadata, not in PipeState)
     int black = 512;
     int white = 16383;
     if (flow.head().test(BLACK))
@@ -24,18 +25,12 @@ void* RawprepareStep::exec(Flow& flow) {
     if (flow.head().test(WHITE))
         white = static_cast<int>(flow.head().leaf(WHITE).dial());
 
-    // Setup params
+    // Setup params exactly as pipe/gold.cpp
     RawprepareParams params;
     rawprepare_reset(&params, 0, 0, 0, 0,
                      black, black, black, black, white);
-
     RawprepareData data;
     rawprepare_commit_params(&params, &data);
-
-    // Record params in flow
-    Stem& m = flow.flow().next("rawprepare");
-    m.leaf("black").dial(static_cast<float>(black));
-    m.leaf("white").dial(static_cast<float>(white));
 
     // Input is uint16, output is float
     uint16_t* in = static_cast<uint16_t*>(flow.data());

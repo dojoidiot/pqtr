@@ -26,8 +26,9 @@ static const float XYZ_to_REC2020[4][4] = {
 namespace pqtr {
 
 void* ChannelMixerStep::exec(Flow& flow) {
-    int width = static_cast<int>(flow.head().leaf(WIDTH).dial());
-    int height = static_cast<int>(flow.head().leaf(HEIGHT).dial());
+    PipeState& state = flow.state();
+    int width = state.width;
+    int height = state.height;
 
     // Matrices for Rec2020 pipeline
     dt_colormatrix_t rec2020_to_xyz_4x4 = {

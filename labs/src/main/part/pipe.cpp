@@ -5,6 +5,7 @@
 #include "labs.hpp"
 #include <map>
 #include <sstream>
+#include <cstring>
 
 namespace pqtr
 {
@@ -156,18 +157,23 @@ namespace pqtr
 
     class FlowImpl : public Flow
     {
-        Hold<StemImpl> head_;
+        PipeState state_;                // execution state (C struct)
+        Hold<StemImpl> head_;            // persistence (tree)
         Hold<StemImpl> flow_;
         Hold<StemImpl> tail_;
         std::vector<uint8_t> data_;
 
     public:
         FlowImpl()
-            : head_(std::make_unique<StemImpl>())
+            : state_{}
+            , head_(std::make_unique<StemImpl>())
             , flow_(std::make_unique<StemImpl>())
             , tail_(std::make_unique<StemImpl>())
-        {}
+        {
+            memset(&state_, 0, sizeof(state_));
+        }
 
+        PipeState &state() override { return state_; }
         Stem &head() override { return *head_; }
         Stem &flow() override { return *flow_; }
         Stem &tail() override { return *tail_; }

@@ -12,29 +12,21 @@ extern "C" {
 namespace pqtr {
 
 void* ExposureStep::exec(Flow& flow) {
-    int width = static_cast<int>(flow.head().leaf(WIDTH).dial());
-    int height = static_cast<int>(flow.head().leaf(HEIGHT).dial());
+    PipeState& state = flow.state();
+    int width = state.width;
+    int height = state.height;
     size_t npixels = static_cast<size_t>(width) * height;
 
-    // Get exposure bias from head
-    float exposure_bias = 1.05f;
-    if (flow.head().test("exposure_bias"))
-        exposure_bias = flow.head().leaf("exposure_bias").dial();
-
-    // Setup params
+    // Setup params exactly as pipe/gold.cpp
     ExposureParams params;
     params.mode = 0;
     params.black = 0.0f;
-    params.exposure = exposure_bias;
+    params.exposure = state.exposure_bias;  // From PipeState
     params.deflicker_percentile = 50.0f;
     params.deflicker_target_level = -4.0f;
     params.compensate_exposure_bias = 0;
 
-    // Record in flow
-    Stem& m = flow.flow().next("exposure");
-    m.leaf("ev").dial(exposure_bias);
-
-    // Process in-place
+    // Process
     float* in = static_cast<float*>(flow.data());
     std::vector<float> out(npixels * 4);
 
@@ -42,7 +34,7 @@ void* ExposureStep::exec(Flow& flow) {
 
     std::memcpy(flow.data(), out.data(), npixels * 4 * sizeof(float));
 
-    std::cout << "ExposureStep: " << exposure_bias << " EV\n";
+    std::cout << "ExposureStep: " << state.exposure_bias << " EV\n";
 
     return flow.data();
 }

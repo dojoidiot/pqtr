@@ -5,6 +5,11 @@
 #include <string>
 #include <vector>
 
+// PipeState from pipe/ for execution
+extern "C" {
+#include "../../pipe/src/main/labs/pipe_state.h"
+}
+
 /**
  * This is the labs namespace.  This is designed for me to read - it must be maintained as minimal interface,
  * PIMPL.  No boilerplate, low cognitive load.
@@ -77,9 +82,10 @@ namespace pqtr
     {
     public:
         virtual ~Flow() = default;
-        virtual Stem &head() = 0;                // the head information
-        virtual Stem &flow() = 0;                // the flow step information
-        virtual Stem &tail() = 0;                // the tail information
+        virtual PipeState &state() = 0;          // execution state (C struct)
+        virtual Stem &head() = 0;                // persistence (tree)
+        virtual Stem &flow() = 0;                // persistence (tree)
+        virtual Stem &tail() = 0;                // persistence (tree)
         virtual void *data() = 0;                // current flow data
         virtual void resize(size_t bytes) = 0;   // resize data buffer
         virtual std::string json() = 0;          // serialize to JSON
