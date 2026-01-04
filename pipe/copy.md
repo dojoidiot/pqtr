@@ -4,22 +4,134 @@
 
 The copy phase is **complete**. All DT modules have been copied and verified:
 
-| Module | Status | Tolerance |
-|--------|--------|-----------|
-| sony.c (decoder) | verified | 100% match |
-| rawprepare | verified | 100% match |
-| temperature | verified | 100% match |
-| highlights | verified | 1e-2 |
-| demosaic | verified | 1e-2 |
-| exposure | verified | 100% match |
-| colorin | verified | 1e-3 |
-| channelmixerrgb | verified | functional |
-| colorbalancergb | verified | functional |
-| filmicrgb | verified | 3e-2 |
-| bilat | verified | 3e-1 |
-| colorout | verified | 100% match |
+| Module | Status | Tolerance | Colorspace |
+|--------|--------|-----------|------------|
+| sony.c (decoder) | verified | 100% match | RAW |
+| rawprepare | verified | 100% match | RAW |
+| temperature | verified | 100% match | RAW |
+| highlights | verified | 1e-2 | RAW |
+| demosaic | verified | 1e-2 | RAW→RGB |
+| exposure | verified | 100% match | RGB |
+| colorin | verified | 1e-3 | RGB |
+| channelmixerrgb | verified | functional | RGB |
+| colorbalancergb | verified | functional | RGB |
+| filmicrgb | verified | 3e-2 | RGB |
+| bilat | verified | functional | LAB (auto-converted) |
+| colorout | verified | 100% match | RGB |
 
-The pipeline produces output that is structurally correct but requires tuning for optimal visual match.
+**Colorspace API:** bilat declares `inputColorspace() = Lab` and the pipeline auto-inserts RGB↔Lab conversions.
+
+---
+
+## Colorspace Architecture
+
+### The Problem
+
+DT's pixelpipe manages colorspace automatically:
+1. Each module declares `input_colorspace()` and `output_colorspace()`
+2. Pixelpipe tracks current colorspace in `pipe->dsc.cst`
+3. Before each module, if colorspaces differ, auto-inserts conversion
+
+Our pipe currently assumes all modules work in RGB - **this is wrong**.
+
+### DT Module Colorspace Declarations
+
+From darktable source (`src/iop/*.c`):
+
+```c
+// exposure.c
+dt_iop_colorspace_type_t default_colorspace(...) { return IOP_CS_RGB; }
+
+// colorbalancergb.c
+dt_iop_colorspace_type_t default_colorspace(...) { return IOP_CS_RGB; }
+
+// filmicrgb.c
+dt_iop_colorspace_type_t default_colorspace(...) { return IOP_CS_RGB; }
+
+// bilat.c
+dt_iop_colorspace_type_t default_colorspace(...) { return IOP_CS_LAB; }  // ← Different!
+```
+
+### Required Architecture
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  Flow tracks: current_colorspace (RAW, RGB, Lab, XYZ)   │
+└─────────────────────────────────────────────────────────┘
+
+Each Step declares:
+  - inputColorspace()   → what it expects
+  - outputColorspace()  → what it produces
+
+Pipe::body() checks:
+  if (current_cs != step.input_cs) → insert conversion step
+
+Conversion steps needed:
+  - RgbToLabStep: RGB → XYZ (matrix) → Lab (CIE D50)
+  - LabToRgbStep: Lab → XYZ → RGB (inverse matrix)
+```
+
+### Colorspace Flow (Correct)
+
+```
+RAW ──────────────────────────────────────────────────────►
+     rawprepare  temperature  highlights  demosaic
+                                              │
+RGB ◄─────────────────────────────────────────┘
+     exposure  colorin  channelmixer  colorbalance  filmic
+                                                       │
+                                          ┌────────────┘
+                                          ▼
+                                    [RGB → Lab]  ← auto-insert
+                                          │
+LAB                                       ▼
+                                        bilat
+                                          │
+                                          ▼
+                                    [Lab → RGB]  ← auto-insert
+                                          │
+RGB ◄─────────────────────────────────────┘
+     colorout
+```
+
+---
+
+## Pipeline Phases
+
+### Phase 1: Baseline (RAW → Linear RGB)
+
+Modules: `rawprepare → temperature → highlights → demosaic → colorin → channelmixer → colorout`
+
+- Fixed processing, metadata-driven
+- Channelmixer included (DT auto-applies in scene-referred mode)
+- No user-tunable parameters
+- Output: sRGB PNG
+
+Test: `make test-phase1` (labs/)
+
+### Phase 2: Color Science (Match Camera JPEG)
+
+Modules: `phase1 → exposure → colorbalance → filmic → [rgb_to_lab] → bilat → [lab_to_rgb] → colorout`
+
+- Optimizable parameters
+- Goal: Match manufacturer camera JPEG output
+- All operate in linear RGB (scene-referred until filmic)
+- Bilat requires Lab colorspace (auto-converted)
+
+Test: `make test-phase2` (labs/) - identical to `make test-gold`
+
+**Official DT Sony Camera Style (ILCE-7M3, ILCE-7RM5):**
+```
+exposure (EV=1.1) → colorbalancergb → bilat → filmicrgb
+```
+
+### Phase 3: Effects (User Creative)
+
+Modules: `bilat` (local contrast)
+
+- Optional, after color science
+- bilat requires Lab colorspace conversion
+- Not part of color optimization
 
 ---
 
@@ -37,14 +149,87 @@ See **tune.md** for:
 ### Current State
 
 **Sony ILCE-7M3 Profile:**
-- exposure_bias: 1.05 EV (tuned - overall brightness matches)
+- exposure_bias: 0.0 EV (DT module default - XMP/style provides actual value)
 - d65_coeffs: from cameras.xml matrix (correct)
-- contrast: 0.80 (testing - lifts shadows)
 
 **Outstanding Issue:**
 - Shadow crush: Gold has ~2x more very dark pixels than DT reference
 - Root cause: NOT a code bug (verified filmicrgb spline is correct)
 - Solution: Parameter tuning in colorbalancergb
+
+**Bilat Issue:** FIXED
+- Implemented Colorspace enum in Step interface
+- BilatStep declares `inputColorspace() = Lab`
+- Pipeline inserts RgbToLabStep before bilat, LabToRgbStep after
+- Conversion uses Rec2020→XYZ→Lab (D50 white point)
+
+---
+
+## Next Steps
+
+### 1. Implement Colorspace API in Step
+
+```cpp
+enum class Colorspace { RAW, RGB, Lab, XYZ };
+
+class Step {
+    virtual Colorspace inputColorspace() { return Colorspace::RGB; }
+    virtual Colorspace outputColorspace() { return Colorspace::RGB; }
+    virtual void* exec(Flow& flow) = 0;
+};
+```
+
+### 2. Add Conversion Steps
+
+```cpp
+class RgbToLabStep : public Step {
+    Colorspace inputColorspace() override { return Colorspace::RGB; }
+    Colorspace outputColorspace() override { return Colorspace::Lab; }
+    // RGB → XYZ (Rec2020 matrix) → Lab (CIE D50)
+};
+
+class LabToRgbStep : public Step {
+    Colorspace inputColorspace() override { return Colorspace::Lab; }
+    Colorspace outputColorspace() override { return Colorspace::RGB; }
+    // Lab → XYZ → RGB (inverse matrix)
+};
+```
+
+### 3. Update Pipe to Auto-Insert Conversions
+
+```cpp
+Pipe& Pipe::body(const std::string& name, std::unique_ptr<Step> step) {
+    Colorspace current = flow_.colorspace();
+    Colorspace required = step->inputColorspace();
+
+    if (current != required) {
+        // Auto-insert conversion step
+        insertConversion(current, required);
+    }
+
+    // Add actual step
+    steps_.push_back(std::move(step));
+    flow_.setColorspace(steps_.back()->outputColorspace());
+
+    return *this;
+}
+```
+
+### 4. Fix BilatStep
+
+```cpp
+class BilatStep : public Step {
+    Colorspace inputColorspace() override { return Colorspace::Lab; }
+    Colorspace outputColorspace() override { return Colorspace::Lab; }
+    // Process L channel only, preserve a/b
+};
+```
+
+### 5. Verify with DT Reference
+
+- Run darktable-cli with DSC00458.ARW + XMP
+- Compare output pixel-perfect with our pipeline
+- Verify colorspace conversions match DT's dt_ioppr_transform_image_colorspace()
 
 ---
 
@@ -57,7 +242,7 @@ Sony decoder (sony.c)
     - Extracts: dimensions, strip_offset, curve, WB, black/white levels
     - Extracts: color matrix from cameras.xml
     - Computes: d65_coeffs from matrix
-    - Sets: exposure_bias per camera model
+    - exposure_bias: 0.0 (DT default, XMP/style provides actual value)
     ↓
 PipeState populated
     ↓
@@ -85,10 +270,23 @@ src/main/labs/mods/*.c            # All copied modules
 ### Test
 ```
 src/test/labs/gold.cpp            # Full pipeline test
-src/test/raws/sony.ARW            # Test input
+src/test/raws/sony.ARW            # Test input (ILCE-7M3)
+src/test/raws/DSC00458.ARW        # Sony style test input
+src/test/raws/DSC00458.ARW.xmp    # DT XMP with Sony style
+src/test/raws/DSC00458.JPG        # Camera-generated reference
 tmp/var/gold.png                  # Our output
 tmp/var/dt_gold_ref.png           # DT reference
 ```
+
+### DT Camera Styles
+```
+dark/lib/dark/share/darktable/styles/darktable_Sony_ILCE-7M3.dtstyle
+dark/lib/dark/share/darktable/styles/darktable_Sony_ILCE-7RM5.dtstyle
+```
+
+Official Sony styles use: `exposure → colorbalancergb → bilat → filmicrgb`
+- sigmoid: disabled
+- basecurve: disabled
 
 ### Documentation
 ```

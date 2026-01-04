@@ -516,11 +516,12 @@ void bilat_process(
 
 static inline BilatData bilat_defaults(void)
 {
+    /* DT defaults from src/iop/bilat.c $DEFAULT annotations */
     BilatData d;
-    d.mode = 1;       /* local_laplacian mode */
-    d.sigma_r = 0.5f; /* highlights compression */
-    d.sigma_s = 0.5f; /* shadows lift */
-    d.detail = 0.0f;  /* clarity (local contrast) */
-    d.midtone = 0.2f; /* sigma for tone separation */
+    d.mode = 1;        /* $DEFAULT: 1 (local_laplacian mode) */
+    d.sigma_r = 0.5f;  /* $DEFAULT: 0.5 highlights compression */
+    d.sigma_s = 0.5f;  /* $DEFAULT: 0.5 shadows lift */
+    d.detail = 0.25f;  /* $DEFAULT: 0.25 clarity (local contrast) */
+    d.midtone = 0.5f;  /* $DEFAULT: 0.5 midtone range */
     return d;
 }

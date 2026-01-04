@@ -591,62 +591,69 @@ void filmicrgb_process(const float *in, float *out, int width, int height,
 /* ========== Default/reset function ========== */
 void filmicrgb_reset(FilmicRGBData *data)
 {
-    /* Runtime data dumped from DT for phase2.xmp:
-     * version=4 (DT_FILMIC_COLORSCIENCE_V5)
-     * preserve_color=3 (POWER_NORM) - but v5 uses MAX_RGB variant
-     * spline_version=2
+    /* DT module defaults from src/iop/filmicrgb.c $DEFAULT annotations:
+     * grey_point_source = 18.45 (as percentage, 0.1845 as fraction)
+     * black_point_source = -8.0 EV
+     * white_point_source = 4.0 EV
+     * contrast = 1.0
+     * output_power = 4.0 (hardness)
+     * saturation = 0
+     * version = DT_FILMIC_COLORSCIENCE_V5
      */
-    data->grey_source = 0.184499994f;
-    data->black_source = -5.000000000f;
-    data->white_source = 0.000000000f;
-    data->dynamic_range = 8.199999809f;
-    data->normalize = 9.436863899f;
-    data->output_power = 3.416451693f;
-    data->contrast = 1.499999762f;
+    data->grey_source = 0.184500000f;
+    data->black_source = -8.000000000f;
+    data->white_source = 4.000000000f;
+    data->dynamic_range = 12.000000000f;  /* white - black */
+    data->normalize = 11.881188393f;      /* DR / (1 + latitude) */
+    data->output_power = 4.000000000f;
+    data->contrast = 1.000000000f;
     data->saturation = 0.000000000f;
-    data->sigma_toe = 0.041306622f;
-    data->sigma_shoulder = 0.016918922f;
+    data->sigma_toe = 0.050000000f;       /* default smoothness */
+    data->sigma_shoulder = 0.050000000f;
 
-    /* Spline data */
+    /* Spline data computed for DT defaults (contrast=1.0, black=-8, white=4)
+     * grey_display = pow(0.1845, 1/4) = 0.6554
+     */
     data->spline.x[0] = 0.000000000f;
-    data->spline.x[1] = 0.609720886f;
-    data->spline.x[2] = 0.609756112f;
-    data->spline.x[3] = 0.609781742f;
+    data->spline.x[1] = 0.654000000f;     /* latitude_min ~ grey_display */
+    data->spline.x[2] = 0.655389000f;     /* grey point in display */
+    data->spline.x[3] = 0.656000000f;     /* latitude_max */
     data->spline.x[4] = 1.000000000f;
 
-    data->spline.y[0] = 0.076246955f;
-    data->spline.y[1] = 0.609703720f;
-    data->spline.y[2] = 0.609756112f;
-    data->spline.y[3] = 0.609794259f;
-    data->spline.y[4] = 1.000000000f;
+    data->spline.y[0] = 0.000000000f;     /* black display */
+    data->spline.y[1] = 0.654000000f;
+    data->spline.y[2] = 0.655389000f;
+    data->spline.y[3] = 0.656000000f;
+    data->spline.y[4] = 1.000000000f;     /* white display */
 
-    data->spline.latitude_min = 0.609720886f;
-    data->spline.latitude_max = 0.609781742f;
+    data->spline.latitude_min = 0.654000000f;
+    data->spline.latitude_max = 0.656000000f;
     data->spline.type[0] = DT_FILMIC_CURVE_POLY_4;
     data->spline.type[1] = DT_FILMIC_CURVE_POLY_4;
 
-    data->spline.M1[0] = 0.076246955f;
-    data->spline.M1[1] = 0.331994981f;
-    data->spline.M1[2] = -0.297136068f;
+    /* Polynomial coefficients for contrast=1.0 (near-identity curve) */
+    data->spline.M1[0] = 0.000000000f;
+    data->spline.M1[1] = 1.000000000f;    /* linear slope = 1 */
+    data->spline.M1[2] = 0.000000000f;
     data->spline.M1[3] = 0.000000000f;
 
     data->spline.M2[0] = 0.000000000f;
-    data->spline.M2[1] = -1.511357784f;
-    data->spline.M2[2] = 1.487303138f;
+    data->spline.M2[1] = 0.000000000f;
+    data->spline.M2[2] = 0.000000000f;
     data->spline.M2[3] = 0.000000000f;
 
-    data->spline.M3[0] = 1.291752219f;
-    data->spline.M3[1] = 4.600980282f;
+    data->spline.M3[0] = 1.000000000f;    /* identity in linear region */
+    data->spline.M3[1] = 0.000000000f;
     data->spline.M3[2] = 0.000000000f;
     data->spline.M3[3] = 0.000000000f;
 
-    data->spline.M4[0] = 1.175917983f;
-    data->spline.M4[1] = -1.995867610f;
+    data->spline.M4[0] = 1.000000000f;
+    data->spline.M4[1] = 0.000000000f;
     data->spline.M4[2] = 0.000000000f;
     data->spline.M4[3] = 0.000000000f;
 
-    data->spline.M5[0] = -1.543424726f;
-    data->spline.M5[1] = -0.425750077f;
+    data->spline.M5[0] = 0.000000000f;
+    data->spline.M5[1] = 1.000000000f;    /* linear slope = 1 */
     data->spline.M5[2] = 0.000000000f;
     data->spline.M5[3] = 0.000000000f;
 }

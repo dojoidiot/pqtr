@@ -707,12 +707,13 @@ void channelmixerrgb_process(const float *in, float *out,
 
 void channelmixerrgb_reset(ChannelMixerRGBData *d)
 {
-    d->adaptation = DT_ADAPTATION_LINEAR_BRADFORD;
+    /* DT default from $DEFAULT: DT_ADAPTATION_CAT16 */
+    d->adaptation = DT_ADAPTATION_CAT16;
 
-    /* D65 illuminant in Bradford LMS */
-    d->illuminant[0] = 0.941238f;
-    d->illuminant[1] = 1.040633f;
-    d->illuminant[2] = 1.088791f;
+    /* D65 illuminant in CAT16 LMS (from chromatic_adaptation.h) */
+    d->illuminant[0] = 0.97553267f;
+    d->illuminant[1] = 1.01647859f;
+    d->illuminant[2] = 1.08483440f;
     d->illuminant[3] = 0.0f;
 
     /* Identity MIX matrix */

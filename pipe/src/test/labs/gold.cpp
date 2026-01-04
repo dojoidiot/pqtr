@@ -17,6 +17,11 @@
 #include <cmath>
 #include <cstdint>
 
+/* Camera database - from DT adobe_coeff.c */
+extern "C" {
+#include "../../main/labs/cameras.c"
+}
+
 /* Sony ARW decoder - COPIED from DT/RawSpeed */
 extern "C" {
 #include "../../main/labs/sony.c"
