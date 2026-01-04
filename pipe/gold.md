@@ -417,3 +417,173 @@ To add support for a new camera, add an entry to `camera_db[]` in `cameras.c`:
 
 1. Check `rawspeed/data/cameras.xml` for `<BlackAreas>` and typical sensor bit depth
 2. Common values: 14-bit sensor = white 16383, black varies by camera
+
+---
+
+## DT Expert System
+
+Darktable is an **expert system** with multiple knowledge sources:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     DT Expert System                                │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. RAW METADATA (per-image)                                        │
+│     └─ black/white levels, WB coeffs, EXIF                          │
+│     └─ Source: Embedded in RAW file                                 │
+│                                                                     │
+│  2. CAMERA DATABASE (per-camera)                                    │
+│     └─ xyz_to_cam matrix, default black/white, Bayer pattern        │
+│     └─ Source: cameras.c (from adobe_coeff.c + cameras.xml)         │
+│                                                                     │
+│  3. MODULE DEFAULTS (universal)                                     │
+│     └─ $DEFAULT annotations in each module                          │
+│     └─ Source: mods/*_defaults() functions                          │
+│                                                                     │
+│  4. AUTO-TUNE (per-image, runtime)                         ← NEW    │
+│     └─ Histogram analysis to set optimal parameters                 │
+│     └─ Source: filmicrgb.c apply_autotune()                         │
+│                                                                     │
+│  5. CAMERA STYLES (per-camera-family)                               │
+│     └─ Pre-tuned looks: exposure, contrast, color                   │
+│     └─ Source: styles/darktable_Sony_ILCE-7M3.dtstyle               │
+│                                                                     │
+│  6. XMP/USER (per-image)                                            │
+│     └─ User edits, sidecar files                                    │
+│     └─ Source: image.ARW.xmp                                        │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Parameter Precedence
+
+```
+XMP/User  →  overrides  →  Camera Style
+    │                          │
+    └──────────┬───────────────┘
+               ▼
+         Auto-Tune  →  adjusts  →  Module Defaults
+               │                        │
+               └──────────┬─────────────┘
+                          ▼
+                   Camera Database
+                          │
+                          ▼
+                    RAW Metadata
+```
+
+---
+
+## Parameter Optimization Order
+
+### The Problem
+
+Both DRO (colorbalancergb) and filmic autotune try to lift shadows:
+- **DRO**: `shadows[] *= 1.08` in scene-referred space (before filmic)
+- **Filmic autotune**: `output_power = f(DR)` lifts shadows via gamma curve
+
+When both are active: **double shadow lift = shadows too bright**
+
+### Solution: Scene-Adaptive Filmic + Metadata DRO
+
+The pipeline uses both adaptive mechanisms:
+1. **Filmic autotune**: Analyzes image histogram to set black/white EV points
+2. **DRO from metadata**: Applies shadow lift based on camera DRO setting
+
+### Optimization Order (by parameter source)
+
+| Phase | Source | Parameters | Module |
+|-------|--------|-----------|--------|
+| **1. Fixed from metadata** | Camera calibration | black/white levels | rawprepare |
+| | Shot metadata | WB coefficients | temperature |
+| | Camera database | color matrix | colorin |
+| | ISO from EXIF | noise profile | denoiseprofile |
+| **2. Exposure calibration** | Per-camera | exposure EV | exposure |
+| **3. Tone mapping** | Scene autotune | black/white EV from histogram | filmicrgb |
+| **4. Color grading** | Picture Profile | saturation, vibrance | colorbalancergb |
+| | DRO metadata | shadow_lift | colorbalancergb |
+
+### Key Insight
+
+```
+Filmic autotune adapts to scene dynamic range
+DRO applies camera-specified shadow lift
+Both work together for per-image optimization
+```
+
+### Implementation
+
+```cpp
+// In gold.cpp
+
+// Scene-adaptive filmic: analyze histogram for black/white points
+FilmicRGBData filmic_data;
+filmicrgb_reset(&filmic_data);
+filmicrgb_autotune(&filmic_data, rec2020_cb, width, height);
+
+// DRO handles shadow adaptation (from camera metadata)
+if (meta.dro_shadow_lift != 1.0f) {
+    cb_data.shadows[0] = meta.dro_shadow_lift;  // e.g., 1.08 for DRO Auto
+    cb_data.shadows[1] = meta.dro_shadow_lift;
+    cb_data.shadows[2] = meta.dro_shadow_lift;
+}
+```
+
+---
+
+## Filmic Auto-Tune (Reference)
+
+### Status: ENABLED
+
+Auto-tune is implemented in `filmicrgb_autotune()` and **enabled by default**. It analyzes the scene histogram to adapt the tone curve to each image's dynamic range.
+
+### What It Does
+
+```c
+// 1. Compute min/max per channel from input image
+// 2. Use max RGB method to find scene black/white
+// 3. Convert to EV relative to grey point (0.1845)
+// 4. Update black_source, white_source, dynamic_range
+// 5. Recompute output_power from DR
+// 6. Recompute spline coefficients
+```
+
+### To Disable (if needed)
+
+```cpp
+// Comment out in gold.cpp:
+// filmicrgb_autotune(&filmic_data, rec2020_cb, width, height);
+
+// filmicrgb_reset() provides fixed DT defaults:
+// black=-8, white=4, output_power=4.0
+```
+
+---
+
+## Verification Tools
+
+### diff.cpp
+
+Compares two images with delta-E tolerance:
+
+```bash
+./tmp/build/diff <reference> <output> [--bits|--bayer|--rgb|--lab|--display]
+
+# Modes:
+--bits     Exact binary match (for raw data)
+--bayer    Float match (mean < 1e-6)
+--rgb      Linear RGB delta-E < 0.01
+--lab      Lab delta-E < 0.01
+--display  sRGB delta-E < 1.0 (perceptual match)
+```
+
+### dark.cpp
+
+Parses DT XMP sidecar files:
+
+```bash
+./tmp/build/dark src/test/raws/sony.xmp --dump
+
+# Shows all modules and their parameters
+```

@@ -200,23 +200,20 @@ Copied from DT's `apply_autotune()` (filmicrgb.c:2680-2717):
 ### Files Modified
 
 - `mods/filmicrgb.c`: Added `filmicrgb_autotune()`, `compute_filmic_spline()`, `gauss_solve()`
-- `gold.cpp`: Added autotune call (disabled by default)
+- `gold.cpp`: Added autotune call (enabled by default)
 
 ### Usage
 
 ```cpp
 FilmicRGBData filmic_data;
 filmicrgb_reset(&filmic_data);
-filmicrgb_autotune(&filmic_data, pixels, width, height);  // Optional
+filmicrgb_autotune(&filmic_data, pixels, width, height);  // Scene-adaptive
 filmicrgb_process(...);
 ```
 
 ### Note
 
-Auto-tune is **disabled by default** because:
-- DT camera styles/XMPs have pre-tuned params
-- DT defaults (black=-8, white=4) are the "out of the box" behavior
-- Auto-tune is a user action in DT GUI, not automatic
+Auto-tune is **enabled by default** for scene-adaptive processing. It analyzes the image histogram to set optimal black/white EV points for each scene.
 
 **Bilat Issue:** FIXED
 - Implemented Colorspace enum in Step interface
