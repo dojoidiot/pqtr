@@ -47,6 +47,7 @@ extern "C" {
 #include "../../main/labs/mods/bilat.c"
 #include "../../main/labs/mods/colorout.c"
 #include "../../main/labs/mods/autotune.c"
+#include "../../main/labs/mods/denoiseprofile.c"
 }
 
 /* STB image write */
@@ -351,9 +352,42 @@ int main(int argc, char** argv)
     free(rec2020);
 
     /* ======================================================================
-       11. colorbalancergb: Color grading (order 41.5 - before filmicrgb!)
+       11. denoiseprofile: Profiled wavelet denoise (after colorin, before grading)
        ====================================================================== */
-    printf("8. colorbalancergb...\n");
+    printf("8. denoiseprofile...\n");
+
+    DenoiseProfileData dn_data;
+    denoiseprofile_reset(&dn_data);
+
+    /* Get ISO from exiftool for noise profile lookup */
+    int iso = 100;
+    {
+        char cmd[512];
+        snprintf(cmd, sizeof(cmd), "exiftool -n -ISO \"%s\" 2>/dev/null | grep -oE '[0-9]+'", input_path);
+        FILE* fp = popen(cmd, "r");
+        if (fp) {
+            fscanf(fp, "%d", &iso);
+            pclose(fp);
+        }
+    }
+    printf("   ISO: %d\n", iso);
+
+    /* Set noise profile based on camera and ISO */
+    denoiseprofile_set_profile(&dn_data, "SONY", "ILCE-7M3", iso);
+
+    /* Adjust strength based on ISO (higher ISO = more noise = more denoise) */
+    float iso_factor = logf((float)iso / 100.0f) / logf(2.0f);  /* Stops above ISO 100 */
+    dn_data.strength = 0.5f + iso_factor * 0.15f;  /* Scale strength with ISO */
+    printf("   Denoise strength: %.2f (ISO factor: %.1f stops)\n", dn_data.strength, iso_factor);
+
+    float* rec2020_dn = (float*)malloc(npixels * 4 * sizeof(float));
+    denoiseprofile_process(rec2020_cm, rec2020_dn, width, height, &dn_data);
+    free(rec2020_cm);
+
+    /* ======================================================================
+       12. colorbalancergb: Color grading (order 41.5 - before filmicrgb!)
+       ====================================================================== */
+    printf("9. colorbalancergb...\n");
 
     ColorBalanceRGBData cb_data;
     colorbalancergb_reset(&cb_data);
@@ -390,9 +424,9 @@ int main(int argc, char** argv)
     };
 
     float* rec2020_cb = (float*)malloc(npixels * 4 * sizeof(float));
-    colorbalancergb_process(rec2020_cm, rec2020_cb, width, height,
+    colorbalancergb_process(rec2020_dn, rec2020_cb, width, height,
                             cb_input_matrix, cb_output_matrix, &cb_data);
-    free(rec2020_cm);
+    free(rec2020_dn);
 
     /* ======================================================================
        12. filmicrgb: Tone mapping (HDR -> SDR) (order 46)
