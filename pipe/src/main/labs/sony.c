@@ -444,6 +444,8 @@ typedef struct {
     float d65_coeffs[4];     /* D65 WB multipliers computed from xyz_to_cam */
     const CameraData* camera; /* Pointer to camera database entry (includes style) */
     PictureProfile profile;  /* Picture profile from RAW (saturation, vibrance, etc.) */
+    int dro_level;           /* DynamicRangeOptimizer: 0=Off, 1=Standard, 3=Auto, 4-8=Lv1-5 */
+    float dro_shadow_lift;   /* Derived shadow lift factor (1.0 = neutral) */
 } SonyARWMeta;
 
 /* Read uint16/32 little-endian */
@@ -619,6 +621,10 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
     meta->profile.saturation = 0.0f;
     meta->profile.vibrance = 0.0f;
     meta->profile.contrast = 0.0f;
+
+    /* DRO defaults */
+    meta->dro_level = 0;
+    meta->dro_shadow_lift = 1.0f;  /* Neutral */
 
     /* Lookup camera in database - will be updated with actual model after parsing */
     const CameraData* cam = cameras_lookup("Sony", "ILCE-7M3");
@@ -917,17 +923,69 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
     /* Map picture profile to saturation/vibrance values */
     map_picture_profile(&meta->profile);
 
-    /* Debug output for picture profile */
+    /* Get DynamicRangeOptimizer from exiftool
+       Values: 0=Off, 1=Standard, 3=Auto, 4=Lv1, 5=Lv2, 6=Lv3, 7=Lv4, 8=Lv5 */
+    snprintf(cmd, sizeof(cmd), "exiftool -n -DynamicRangeOptimizer \"%s\" 2>/dev/null | grep -oE '[0-9]+'", filename);
+    FILE* dro_fp = popen(cmd, "r");
+    if (dro_fp) {
+        int dro_value = 0;
+        if (fscanf(dro_fp, "%d", &dro_value) == 1) {
+            meta->dro_level = dro_value;
+        }
+        pclose(dro_fp);
+    }
+
+    /* Map DRO level to shadow lift
+       DRO boosts shadows while protecting highlights.
+       Auto (3) = moderate lift, Lv1-5 (4-8) = progressive lift */
+    switch (meta->dro_level) {
+        case 0:  /* Off */
+            meta->dro_shadow_lift = 1.0f;
+            break;
+        case 1:  /* Standard */
+            meta->dro_shadow_lift = 1.10f;
+            break;
+        case 3:  /* Auto - scene-adaptive lift */
+            meta->dro_shadow_lift = 1.08f;
+            break;
+        case 4:  /* Lv1 */
+            meta->dro_shadow_lift = 1.20f;
+            break;
+        case 5:  /* Lv2 */
+            meta->dro_shadow_lift = 1.30f;
+            break;
+        case 6:  /* Lv3 */
+            meta->dro_shadow_lift = 1.40f;
+            break;
+        case 7:  /* Lv4 */
+            meta->dro_shadow_lift = 1.50f;
+            break;
+        case 8:  /* Lv5 */
+            meta->dro_shadow_lift = 1.60f;
+            break;
+        default:
+            meta->dro_shadow_lift = 1.0f;
+            break;
+    }
+
+    /* Debug output for picture profile and DRO */
     const char* pp_names[] = {
         "Off", "Portrait", "Standard/Neutral", "Cinema/Neutral",
         "Cine1-SGamut", "Cine2-SGamut", "Cine1-Cinema", "S-Log2",
         "Vivid", "S-Log3-Cine", "S-Log3"
     };
+    const char* dro_names[] = {
+        "Off", "Standard", "2", "Auto", "Lv1", "Lv2", "Lv3", "Lv4", "Lv5"
+    };
     const char* pp_name = (meta->profile.picture_profile < 11)
         ? pp_names[meta->profile.picture_profile] : "Unknown";
+    const char* dro_name = (meta->dro_level < 9)
+        ? dro_names[meta->dro_level] : "Unknown";
     printf("sony: Picture Profile: pp=%d (%s), sat=%.2f, vib=%.2f\n",
            meta->profile.picture_profile, pp_name,
            meta->profile.saturation, meta->profile.vibrance);
+    printf("sony: DRO: level=%d (%s), shadow_lift=%.2f\n",
+           meta->dro_level, dro_name, meta->dro_shadow_lift);
 
     free(data);
     return 0;

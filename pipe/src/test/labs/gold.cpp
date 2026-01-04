@@ -366,6 +366,15 @@ int main(int argc, char** argv)
                meta.profile.saturation, meta.profile.vibrance);
     }
 
+    /* Apply DRO (Dynamic Range Optimizer) shadow lift */
+    if (meta.dro_shadow_lift != 1.0f) {
+        cb_data.shadows[0] = meta.dro_shadow_lift;
+        cb_data.shadows[1] = meta.dro_shadow_lift;
+        cb_data.shadows[2] = meta.dro_shadow_lift;
+        /* No highlight compensation - DRO only lifts shadows */
+        printf("   DRO: shadow_lift=%.2f\n", meta.dro_shadow_lift);
+    }
+
     /* DT pre-multiplied matrices from phase2.xmp dump */
     dt_colormatrix_t cb_input_matrix = {
         { 0.406808585f, 0.617819786f, 0.045817737f, 0.0f },
