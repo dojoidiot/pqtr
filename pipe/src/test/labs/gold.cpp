@@ -358,6 +358,14 @@ int main(int argc, char** argv)
     ColorBalanceRGBData cb_data;
     colorbalancergb_reset(&cb_data);
 
+    /* Apply Picture Profile saturation/vibrance from RAW metadata */
+    if (meta.profile.saturation != 0.0f || meta.profile.vibrance != 0.0f) {
+        cb_data.saturation_global = meta.profile.saturation;
+        cb_data.vibrance = meta.profile.vibrance;
+        printf("   Picture Profile: saturation=%.2f vibrance=%.2f\n",
+               meta.profile.saturation, meta.profile.vibrance);
+    }
+
     /* DT pre-multiplied matrices from phase2.xmp dump */
     dt_colormatrix_t cb_input_matrix = {
         { 0.406808585f, 0.617819786f, 0.045817737f, 0.0f },

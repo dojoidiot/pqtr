@@ -420,6 +420,15 @@ int sony_write_ppm(const char* filename, const uint16_t* data, int width, int he
    Extracts values needed for decoding and PipeState initialization.
    ============================================================================ */
 
+/* Picture profile settings read from RAW MakerNotes */
+typedef struct {
+    int creative_style;      /* 0=Standard, 1=Vivid, 2=Neutral, 3=Portrait, etc. */
+    int picture_profile;     /* Raw value from tag 0x0237 */
+    float saturation;        /* Derived saturation boost (-1 to +1) */
+    float vibrance;          /* Derived vibrance boost (-1 to +1) */
+    float contrast;          /* Derived contrast adjustment */
+} PictureProfile;
+
 typedef struct {
     int width;
     int height;
@@ -434,6 +443,7 @@ typedef struct {
     float xyz_to_cam[9];     /* XYZ->CAM matrix from cameras.xml (scaled by 10000) */
     float d65_coeffs[4];     /* D65 WB multipliers computed from xyz_to_cam */
     const CameraData* camera; /* Pointer to camera database entry (includes style) */
+    PictureProfile profile;  /* Picture profile from RAW (saturation, vibrance, etc.) */
 } SonyARWMeta;
 
 /* Read uint16/32 little-endian */
@@ -459,6 +469,110 @@ static IFDEntry parse_ifd_entry(const uint8_t* data) {
     e.count = meta_read_u32(data + 4);
     e.value_offset = meta_read_u32(data + 8);
     return e;
+}
+
+/* Map Sony Picture Profile (from tag 0x0237) to saturation/vibrance values
+
+   Picture Profile values (from exiftool Sony.pm):
+   0 = Off (use Creative Style)
+   1 = Gamma Still - Portrait
+   2 = Gamma Still - Standard/Neutral (PP2)
+   3 = Gamma Still - Cinema/Neutral (PP3)
+   4 = Gamma Cine1 - S-Gamut (PP4)
+   5 = Gamma Cine2 - S-Gamut (PP5)
+   6 = Gamma Cine1 - Cinema (PP6)
+   7 = S-Log2 - S-Gamut (PP7)
+   8 = Gamma Still - Vivid
+   9 = S-Log3 - S-Gamut3.Cine (PP9)
+   10 = S-Log3 - S-Gamut3 (PP10)
+   ... and more
+
+   Creative Style (tag 0xb020, string):
+   Standard, Vivid, Neutral, Clear, Deep, Light, Portrait, Landscape, etc.
+
+   We prioritize picture_profile over creative_style when available. */
+static void map_picture_profile(PictureProfile* p)
+{
+    /* First check picture_profile (more specific) */
+    if (p->picture_profile != 0) {
+        switch (p->picture_profile) {
+            case 8:  /* Gamma Still - Vivid */
+                p->saturation = 1.0f;    /* Strong saturation boost (tuned to match camera JPEG) */
+                p->vibrance = 0.50f;     /* Boost greens/blues */
+                p->contrast = 0.10f;
+                return;
+            case 1:  /* Gamma Still - Portrait */
+                p->saturation = 0.0f;
+                p->vibrance = 0.10f;
+                p->contrast = 0.0f;
+                return;
+            case 2:  /* Gamma Still - Standard/Neutral */
+            case 3:  /* Gamma Still - Cinema/Neutral */
+                p->saturation = -0.10f;
+                p->vibrance = 0.0f;
+                p->contrast = 0.0f;
+                return;
+            case 4:  /* Cine1 - log gamma, needs different handling */
+            case 5:  /* Cine2 */
+            case 6:  /* Cinema */
+            case 7:  /* S-Log2 */
+            case 9:  /* S-Log3 - S-Gamut3.Cine */
+            case 10: /* S-Log3 - S-Gamut3 */
+                /* Log profiles should be left neutral - they need different processing */
+                p->saturation = 0.0f;
+                p->vibrance = 0.0f;
+                p->contrast = 0.0f;
+                return;
+            default:
+                /* Unknown picture profile, fall through to creative_style */
+                break;
+        }
+    }
+
+    /* Fall back to creative_style */
+    switch (p->creative_style) {
+        case 1:  /* Vivid - strong saturation boost */
+            p->saturation = 0.25f;
+            p->vibrance = 0.20f;
+            p->contrast = 0.10f;
+            break;
+        case 2:  /* Neutral - reduced saturation */
+            p->saturation = -0.15f;
+            p->vibrance = 0.0f;
+            p->contrast = -0.10f;
+            break;
+        case 3:  /* Clear - slight boost */
+            p->saturation = 0.10f;
+            p->vibrance = 0.15f;
+            p->contrast = 0.05f;
+            break;
+        case 4:  /* Deep - emphasis on dark tones */
+            p->saturation = 0.15f;
+            p->vibrance = 0.10f;
+            p->contrast = 0.15f;
+            break;
+        case 5:  /* Light - bright, airy */
+            p->saturation = 0.05f;
+            p->vibrance = 0.10f;
+            p->contrast = -0.05f;
+            break;
+        case 6:  /* Portrait - skin-friendly */
+            p->saturation = 0.0f;
+            p->vibrance = 0.10f;
+            p->contrast = 0.0f;
+            break;
+        case 7:  /* Landscape - boosted greens/blues */
+            p->saturation = 0.20f;
+            p->vibrance = 0.15f;
+            p->contrast = 0.10f;
+            break;
+        case 0:  /* Standard - neutral */
+        default:
+            p->saturation = 0.0f;
+            p->vibrance = 0.0f;
+            p->contrast = 0.0f;
+            break;
+    }
 }
 
 /* Sony SR2SubIFD decryption (Dave Coffin's algorithm from dcraw) */
@@ -498,6 +612,13 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
     meta->wb_rggb[3] = 1.0f;
     meta->filters = 0x94949494;  /* RGGB default */
     meta->exposure_bias = 0.0f;  /* DT module default - no exposure compensation */
+
+    /* Initialize picture profile defaults (neutral) */
+    meta->profile.creative_style = 0;  /* Standard */
+    meta->profile.picture_profile = 0;
+    meta->profile.saturation = 0.0f;
+    meta->profile.vibrance = 0.0f;
+    meta->profile.contrast = 0.0f;
 
     /* Lookup camera in database - will be updated with actual model after parsing */
     const CameraData* cam = cameras_lookup("Sony", "ILCE-7M3");
@@ -609,9 +730,35 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
 
                 if (entry.tag == 0x2010)
                     sony_tag2010_offset = entry.value_offset;
+
+                /* Creative Style: tag 0xb020 (16-byte string: "Standard", "Vivid", etc.) */
+                if (entry.tag == 0xb020 && entry.count >= 1) {
+                    uint32_t str_offset = entry.value_offset;
+                    if (entry.count <= 4) {
+                        /* Small value stored in value_offset itself */
+                        /* Not expected for 16-byte string */
+                    } else if (str_offset + entry.count <= read_size) {
+                        /* String at offset - parse first word to identify style */
+                        char style_str[20] = {0};
+                        int len = (entry.count < 19) ? entry.count : 19;
+                        memcpy(style_str, data + str_offset, len);
+
+                        /* Map string to enum */
+                        if (strstr(style_str, "Vivid")) meta->profile.creative_style = 1;
+                        else if (strstr(style_str, "Neutral")) meta->profile.creative_style = 2;
+                        else if (strstr(style_str, "Clear")) meta->profile.creative_style = 3;
+                        else if (strstr(style_str, "Deep")) meta->profile.creative_style = 4;
+                        else if (strstr(style_str, "Light")) meta->profile.creative_style = 5;
+                        else if (strstr(style_str, "Portrait")) meta->profile.creative_style = 6;
+                        else if (strstr(style_str, "Landscape")) meta->profile.creative_style = 7;
+                        else if (strstr(style_str, "Standard")) meta->profile.creative_style = 0;
+                        else meta->profile.creative_style = 0; /* Default to Standard */
+                    }
+                }
             }
 
-            /* Parse tag 0x2010 sub-IFD for tone curve (0x7010) */
+            /* Parse tag 0x2010 sub-IFD for tone curve (0x7010) - note: tag 0x2010 is encrypted,
+               so we use exiftool for PictureProfile instead */
             if (sony_tag2010_offset > 0 && sony_tag2010_offset + 2 <= read_size) {
                 uint16_t tag2010_nentries = meta_read_u16(data + sony_tag2010_offset);
 
@@ -628,7 +775,6 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
                             meta->sony_curve[j] = meta_read_u16(data + entry.value_offset + j * 2);
                         }
                         found_sony_curve = 1;
-                        break;
                     }
                 }
             }
@@ -754,6 +900,34 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
             free(sr2);
         }
     }
+
+    /* Try to get PictureProfile from exiftool (tag 0x2010 is encrypted) */
+    char cmd[512];
+    snprintf(cmd, sizeof(cmd), "exiftool -n -PictureProfile \"%s\" 2>/dev/null | grep -oE '[0-9]+'", filename);
+    FILE* pp = popen(cmd, "r");
+    if (pp) {
+        int pp_value = 0;
+        if (fscanf(pp, "%d", &pp_value) == 1) {
+            meta->profile.picture_profile = pp_value;
+            printf("sony: PictureProfile from exiftool: %d\n", pp_value);
+        }
+        pclose(pp);
+    }
+
+    /* Map picture profile to saturation/vibrance values */
+    map_picture_profile(&meta->profile);
+
+    /* Debug output for picture profile */
+    const char* pp_names[] = {
+        "Off", "Portrait", "Standard/Neutral", "Cinema/Neutral",
+        "Cine1-SGamut", "Cine2-SGamut", "Cine1-Cinema", "S-Log2",
+        "Vivid", "S-Log3-Cine", "S-Log3"
+    };
+    const char* pp_name = (meta->profile.picture_profile < 11)
+        ? pp_names[meta->profile.picture_profile] : "Unknown";
+    printf("sony: Picture Profile: pp=%d (%s), sat=%.2f, vib=%.2f\n",
+           meta->profile.picture_profile, pp_name,
+           meta->profile.saturation, meta->profile.vibrance);
 
     free(data);
     return 0;
