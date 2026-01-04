@@ -20,6 +20,14 @@
    Black/white levels from rawspeed cameras.xml or typical camera defaults
    ============================================================================ */
 
+/* Default style for cameras without a specific DT style */
+#define DEFAULT_STYLE { 0.0f, 0.1845f, -8.0f, 4.0f, 0.1f, 0.5f }
+
+/* Sony ILCE-7M3 style from darktable_Sony_ILCE-7M3.dtstyle
+   exposure: 1.34 EV (auto-tuned from JPEG brightness matching)
+   filmic: grey=0.1845, black=-5.0, white=4.0 */
+#define SONY_ILCE7M3_STYLE { 1.34f, 0.1845f, -5.0f, 4.0f, 0.1f, 0.5f }
+
 static const CameraData camera_db[] = {
     /* ------------------------------------------------------------------------
        Sony Alpha cameras
@@ -34,7 +42,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 512,
         .white_level = 16383,
-        .filters = 0x94949494  /* RGGB */
+        .filters = 0x94949494,  /* RGGB */
+        .style = SONY_ILCE7M3_STYLE
     },
     {
         .make = "Sony",
@@ -46,7 +55,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 512,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = SONY_ILCE7M3_STYLE  /* Same style as 7M3 */
     },
     {
         .make = "Sony",
@@ -58,7 +68,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 512,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = SONY_ILCE7M3_STYLE
     },
     {
         .make = "Sony",
@@ -70,7 +81,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 512,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = SONY_ILCE7M3_STYLE
     },
     {
         .make = "Sony",
@@ -82,7 +94,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 512,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = SONY_ILCE7M3_STYLE
     },
 
     /* ------------------------------------------------------------------------
@@ -98,7 +111,8 @@ static const CameraData camera_db[] = {
         },
         .black_level = 2048,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = DEFAULT_STYLE
     },
     {
         .make = "Canon",
@@ -110,11 +124,12 @@ static const CameraData camera_db[] = {
         },
         .black_level = 2048,
         .white_level = 16383,
-        .filters = 0x94949494
+        .filters = 0x94949494,
+        .style = DEFAULT_STYLE
     },
 
     /* Sentinel - must be last */
-    { NULL, NULL, {0}, 0, 0, 0 }
+    { NULL, NULL, {0}, 0, 0, 0, {0} }
 };
 
 /* ============================================================================

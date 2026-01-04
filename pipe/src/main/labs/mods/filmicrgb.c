@@ -668,3 +668,251 @@ static inline FilmicRGBData filmicrgb_defaults(void)
     filmicrgb_reset(&d);
     return d;
 }
+
+/* ============================================================================
+   Gaussian elimination for spline computation
+   Copied from darktable src/iop/gaussian_elimination.h
+   ============================================================================ */
+
+static int gauss_make_triangular(double *A, int *p, int n)
+{
+    p[n - 1] = n - 1;
+    for(int k = 0; k < n; ++k) {
+        int m = k;
+        for(int i = k + 1; i < n; ++i)
+            if(fabs(A[k + n * i]) > fabs(A[k + n * m])) m = i;
+        p[k] = m;
+        double t1 = A[k + n * m];
+        A[k + n * m] = A[k + n * k];
+        A[k + n * k] = t1;
+        if(t1 != 0) {
+            for(int i = k + 1; i < n; ++i) A[k + n * i] /= -t1;
+            if(k != m)
+                for(int i = k + 1; i < n; ++i) {
+                    double t2 = A[i + n * m];
+                    A[i + n * m] = A[i + n * k];
+                    A[i + n * k] = t2;
+                }
+            for(int j = k + 1; j < n; ++j)
+                for(int i = k + 1; i < n; ++i)
+                    A[i + n * j] += A[k + j * n] * A[i + k * n];
+        } else {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static void gauss_solve_triangular(const double *A, const int *p, double *b, int n)
+{
+    for(int k = 0; k < n - 1; ++k) {
+        int m = p[k];
+        double t = b[m];
+        b[m] = b[k];
+        b[k] = t;
+        for(int i = k + 1; i < n; ++i) b[i] += A[k + n * i] * t;
+    }
+    for(int k = n - 1; k > 0; --k) {
+        b[k] /= A[k + n * k];
+        double t = b[k];
+        for(int i = 0; i < k; ++i) b[i] -= A[k + n * i] * t;
+    }
+    b[0] /= A[0 + 0 * n];
+}
+
+static int gauss_solve(double *A, double *b, int n)
+{
+    int p[5];  /* max size needed for our splines */
+    int err_code = gauss_make_triangular(A, p, n);
+    if(err_code) gauss_solve_triangular(A, p, b, n);
+    return err_code;
+}
+
+/* ============================================================================
+   Spline computation - simplified from DT's dt_iop_filmic_rgb_compute_spline
+   ============================================================================ */
+
+#define ORDER_4 5
+#define ORDER_3 4
+#define SAFETY_MARGIN 0.01f
+
+static void compute_filmic_spline(FilmicRGBData *d)
+{
+    const float output_power = d->output_power;
+    const float black_source = d->black_source;
+    const float white_source = d->white_source;
+    const float dynamic_range = d->dynamic_range;
+    const float contrast = d->contrast;
+
+    /* Display targets */
+    const float grey_display = powf(0.1845f, 1.0f / output_power);
+    const float black_display = 0.0f;
+    const float white_display = 1.0f;
+
+    /* Log coordinates */
+    const float black_log = 0.0f;
+    const float grey_log = fabsf(black_source) / dynamic_range;
+    const float white_log = 1.0f;
+
+    /* Latitude (V3 style) */
+    const float latitude = 0.01f;  /* default latitude */
+    const float hardness = output_power;
+    const float slope = contrast * dynamic_range / 8.0f;
+
+    float min_contrast = 1.0f;
+    min_contrast = fmaxf(min_contrast, (white_display - grey_display) / (white_log - grey_log));
+    min_contrast = fmaxf(min_contrast, (grey_display - black_display) / (grey_log - black_log));
+    min_contrast += SAFETY_MARGIN;
+
+    float actual_contrast = slope / (hardness * powf(grey_display, hardness - 1.0f));
+    actual_contrast = CLAMP(actual_contrast, min_contrast, 100.0f);
+
+    const float linear_intercept = grey_display - (actual_contrast * grey_log);
+
+    const float xmin = (black_display + SAFETY_MARGIN * (white_display - black_display) - linear_intercept) / actual_contrast;
+    const float xmax = (white_display - SAFETY_MARGIN * (white_display - black_display) - linear_intercept) / actual_contrast;
+
+    float toe_log = (1.0f - latitude) * grey_log + latitude * xmin;
+    float shoulder_log = (1.0f - latitude) * grey_log + latitude * xmax;
+
+    float toe_display = toe_log * actual_contrast + linear_intercept;
+    float shoulder_display = shoulder_log * actual_contrast + linear_intercept;
+
+    /* Build spline control points */
+    d->spline.x[0] = black_log;
+    d->spline.x[1] = toe_log;
+    d->spline.x[2] = grey_log;
+    d->spline.x[3] = shoulder_log;
+    d->spline.x[4] = white_log;
+
+    d->spline.y[0] = black_display;
+    d->spline.y[1] = toe_display;
+    d->spline.y[2] = grey_display;
+    d->spline.y[3] = shoulder_display;
+    d->spline.y[4] = white_display;
+
+    d->spline.latitude_min = toe_log;
+    d->spline.latitude_max = shoulder_log;
+    d->spline.type[0] = DT_FILMIC_CURVE_POLY_4;
+    d->spline.type[1] = DT_FILMIC_CURVE_POLY_4;
+
+    /* Solve linear central part */
+    d->spline.M2[2] = actual_contrast;
+    d->spline.M1[2] = d->spline.y[1] - d->spline.M2[2] * d->spline.x[1];
+    d->spline.M3[2] = 0.f;
+    d->spline.M4[2] = 0.f;
+    d->spline.M5[2] = 0.f;
+
+    /* Solve toe (4th order polynomial) */
+    const double Tl = d->spline.x[1];
+    const double Tl2 = Tl * Tl;
+    const double Tl3 = Tl2 * Tl;
+    const double Tl4 = Tl3 * Tl;
+
+    double A0[ORDER_4 * ORDER_4] = {
+        0.,        0.,       0.,      0., 1.,
+        0.,        0.,       0.,      1., 0.,
+        Tl4,       Tl3,      Tl2,     Tl, 1.,
+        4. * Tl3,  3. * Tl2, 2. * Tl, 1., 0.,
+        12. * Tl2, 6. * Tl,  2.,      0., 0.
+    };
+    double b0[ORDER_4] = { d->spline.y[0], 0., d->spline.y[1], d->spline.M2[2], 0. };
+    gauss_solve(A0, b0, ORDER_4);
+    d->spline.M5[0] = b0[0];
+    d->spline.M4[0] = b0[1];
+    d->spline.M3[0] = b0[2];
+    d->spline.M2[0] = b0[3];
+    d->spline.M1[0] = b0[4];
+
+    /* Solve shoulder (3rd order polynomial) */
+    const double Sl = d->spline.x[3];
+    const double Sl2 = Sl * Sl;
+    const double Sl3 = Sl2 * Sl;
+
+    double A1[ORDER_3 * ORDER_3] = {
+        1.,       1.,      1., 1.,
+        Sl3,      Sl2,     Sl, 1.,
+        3. * Sl2, 2. * Sl, 1., 0.,
+        6. * Sl,  2.,      0., 0.
+    };
+    double b1[ORDER_3] = { d->spline.y[4], d->spline.y[3], d->spline.M2[2], 0. };
+    gauss_solve(A1, b1, ORDER_3);
+    d->spline.M5[1] = 0.0f;
+    d->spline.M4[1] = b1[0];
+    d->spline.M3[1] = b1[1];
+    d->spline.M2[1] = b1[2];
+    d->spline.M1[1] = b1[3];
+
+    /* Update sigma values */
+    d->sigma_toe = powf(d->spline.latitude_min / 3.0f, 2.0f);
+    d->sigma_shoulder = powf((1.0f - d->spline.latitude_max) / 3.0f, 2.0f);
+}
+
+/* ============================================================================
+   filmicrgb_autotune - Copied from DT's apply_autotune()
+
+   Algorithm (from DT filmicrgb.c:2680-2717):
+   1. Compute min/max of input pixels using max(R,G,B) method
+   2. black = max(min_R, min_G, min_B)
+   3. white = max(max_R, max_G, max_B)
+   4. EVmin = clamp(log2(black / grey), -16, -1)
+   5. EVmax = clamp(log2(white / grey), 1, 16)
+   6. black_source = max(EVmin, -16)
+   7. white_source = EVmax
+   ============================================================================ */
+
+void filmicrgb_autotune(FilmicRGBData *data, const float *pixels, int width, int height)
+{
+    /* Compute min/max per channel */
+    float min_rgb[3] = {FLT_MAX, FLT_MAX, FLT_MAX};
+    float max_rgb[3] = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+
+    const size_t npix = (size_t)width * height;
+    for(size_t i = 0; i < npix; i++) {
+        for(int c = 0; c < 3; c++) {
+            const float v = pixels[4*i + c];
+            if(v < min_rgb[c]) min_rgb[c] = v;
+            if(v > max_rgb[c]) max_rgb[c] = v;
+        }
+    }
+
+    /* DT uses max(R,G,B) method for both min and max */
+    const float black = fmaxf(fmaxf(min_rgb[0], min_rgb[1]), min_rgb[2]);
+    const float white = fmaxf(fmaxf(max_rgb[0], max_rgb[1]), max_rgb[2]);
+    const float grey = data->grey_source;
+    const float security_factor = 0.0f;  /* DT default */
+
+    /* Compute EV values relative to grey */
+    float EVmin = CLAMP(log2f(black / grey), -16.0f, -1.0f);
+    float EVmax = CLAMP(log2f(white / grey), 1.0f, 16.0f);
+
+    /* Apply security factor */
+    EVmin *= (1.0f + security_factor / 100.0f);
+    EVmax *= (1.0f + security_factor / 100.0f);
+
+    /* Update data */
+    data->black_source = fmaxf(EVmin, -16.0f);
+    data->white_source = EVmax;
+    data->dynamic_range = data->white_source - data->black_source;
+
+    /* Compute output_power (from DT's _compute_output_power) */
+    const float grey_target = 18.45f;  /* default grey_point_target */
+    data->output_power = CLAMP(
+        logf(grey_target / 100.0f) / logf(-data->black_source / data->dynamic_range),
+        1.0f, 10.0f
+    );
+
+    /* Recompute normalize */
+    const float reconstruct_threshold = powf(2.0f, data->white_source + 0.0f) * grey;
+    const float reconstruct_feather = exp2f(12.f / 3.0f);  /* default feather=3 */
+    data->normalize = reconstruct_feather / reconstruct_threshold;
+
+    /* Recompute spline */
+    compute_filmic_spline(data);
+
+    fprintf(stderr, "filmicrgb_autotune: min_rgb=[%.5e,%.5e,%.5e] max_rgb=[%.5f,%.5f,%.5f] black=%.5f white=%.5f grey=%.4f EVmin=%.4f EVmax=%.4f\n",
+            min_rgb[0], min_rgb[1], min_rgb[2], max_rgb[0], max_rgb[1], max_rgb[2],
+            black, white, grey, EVmin, EVmax);
+    fprintf(stderr, "filmicrgb_autotune: black_ev=%.2f white_ev=%.2f DR=%.2f output_power=%.2f\n",
+            data->black_source, data->white_source, data->dynamic_range, data->output_power);
+}

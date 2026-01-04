@@ -46,6 +46,7 @@ extern "C" {
 #include "../../main/labs/mods/colorbalancergb.c"
 #include "../../main/labs/mods/bilat.c"
 #include "../../main/labs/mods/colorout.c"
+#include "../../main/labs/mods/autotune.c"
 }
 
 /* STB image write */
@@ -231,7 +232,9 @@ int main(int argc, char** argv)
     ExposureParams exp_params;
     exp_params.mode = 0;
     exp_params.black = 0.0f;
-    exp_params.exposure = state.exposure_bias;  /* From camera style */
+    /* Use camera style exposure from database */
+    exp_params.exposure = meta.camera ? meta.camera->style.exposure_ev : 0.0f;
+    printf("   Exposure: %.2f EV (from camera style)\n", exp_params.exposure);
     exp_params.deflicker_percentile = 50.0f;
     exp_params.deflicker_target_level = -4.0f;
     exp_params.compensate_exposure_bias = 0;
@@ -382,6 +385,9 @@ int main(int argc, char** argv)
     FilmicRGBData filmic_data;
     filmicrgb_reset(&filmic_data);
 
+    /* Scene-adaptive autotune: analyze image to set black/white EV points */
+    filmicrgb_autotune(&filmic_data, rec2020_cb, width, height);
+
     float* rec2020_filmic = (float*)malloc(npixels * 4 * sizeof(float));
     filmicrgb_process(rec2020_cb, rec2020_filmic, width, height, &filmic_data,
                       FILMIC_INPUT_MATRIX_TRANS, FILMIC_OUTPUT_MATRIX,
@@ -461,6 +467,17 @@ int main(int argc, char** argv)
         free(png_data);
         return 1;
     }
+
+    /* ======================================================================
+       15. Auto-tune: compare to embedded JPEG, report optimal exposure
+       ====================================================================== */
+    printf("12. autotune...\n");
+    float current_ev = meta.camera ? meta.camera->style.exposure_ev : 0.0f;
+    float ev_adjustment = raw_exposure_autotune(input_path, png_data, width, height);
+    float optimal_ev = current_ev + ev_adjustment;
+    printf("   Current exposure: %.2f EV\n", current_ev);
+    printf("   Optimal exposure: %.2f EV\n", optimal_ev);
+
     free(png_data);
 
     printf("\nDone: %s (%dx%d)\n", output_path, width, height);

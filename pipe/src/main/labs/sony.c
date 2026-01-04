@@ -433,6 +433,7 @@ typedef struct {
     float exposure_bias;     /* Reserved for XMP/style exposure value (default 0.0) */
     float xyz_to_cam[9];     /* XYZ->CAM matrix from cameras.xml (scaled by 10000) */
     float d65_coeffs[4];     /* D65 WB multipliers computed from xyz_to_cam */
+    const CameraData* camera; /* Pointer to camera database entry (includes style) */
 } SonyARWMeta;
 
 /* Read uint16/32 little-endian */
@@ -500,6 +501,7 @@ int sony_arw_read_meta(const char* filename, SonyARWMeta* meta)
 
     /* Lookup camera in database - will be updated with actual model after parsing */
     const CameraData* cam = cameras_lookup("Sony", "ILCE-7M3");
+    meta->camera = cam;  /* Store camera pointer for style access */
     if (cam) {
         memcpy(meta->xyz_to_cam, cam->xyz_to_cam, sizeof(meta->xyz_to_cam));
         meta->black_level = cam->black_level;

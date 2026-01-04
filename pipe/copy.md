@@ -1,5 +1,51 @@
 # Pipeline Status
 
+## Gold Process Definition
+
+**Scope:** pipe/ only (pure C, DT copy). Labs is a facade and out of scope.
+
+**Process:**
+1. **Read RAW** → identify camera make/model from EXIF
+2. **Get camera** → lookup in cameras.c database (color matrix, black/white levels)
+3. **Create camera-specific module pipe** → build pipeline with DT defaults for that camera
+4. **Apply camera style overrides** → parameters from .dtstyle file (exposure, colorbalance, bilat, filmic)
+5. **Auto-tune** → two methods:
+   - **filmicrgb_autotune()** - scene-adaptive: analyzes pipeline data to set filmic black/white EV
+   - **raw_exposure_autotune()** - calibration: extracts embedded JPEG from RAW, calculates optimal exposure EV
+
+**Auto-tune Calibration Process:**
+```
+1. Run pipeline with initial exposure (e.g., DT style's 1.8 EV)
+2. Extract embedded JPEG preview from RAW (via exiftool)
+3. Compare: EV_adjustment = log2(embedded_brightness / pipeline_brightness)
+4. Optimal exposure = current_exposure + EV_adjustment
+5. Store in cameras.c for that camera model
+```
+
+**No separate JPEG file needed** - uses the preview embedded in every RAW file.
+
+**Example (Sony ILCE-7M3):**
+- DT style exposure: 1.8 EV (too bright)
+- Embedded JPEG brightness: 0.1494, Pipeline brightness: 0.1677
+- EV adjustment: -0.46
+- **Final calibrated exposure: 1.34 EV** (stored in cameras.c)
+
+**Default Configuration:**
+- Tone mapping: **filmic** (not sigmoid, not basecurve)
+- Scene-adaptive: filmicrgb_autotune() ON (adjusts filmic per image)
+- Exposure: camera style from cameras.c (calibrated via JPEG matching)
+- Camera style: applied automatically based on camera model
+
+**Success Criteria:**
+- Output: `tmp/var/gold.png`
+- Verification: user visual review of gold.png
+- Brightness match: <5% difference from reference JPEG (currently 1.8%)
+- Tolerance: exact copy match per module (see table below)
+
+**Rule:** COPY, don't think. All code comes from DT. When in doubt, dump DT runtime values.
+
+---
+
 ## Phase Complete: Copy
 
 The copy phase is **complete**. All DT modules have been copied and verified:
@@ -135,27 +181,42 @@ Modules: `bilat` (local contrast)
 
 ---
 
-## Current Phase: Tuning
+## Phase Complete: Autotune Copy
 
-### Goal
-Optimize pipeline parameters to match DT output without code changes.
+### Status: DONE
 
-### Approach
-See **tune.md** for:
-- Objective functions (brightness, shadow preservation, channel balance)
-- Tunable parameters per module
-- Optimization strategy
+Filmic auto-tune is implemented in `filmicrgb_autotune()` in `mods/filmicrgb.c`.
 
-### Current State
+### Implementation
 
-**Sony ILCE-7M3 Profile:**
-- exposure_bias: 0.0 EV (DT module default - XMP/style provides actual value)
-- d65_coeffs: from cameras.xml matrix (correct)
+Copied from DT's `apply_autotune()` (filmicrgb.c:2680-2717):
 
-**Outstanding Issue:**
-- Shadow crush: Gold has ~2x more very dark pixels than DT reference
-- Root cause: NOT a code bug (verified filmicrgb spline is correct)
-- Solution: Parameter tuning in colorbalancergb
+1. **Min/max computation**: Scans all input pixels, tracks per-channel min/max
+2. **Max RGB method**: `black = max(min_R, min_G, min_B)`, `white = max(max_R, max_G, max_B)`
+3. **EV calculation**: `EVmin = clamp(log2(black/grey), -16, -1)`, `EVmax = clamp(log2(white/grey), 1, 16)`
+4. **Output power**: From DT's `_compute_output_power()`
+5. **Spline recomputation**: Copied gaussian elimination + spline computation from DT
+
+### Files Modified
+
+- `mods/filmicrgb.c`: Added `filmicrgb_autotune()`, `compute_filmic_spline()`, `gauss_solve()`
+- `gold.cpp`: Added autotune call (disabled by default)
+
+### Usage
+
+```cpp
+FilmicRGBData filmic_data;
+filmicrgb_reset(&filmic_data);
+filmicrgb_autotune(&filmic_data, pixels, width, height);  // Optional
+filmicrgb_process(...);
+```
+
+### Note
+
+Auto-tune is **disabled by default** because:
+- DT camera styles/XMPs have pre-tuned params
+- DT defaults (black=-8, white=4) are the "out of the box" behavior
+- Auto-tune is a user action in DT GUI, not automatic
 
 **Bilat Issue:** FIXED
 - Implemented Colorspace enum in Step interface

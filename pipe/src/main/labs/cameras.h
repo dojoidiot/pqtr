@@ -1,16 +1,30 @@
 /*
-    cameras.h - Camera color matrix database
+    cameras.h - Camera database (color matrix + style parameters)
 
-    Source: Mirrors DT's adobe_coeff.c + rawspeed cameras.xml
+    Source:
+    - darktable/src/external/adobe_coeff.c (color matrices)
+    - rawspeed/data/cameras.xml (black/white levels, filters)
+    - darktable/share/darktable/styles/*.dtstyle (camera style parameters)
 
     Contains per-camera:
     - XYZ_to_CAM color matrix (for color calibration)
     - Default black/white levels (fallback if not in RAW)
     - Bayer pattern
+    - Camera style parameters (exposure, filmic, bilat)
 */
 
 #ifndef CAMERAS_H
 #define CAMERAS_H
+
+/* Camera style parameters from DT .dtstyle files */
+typedef struct {
+    float exposure_ev;          /* Total exposure adjustment (default + style) */
+    float filmic_grey;          /* Middle grey (typically 0.1845) */
+    float filmic_black_ev;      /* Black point in EV relative to grey */
+    float filmic_white_ev;      /* White point in EV relative to grey */
+    float bilat_detail;         /* Local contrast detail/clarity */
+    float bilat_midtone;        /* Midtone sigma */
+} CameraStyle;
 
 typedef struct {
     const char* make;           /* "Sony", "Canon", etc. */
@@ -19,6 +33,7 @@ typedef struct {
     int black_level;            /* Default black level */
     int white_level;            /* Default white level */
     unsigned int filters;       /* Bayer pattern (e.g. 0x94949494 = RGGB) */
+    CameraStyle style;          /* Pre-tuned style parameters */
 } CameraData;
 
 /* Lookup camera by make/model. Returns NULL if not found. */
