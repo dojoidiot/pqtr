@@ -9,8 +9,8 @@
 #   make test      - run all tests
 #   make clean     - remove build artifacts
 
-CXX := g++
-CXXFLAGS := -std=c++17 -Wall -Wextra -O2
+CC := gcc
+CFLAGS := -std=gnu11 -Wall -Wextra -O2
 
 BUILD := tmp/build
 VAR := tmp/var
@@ -20,17 +20,17 @@ VAR := tmp/var
 all: $(BUILD)/gold $(BUILD)/args
 
 # Gold pipeline (uses mods/ modules)
-$(BUILD)/gold: src/main/gold.cpp
+$(BUILD)/gold: src/main/gold.c
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -o $@ $< -lm
 
 gold: $(BUILD)/gold
 	@echo "Built: $(BUILD)/gold"
 
-# Algo pipeline (uses args/ modules)
-$(BUILD)/args: src/main/args.cpp
+# Args pipeline (uses args/ modules)
+$(BUILD)/args: src/main/args.c
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -o $@ $< -lm
+	$(CC) $(CFLAGS) -o $@ $< -lm
 
 args: $(BUILD)/args
 	@echo "Built: $(BUILD)/args"

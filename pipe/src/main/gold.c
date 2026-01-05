@@ -1,40 +1,30 @@
 /*
- * gold.cpp - Golden pipeline test (full scene-referred)
+ * gold.c - Golden pipeline (mods/ modules)
  *
  * Pipeline: sony.c decoder -> rawprepare -> temperature -> highlights -> demosaic ->
  *           exposure -> colorin -> channelmixerrgb -> colorbalancergb -> filmicrgb ->
  *           bilat -> colorout -> PNG
  *
- * Uses sony.c decoder (COPIED from DT/RawSpeed) for exact pixel match.
- * PipeState is initialized from DT dump values (COPY approach).
- *
  * Usage: gold <input.ARW> <output.png>
  */
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <cstdint>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
 
 /* Camera database - from DT adobe_coeff.c */
-extern "C" {
 #include "pipe/cameras.c"
-}
 
 /* Sony ARW decoder - COPIED from DT/RawSpeed */
-extern "C" {
 #include "pipe/sony.c"
-}
 
 /* PipeState and pipe_prepare */
-extern "C" {
 #include "pipe/pipe_state.h"
 #include "pipe/pipe_prepare.c"
-}
 
 /* All modules (types inlined into each module) */
-extern "C" {
 #include "pipe/mods/rawprepare.c"
 #include "pipe/mods/temperature.c"
 #include "pipe/mods/highlights.c"
@@ -48,7 +38,6 @@ extern "C" {
 #include "pipe/mods/colorout.c"
 #include "pipe/mods/autotune.c"
 #include "pipe/mods/denoiseprofile.c"
-}
 
 /* STB image write */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -337,8 +326,8 @@ int main(int argc, char** argv)
             fprintf(pfm, "PF\n%d %d\n-1.0\n", width, height);
             for (int y = height - 1; y >= 0; y--) {  /* PFM is bottom-up */
                 for (int x = 0; x < width; x++) {
-                    size_t i = (size_t)y * width + x;
-                    fwrite(&rec2020[i*4], sizeof(float), 3, pfm);
+                    size_t idx = (size_t)y * width + x;
+                    fwrite(&rec2020[idx*4], sizeof(float), 3, pfm);
                 }
             }
             fclose(pfm);

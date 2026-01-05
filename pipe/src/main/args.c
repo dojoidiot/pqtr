@@ -1,40 +1,30 @@
 /*
- * args.cpp - Golden pipeline test using args/ modules
+ * args.c - Golden pipeline (args/ modules)
  *
  * Pipeline: sony.c decoder -> rawprepare -> temperature -> highlights -> demosaic ->
  *           exposure -> colorin -> channelmixerrgb -> colorbalancergb -> filmicrgb ->
  *           bilat -> colorout -> PNG
  *
- * Uses sony.c decoder (COPIED from DT/RawSpeed) for exact pixel match.
- * Identical to gold.cpp but uses args/ modules instead of mods/.
- *
- * Usage: args <input.ARW> <output.png>
+ * Usage: gold <input.ARW> <output.png>
  */
 
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <cmath>
-#include <cstdint>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <stdint.h>
 
 /* Camera database - from DT adobe_coeff.c */
-extern "C" {
 #include "pipe/cameras.c"
-}
 
 /* Sony ARW decoder - COPIED from DT/RawSpeed */
-extern "C" {
 #include "pipe/sony.c"
-}
 
 /* PipeState and pipe_prepare */
-extern "C" {
 #include "pipe/pipe_state.h"
 #include "pipe/pipe_prepare.c"
-}
 
 /* All modules (types inlined into each module) */
-extern "C" {
 #include "pipe/args/rawprepare.c"
 #include "pipe/args/temperature.c"
 #include "pipe/args/highlights.c"
@@ -48,7 +38,6 @@ extern "C" {
 #include "pipe/args/colorout.c"
 #include "pipe/args/autotune.c"
 #include "pipe/args/denoiseprofile.c"
-}
 
 /* STB image write */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
@@ -61,7 +50,7 @@ extern "C" {
 int main(int argc, char** argv)
 {
     const char* input_path = "src/test/raws/sony.ARW";
-    const char* output_path = "tmp/var/args.png";
+    const char* output_path = "tmp/var/gold.png";
 
     if (argc >= 2) input_path = argv[1];
     if (argc >= 3) output_path = argv[2];
@@ -337,8 +326,8 @@ int main(int argc, char** argv)
             fprintf(pfm, "PF\n%d %d\n-1.0\n", width, height);
             for (int y = height - 1; y >= 0; y--) {  /* PFM is bottom-up */
                 for (int x = 0; x < width; x++) {
-                    size_t i = (size_t)y * width + x;
-                    fwrite(&rec2020[i*4], sizeof(float), 3, pfm);
+                    size_t idx = (size_t)y * width + x;
+                    fwrite(&rec2020[idx*4], sizeof(float), 3, pfm);
                 }
             }
             fclose(pfm);
