@@ -1,14 +1,14 @@
 /*
- * gold.cpp - Golden pipeline test (full scene-referred)
+ * args.cpp - Golden pipeline test using args/ modules
  *
  * Pipeline: sony.c decoder -> rawprepare -> temperature -> highlights -> demosaic ->
  *           exposure -> colorin -> channelmixerrgb -> colorbalancergb -> filmicrgb ->
  *           bilat -> colorout -> PNG
  *
  * Uses sony.c decoder (COPIED from DT/RawSpeed) for exact pixel match.
- * PipeState is initialized from DT dump values (COPY approach).
+ * Identical to gold.cpp but uses args/ modules instead of mods/.
  *
- * Usage: gold <input.ARW> <output.png>
+ * Usage: args <input.ARW> <output.png>
  */
 
 #include <cstdio>
@@ -19,40 +19,40 @@
 
 /* Camera database - from DT adobe_coeff.c */
 extern "C" {
-#include "../../main/labs/cameras.c"
+#include "pipe/cameras.c"
 }
 
 /* Sony ARW decoder - COPIED from DT/RawSpeed */
 extern "C" {
-#include "../../main/labs/sony.c"
+#include "pipe/sony.c"
 }
 
 /* PipeState and pipe_prepare */
 extern "C" {
-#include "../../main/labs/pipe_state.h"
-#include "../../main/labs/pipe_prepare.c"
+#include "pipe/pipe_state.h"
+#include "pipe/pipe_prepare.c"
 }
 
 /* All modules (types inlined into each module) */
 extern "C" {
-#include "../../main/labs/mods/rawprepare.c"
-#include "../../main/labs/mods/temperature.c"
-#include "../../main/labs/mods/highlights.c"
-#include "../../main/labs/mods/demosaic.c"
-#include "../../main/labs/mods/exposure.c"
-#include "../../main/labs/mods/colorin.c"
-#include "../../main/labs/mods/channelmixerrgb.c"
-#include "../../main/labs/mods/filmicrgb.c"
-#include "../../main/labs/mods/colorbalancergb.c"
-#include "../../main/labs/mods/bilat.c"
-#include "../../main/labs/mods/colorout.c"
-#include "../../main/labs/mods/autotune.c"
-#include "../../main/labs/mods/denoiseprofile.c"
+#include "pipe/args/rawprepare.c"
+#include "pipe/args/temperature.c"
+#include "pipe/args/highlights.c"
+#include "pipe/args/demosaic.c"
+#include "pipe/args/exposure.c"
+#include "pipe/args/colorin.c"
+#include "pipe/args/channelmixerrgb.c"
+#include "pipe/args/filmicrgb.c"
+#include "pipe/args/colorbalancergb.c"
+#include "pipe/args/bilat.c"
+#include "pipe/args/colorout.c"
+#include "pipe/args/autotune.c"
+#include "pipe/args/denoiseprofile.c"
 }
 
 /* STB image write */
 #define STB_IMAGE_WRITE_IMPLEMENTATION
-#include "../../main/labs/stb_image_write.h"
+#include "pipe/stb_image_write.h"
 
 /* ==========================================================================
    Main pipeline
@@ -61,7 +61,7 @@ extern "C" {
 int main(int argc, char** argv)
 {
     const char* input_path = "src/test/raws/sony.ARW";
-    const char* output_path = "tmp/var/gold.png";
+    const char* output_path = "tmp/var/args.png";
 
     if (argc >= 2) input_path = argv[1];
     if (argc >= 3) output_path = argv[2];

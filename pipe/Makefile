@@ -4,69 +4,64 @@
 # See copy.md for the copy process documentation.
 #
 # Usage:
-#   make gold      - build gold pipeline test
-#   make test-gold - run gold pipeline test
+#   make gold      - build gold pipeline (mods/)
+#   make args      - build args pipeline (args/)
+#   make test      - run all tests
 #   make clean     - remove build artifacts
 
 CXX := g++
 CXXFLAGS := -std=c++17 -Wall -Wextra -O2
 
 BUILD := tmp/build
+VAR := tmp/var
 
-.PHONY: all gold test-gold test-phase1 test-phase2 dt-dumps test-all clean tidy
+.PHONY: all gold args test test-gold test-args clean tidy
 
-DT_CLI := ./dark/lib/desk/build/bin/darktable-cli
-DT_OPTS := --core --disable-opencl
+all: $(BUILD)/gold $(BUILD)/args
 
-all: $(BUILD)/gold
-
-# Gold pipeline test (full end-to-end) - uses pure C modules
-$(BUILD)/gold: src/test/labs/gold.cpp
+# Gold pipeline (uses mods/ modules)
+$(BUILD)/gold: src/main/gold.cpp
 	@mkdir -p $(dir $@)
 	$(CXX) $(CXXFLAGS) -o $@ $< -lm
 
 gold: $(BUILD)/gold
-	@echo "Built: tmp/build/gold"
+	@echo "Built: $(BUILD)/gold"
 
-test-gold: $(BUILD)/gold
-	@echo "=== Gold Pipeline Test ==="
-	@mkdir -p tmp/var
-	./$(BUILD)/gold
-
-# Phase tests
-$(BUILD)/phase1_test: src/test/labs/phase1.cpp
+# Algo pipeline (uses args/ modules)
+$(BUILD)/args: src/main/args.cpp
 	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -I src/main/labs -o $@ $<
+	$(CXX) $(CXXFLAGS) -o $@ $< -lm
 
-test-phase1: $(BUILD)/phase1_test
-	@echo "=== Testing Phase 1 (colorout) ==="
-	@mkdir -p tmp/var
-	./$(BUILD)/phase1_test
+args: $(BUILD)/args
+	@echo "Built: $(BUILD)/args"
 
-$(BUILD)/phase2_test: src/test/labs/phase2.cpp
-	@mkdir -p $(dir $@)
-	$(CXX) $(CXXFLAGS) -I src/main/labs -o $@ $<
-
-test-phase2: $(BUILD)/phase2_test
-	@echo "=== Phase 2 Final Output ==="
-	@mkdir -p tmp/var
-	./$(BUILD)/phase2_test
-
-# Generate DT dumps for phase tests
-dt-dumps:
-	@echo "=== Generating DT dumps ==="
-	@mkdir -p /tmp/dtdump
-	$(DT_CLI) src/test/raws/sony.ARW src/test/raws/phase1.xmp /tmp/out.png $(DT_OPTS) --dump-pipe colorout --dumpdir /tmp/dtdump
-	$(DT_CLI) src/test/raws/sony.ARW src/test/raws/phase2.xmp /tmp/out.png $(DT_OPTS) --dump-pipe bilat --dumpdir /tmp/dtdump
-
-# Run all tests
-test-all: dt-dumps test-gold test-phase1 test-phase2
+# Test targets
+test: test-gold test-args
 	@echo ""
 	@echo "=== All tests complete ==="
-	@ls -la tmp/var/*.png
+
+test-gold: test-gold-458 test-gold-202
+
+test-args: test-args-458 test-args-202
+
+test-gold-458: $(BUILD)/gold
+	@mkdir -p $(VAR)
+	./$(BUILD)/gold src/test/raws/DSC00458.ARW $(VAR)/gold_458.png
+
+test-gold-202: $(BUILD)/gold
+	@mkdir -p $(VAR)
+	./$(BUILD)/gold src/test/raws/DSC00202.ARW $(VAR)/gold_202.png
+
+test-args-458: $(BUILD)/args
+	@mkdir -p $(VAR)
+	./$(BUILD)/args src/test/raws/DSC00458.ARW $(VAR)/args_458.png
+
+test-args-202: $(BUILD)/args
+	@mkdir -p $(VAR)
+	./$(BUILD)/args src/test/raws/DSC00202.ARW $(VAR)/args_202.png
 
 clean:
-	rm -rf tmp/build tmp/var/*.png tmp/var/*.bin
+	rm -rf tmp/build tmp/var
 
 tidy:
 	rm -rf tmp
